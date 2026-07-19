@@ -249,7 +249,7 @@
   }
 
   const SETTINGS_DEFAULTS = {
-    player_mode: "html5",
+    player_mode: "potplayer",
     thumb_position: 0.6,
     thumb_random_min: 0.5,
     thumb_random_max: 0.8,
@@ -1501,7 +1501,7 @@
 
   async function loadPlayerSettings() {
     try {
-      const s = await api("/api/settings?scope=global");
+      const s = await api("/api/settings");
       state.playerMode = s.player_mode || SETTINGS_DEFAULTS.player_mode;
       return s;
     } catch (_) {
@@ -2359,19 +2359,14 @@
 
   async function playVideo(id) {
     const item = getItemById(id);
-    const mode = state.playerMode || "potplayer";
+    const mode = state.playerMode || SETTINGS_DEFAULTS.player_mode;
 
     if (mode === "html5") {
       await playVideoHtml5(id, item || { id, title: id, filename: "", path: "" });
       return;
     }
 
-    try {
-      await api(`/api/play/${id}`, { method: "POST" });
-      bumpLocalPlayMeta(id);
-    } catch (e) {
-      alert("播放失败: " + e.message);
-    }
+    await playVideoExternal(id);
   }
 
   function enableBatchMode() {
@@ -2616,7 +2611,7 @@
     await loadLibraries();
     renderLibrarySettings();
     try {
-      const s = await api("/api/settings?scope=global");
+      const s = await api("/api/settings");
       fillSettingsForm(s);
     } catch (_) {
       fillSettingsForm(null);
@@ -2662,12 +2657,12 @@
           thumb_idle_scan: $("#set-idle-scan")?.value === "true",
           default_page_size: parseInt($("#set-page-size")?.value, 10),
           potplayer_path: $("#set-potplayer")?.value || "",
-          player_mode: document.querySelector('input[name="player-mode"]:checked')?.value || "html5",
+          player_mode: document.querySelector('input[name="player-mode"]:checked')?.value || SETTINGS_DEFAULTS.player_mode,
           history_retention_days: historyDays,
           scope: "global",
         }),
       });
-      state.playerMode = document.querySelector('input[name="player-mode"]:checked')?.value || "html5";
+      state.playerMode = document.querySelector('input[name="player-mode"]:checked')?.value || SETTINGS_DEFAULTS.player_mode;
       $("#settings-dialog")?.close();
       loadProgress();
       if ($("#set-idle-scan")?.value === "true") {
