@@ -16,10 +16,14 @@ from loc_gallery.file_stability import is_ready_for_processing
 from loc_gallery.library_context import current_library_id, set_thread_library
 from loc_gallery.settings_store import get_setting
 
-_BROWSER_UNSUPPORTED_VIDEO = {"mpeg2video", "vc1"}
+_BROWSER_UNSUPPORTED_VIDEO = {
+    "mpeg2video", "vc1", "wmv1", "wmv2", "wmv3", "msmpeg4v2", "msmpeg4v3",
+}
 _HLS_TRANSCODE_VIDEO = {"av1", "hevc", "h265", "vp9"}
 _IMAGE_CODECS = {"png", "mjpeg", "jpeg", "apng", "gif", "bmp", "webp"}
-_PLAN_VERSION = 13
+_BROWSER_NATIVE_EXTENSIONS = {".mp4", ".m4v", ".mov"}
+_WEB_DIRECT_EXTENSIONS = {".webm", ".ogv"}
+_PLAN_VERSION = 14
 _H264_NAL_SIGS = (
     b"\x00\x00\x00\x01\x67", b"\x00\x00\x00\x01\x68", b"\x00\x00\x00\x01\x65",
     b"\x00\x00\x01\x67", b"\x00\x00\x01\x68",
@@ -462,6 +466,55 @@ def _probe_paths_worker(library_id: str, paths: list[Path]) -> None:
             pass
 
 
+def _plan_non_native_container(path: Path, ext: str, sniff: str) -> dict:
+    """WMV/AVI/MKV 等：浏览器 <video> 不能当 MP4 直连，按编码走 HLS。"""
+    codec = probe_video_codec(path)
+    label = sniff if sniff and sniff not in ("unknown", "image") else ext.lstrip(".").upper()
+
+    if codec in _IMAGE_CODECS:
+        return {
+            "mode": "unsupported",
+            "reason": f"视频流为图片编码（{codec.upper()}），无法播放",
+            "codec": codec,
+            "container": label,
+        }
+
+    if codec in _BROWSER_UNSUPPORTED_VIDEO:
+        return {
+            "mode": "hls",
+            "transcode": True,
+            "reason": f"{label} / {codec.upper()}，浏览器不支持，将转码后播放",
+            "codec": codec,
+            "container": label,
+        }
+
+    if codec in _HLS_TRANSCODE_VIDEO:
+        return {
+            "mode": "hls",
+            "transcode": True,
+            "reason": f"{codec.upper()} 编码，将转码后播放",
+            "codec": codec,
+            "container": label,
+        }
+
+    if codec == "h264":
+        return {
+            "mode": "hls",
+            "transcode": False,
+            "reason": f"非 MP4 容器（{label}），边切边播",
+            "codec": codec,
+            "container": label,
+        }
+
+    return {
+        "mode": "hls",
+        "transcode": True,
+        "reason": f"非 MP4 容器（{label}），将转码后播放",
+        "codec": codec,
+        "container": label,
+    }
+
+
 def _build_playback_plan(path: Path) -> dict:
     ext = path.suffix.lower()
     disguised = detect_disguised_mpegts(path)
@@ -487,8 +540,29 @@ def _build_playback_plan(path: Path) -> dict:
             "container": "image",
         }
 
-    if ext not in {".mp4", ".m4v", ".mov"}:
-        return {"mode": "direct", "reason": "非 MP4 容器，尝试直接播放"}
+    if ext not in _BROWSER_NATIVE_EXTENSIONS:
+        if ext in _WEB_DIRECT_EXTENSIONS:
+            codec = probe_video_codec(path)
+            if codec in _IMAGE_CODECS:
+                return {
+                    "mode": "unsupported",
+                    "reason": f"视频流为图片编码（{codec.upper()}），无法播放",
+                    "codec": codec,
+                    "container": sniff,
+                }
+            if codec in _HLS_TRANSCODE_VIDEO:
+                return {
+                    "mode": "hls",
+                    "transcode": True,
+                    "reason": f"{codec.upper()} 编码，将转码后播放",
+                    "codec": codec,
+                }
+            return {
+                "mode": "direct",
+                "reason": f"{ext[1:].upper()} 容器，尝试直接播放",
+                "codec": codec,
+            }
+        return _plan_non_native_container(path, ext, sniff)
 
     codec = probe_video_codec(path)
 

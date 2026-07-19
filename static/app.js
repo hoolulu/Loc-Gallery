@@ -2190,10 +2190,19 @@
       return { text: `索引在末尾${codec ? ` · ${codec}` : ""}`, cls: "fmt-moov-end" };
     }
     if (info.mode === "hls") {
-      return { text: `大文件切片${codec ? ` · ${codec}` : ""}`, cls: "fmt-large" };
+      if (info.transcode) {
+        return { text: `转码播放${codec ? ` · ${codec}` : ""}`, cls: "fmt-large" };
+      }
+      return { text: `边切边播${codec ? ` · ${codec}` : ""}`, cls: "fmt-large" };
     }
     if (info.mode === "direct") {
-      return { text: `标准格式${codec ? ` · ${codec}` : ""}`, cls: "fmt-standard" };
+      const std =
+        info.structure?.kind === "standard" ||
+        (info.reason && /H\.264 MP4|直接播放/.test(info.reason));
+      return {
+        text: std ? `标准格式${codec ? ` · ${codec}` : ""}` : `尝试直连${codec ? ` · ${codec}` : ""}`,
+        cls: std ? "fmt-standard" : "",
+      };
     }
     return { text: codec || "未知格式", cls: "" };
   }
