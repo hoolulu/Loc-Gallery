@@ -5,13 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Loc Gallery</title>
   <link rel="stylesheet" href="/static/tailwind.css?v=1">
-  <link rel="stylesheet" href="/static/style.css?v=46">
+  <link rel="stylesheet" href="/static/style.css?v=50">
 </head>
 <body class="flex h-full flex-col overflow-hidden bg-surface text-zinc-100 antialiased">
 
   <header class="z-50 shrink-0 border-b border-surface-border bg-surface-raised/95 backdrop-blur-sm">
     <div class="flex flex-wrap items-center gap-3 px-5 py-3">
       <h1 class="text-lg font-bold tracking-tight"><span class="text-accent">Loc</span> Gallery</h1>
+      <div id="library-switcher" class="library-switcher">
+        <span class="library-switcher-label">选择视频库</span>
+        <select id="library-select" class="library-select" title="切换视频库"></select>
+      </div>
       <div class="ml-auto flex min-w-[280px] flex-1 items-center justify-end gap-2">
         <input type="search" id="search" placeholder="搜索标题 / 文件名 / 分类..." autocomplete="off"
           class="w-full max-w-sm rounded-lg border border-surface-border bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-accent/60 focus:ring-1 focus:ring-accent/30">
@@ -136,7 +140,23 @@
           </div>
           <div class="flex min-h-0 flex-1 flex-col lg:flex-row">
             <div id="player-stage" class="player-stage flex min-h-0 flex-1 p-2 sm:p-4"></div>
-            <div id="player-playlist" class="player-playlist w-full shrink-0 overflow-y-auto border-t border-surface-border p-2 lg:w-72 lg:border-l lg:border-t-0"></div>
+            <div class="player-playlist-wrap flex w-full shrink-0 flex-col border-t border-surface-border lg:w-72 lg:border-l lg:border-t-0">
+              <div class="player-playlist-head flex shrink-0 items-center justify-between gap-2 border-b border-surface-border px-2 py-1.5">
+                <span class="text-xs font-medium text-zinc-400">播放列表</span>
+                <select id="player-playlist-sort" class="player-playlist-sort" title="播放列表排序（HTML5 模式播完自动连播下一集）">
+                  <option value="page">列表顺序</option>
+                  <option value="filename_asc">文件名 A→Z（自然）</option>
+                  <option value="filename_desc">文件名 Z→A（自然）</option>
+                  <option value="title_asc">标题 A→Z</option>
+                  <option value="title_desc">标题 Z→A</option>
+                  <option value="mtime_desc">最新优先</option>
+                  <option value="mtime_asc">最旧优先</option>
+                  <option value="size_desc">体积最大</option>
+                  <option value="size_asc">体积最小</option>
+                </select>
+              </div>
+              <div id="player-playlist" class="player-playlist min-h-0 flex-1 overflow-y-auto p-2"></div>
+            </div>
           </div>
         </div>
       </main>
@@ -218,64 +238,117 @@
     </form>
   </dialog>
 
-  <dialog id="settings-dialog" class="app-dialog">
-    <form id="settings-form" class="p-6">
-      <h2 class="text-lg font-semibold">设置</h2>
-
-      <div class="mt-5">
-        <span class="text-sm text-zinc-400">播放方式</span>
-        <div class="mt-2 grid grid-cols-2 gap-2 rounded-xl border border-surface-border bg-zinc-950 p-1">
-          <label class="cursor-pointer">
-            <input type="radio" name="player-mode" value="html5" class="peer sr-only">
-            <span class="flex items-center justify-center rounded-lg px-3 py-2.5 text-sm text-zinc-500 transition peer-checked:bg-accent peer-checked:text-white">网页 HTML5</span>
-          </label>
-          <label class="cursor-pointer">
-            <input type="radio" name="player-mode" value="potplayer" class="peer sr-only" checked>
-            <span class="flex items-center justify-center rounded-lg px-3 py-2.5 text-sm text-zinc-500 transition peer-checked:bg-accent peer-checked:text-white">PotPlayer</span>
-          </label>
+  <dialog id="settings-dialog" class="app-dialog app-dialog-settings">
+    <form id="settings-form" class="settings-form" novalidate>
+      <header class="settings-topbar">
+        <h2>设置</h2>
+        <span class="settings-topbar-hint">全局设置</span>
+        <div class="settings-topbar-actions">
+          <button type="button" id="settings-cancel" class="ui-btn sm">取消</button>
+          <button type="button" id="settings-save" class="ui-btn ui-btn-primary sm">保存</button>
         </div>
-        <p class="hint mt-2">HTML5 在页面内播放；碎片化视频将自动边切边播。PotPlayer 调用本地播放器。</p>
-      </div>
+      </header>
 
-      <label class="mt-4 block text-sm text-zinc-400">截图位置（仅影响新生成的缩略图）
-        <input type="number" id="set-position" min="0.05" max="0.95" step="0.05" value="0.6" class="dlg-input mt-1.5 w-full">
-      </label>
-      <label class="mt-4 block text-sm text-zinc-400">随机截图范围（用于「随机生成」）
-        <div class="range-inputs mt-1.5 flex items-center gap-2">
-          <input type="number" id="set-random-min" min="0.05" max="0.95" step="0.05" value="0.5" class="dlg-input w-full">
-          <span class="range-sep text-zinc-600">~</span>
-          <input type="number" id="set-random-max" min="0.05" max="0.95" step="0.05" value="0.8" class="dlg-input w-full">
-        </div>
-      </label>
-      <label class="mt-4 block text-sm text-zinc-400">并发线程数
-        <input type="number" id="set-workers" min="1" max="8" step="1" class="dlg-input mt-1.5 w-full">
-      </label>
-      <label class="mt-4 block text-sm text-zinc-400">空闲时扫描全库
-        <select id="set-idle-scan" class="dlg-input mt-1.5 w-full">
-          <option value="true">是</option>
-          <option value="false">否（仅按需生成）</option>
-        </select>
-      </label>
-      <label class="mt-4 block text-sm text-zinc-400">默认每页数量
-        <select id="set-page-size" class="dlg-input mt-1.5 w-full">
-          <option value="32">32</option>
-          <option value="64">64</option>
-          <option value="0">全部</option>
-        </select>
-      </label>
-      <div id="potplayer-path-wrap">
-        <label class="mt-4 block text-sm text-zinc-400">PotPlayer 路径
-          <input type="text" id="set-potplayer" class="dlg-input mt-1.5 w-full text-xs">
-        </label>
-      </div>
-      <label class="mt-4 block text-sm text-zinc-400">最近播放保留天数
-        <input type="number" id="set-history-days" min="1" max="3650" step="1" value="180" class="dlg-input mt-1.5 w-full">
-      </label>
-      <button type="button" id="btn-clear-history" class="ui-btn mt-3 w-full rounded-lg border border-surface-border px-4 py-2 text-sm">清空最近播放记录</button>
-      <p class="hint mt-4">修改截图比例不会改动已有缩略图；并发数需重启服务后生效</p>
-      <div class="dialog-btns mt-6 flex justify-end gap-2">
-        <button type="button" id="settings-cancel" class="ui-btn rounded-lg px-4 py-2">取消</button>
-        <button type="button" id="settings-save" class="ui-btn ui-btn-primary rounded-lg px-4 py-2">保存</button>
+      <div class="settings-body">
+        <section class="settings-block">
+          <h3 class="settings-block-title">视频库</h3>
+
+          <div class="settings-sub">
+            <div class="settings-subtitle">现有视频库</div>
+            <div class="lib-table">
+              <div class="lib-table-head">
+                <span>别名</span>
+                <span>文件夹路径</span>
+                <span class="lib-col-actions">操作</span>
+              </div>
+              <div id="library-list" class="lib-table-body"></div>
+            </div>
+          </div>
+
+          <div class="settings-sub">
+            <div class="settings-subtitle">新增视频库</div>
+            <div class="lib-table-row lib-add-row">
+              <input type="text" id="library-add-alias" class="dlg-input compact-input" placeholder="别名" autocomplete="off">
+              <div class="lib-path-cell">
+                <input type="text" id="library-add-path" class="dlg-input compact-input" placeholder="文件夹路径" autocomplete="off">
+                <button type="button" id="library-add-browse" class="ui-btn sm">浏览</button>
+              </div>
+              <div class="lib-col-actions">
+                <button type="button" id="library-add-submit" class="ui-btn ui-btn-primary sm">添加</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="settings-block">
+          <h3 class="settings-block-title">其他选项</h3>
+          <div class="options-grid">
+            <div class="opt-cell opt-span-2">
+              <span class="settings-field-label">播放方式</span>
+              <div class="player-mode-inline">
+                <label class="player-mode-opt">
+                  <input type="radio" name="player-mode" value="html5" class="sr-only">
+                  <span>HTML5</span>
+                </label>
+                <label class="player-mode-opt">
+                  <input type="radio" name="player-mode" value="potplayer" class="sr-only" checked>
+                  <span>PotPlayer</span>
+                </label>
+              </div>
+            </div>
+
+            <div id="potplayer-path-wrap" class="opt-cell opt-span-2">
+              <label class="settings-field-label" for="set-potplayer">PotPlayer 路径</label>
+              <input type="text" id="set-potplayer" class="dlg-input compact-input" placeholder="自动检测">
+            </div>
+
+            <label class="opt-cell">
+              <span class="settings-field-label">默认每页</span>
+              <select id="set-page-size" class="dlg-input compact-input">
+                <option value="32">32</option>
+                <option value="64">64</option>
+                <option value="0">全部</option>
+              </select>
+            </label>
+
+            <label class="opt-cell">
+              <span class="settings-field-label">历史保留天数</span>
+              <input type="number" id="set-history-days" min="1" max="3650" step="1" value="180" class="dlg-input compact-input">
+            </label>
+
+            <label class="opt-cell">
+              <span class="settings-field-label">截图位置</span>
+              <input type="number" id="set-position" min="0.05" max="0.95" step="0.05" value="0.6" class="dlg-input compact-input">
+            </label>
+
+            <label class="opt-cell">
+              <span class="settings-field-label">空闲扫描</span>
+              <select id="set-idle-scan" class="dlg-input compact-input">
+                <option value="true">是</option>
+                <option value="false">否</option>
+              </select>
+            </label>
+
+            <div class="opt-cell">
+              <span class="settings-field-label">随机截图</span>
+              <div class="range-inputs compact">
+                <input type="number" id="set-random-min" min="0.05" max="0.95" step="0.05" value="0.5" class="dlg-input compact-input">
+                <span class="range-sep">~</span>
+                <input type="number" id="set-random-max" min="0.05" max="0.95" step="0.05" value="0.8" class="dlg-input compact-input">
+              </div>
+            </div>
+
+            <label class="opt-cell">
+              <span class="settings-field-label">缩略图并发</span>
+              <input type="number" id="set-workers" min="1" max="8" step="1" class="dlg-input compact-input">
+            </label>
+
+            <div class="opt-cell opt-span-4 opt-footer">
+              <button type="button" id="btn-clear-history" class="ui-btn sm">清空播放记录</button>
+              <span class="hint-inline">并发数需重启服务生效</span>
+            </div>
+          </div>
+        </section>
       </div>
     </form>
   </dialog>
@@ -293,6 +366,6 @@
   </dialog>
 
   <script src="/static/vendor/hls.min.js"></script>
-  <script src="/static/app.js?v=52"></script>
+  <script src="/static/app.js?v=60"></script>
 </body>
 </html>

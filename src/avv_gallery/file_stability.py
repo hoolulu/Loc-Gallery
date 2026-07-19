@@ -29,6 +29,7 @@ _INCOMPLETE_MARKERS = (
 
 _lock = threading.Lock()
 _pending: set[str] = set()
+_path_libraries: dict[str, str] = {}
 _timers: dict[str, threading.Timer] = {}
 _on_stable_callback: Callable[[], None] | None = None
 
@@ -102,7 +103,7 @@ def is_ready_for_video(path: Path, *, size: int, mtime: float) -> bool:
     return True
 
 
-def notify_file_activity(path: Path) -> None:
+def notify_file_activity(path: Path, library_id: str | None = None) -> None:
     """文件系统事件：加入待稳定队列，延迟后再触发库刷新。"""
     if is_incomplete_filename(path.name):
         return
@@ -114,6 +115,8 @@ def notify_file_activity(path: Path) -> None:
     key = str(path.resolve())
     with _lock:
         _pending.add(key)
+        if library_id:
+            _path_libraries[key] = library_id
         old = _timers.pop(key, None)
         if old:
             old.cancel()
@@ -125,11 +128,16 @@ def notify_file_activity(path: Path) -> None:
 
 def _run_stability_check(path: Path) -> None:
     key = str(path.resolve())
+    library_id = None
     if not path.is_file():
         with _lock:
             _pending.discard(key)
             _timers.pop(key, None)
+            library_id = _path_libraries.pop(key, None)
         if _on_stable_callback:
+            if library_id:
+                from avv_gallery.library_context import set_thread_library
+                set_thread_library(library_id)
             _on_stable_callback()
         return
 
@@ -137,8 +145,14 @@ def _run_stability_check(path: Path) -> None:
         with _lock:
             _pending.discard(key)
             _timers.pop(key, None)
+            library_id = _path_libraries.pop(key, None)
         if _on_stable_callback:
+            if library_id:
+                from avv_gallery.library_context import set_thread_library
+                set_thread_library(library_id)
             _on_stable_callback()
         return
 
-    notify_file_activity(path)
+    with _lock:
+        library_id = _path_libraries.get(key)
+    notify_file_activity(path, library_id)

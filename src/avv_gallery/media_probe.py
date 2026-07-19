@@ -11,8 +11,9 @@ from pathlib import Path
 
 from avv_gallery.thumb_manager import ffprobe_path, _get_duration_mpegts
 from avv_gallery.process_util import hidden_subprocess_kwargs
-from avv_gallery.config import LARGE_FILE_HLS_BYTES, PLAYBACK_PLANS_FILE
+from avv_gallery.config import LARGE_FILE_HLS_BYTES, playback_plans_file
 from avv_gallery.file_stability import is_ready_for_processing
+from avv_gallery.library_context import current_library_id, set_thread_library
 
 _BROWSER_UNSUPPORTED_VIDEO = {"mpeg2video", "vc1"}
 _HLS_TRANSCODE_VIDEO = {"av1", "hevc", "h265", "vp9"}
@@ -25,51 +26,59 @@ _H264_NAL_SIGS = (
 
 _plan_cache: dict[str, tuple[float, int, dict]] = {}
 _plan_lock = threading.Lock()
-_DISK_FILE = PLAYBACK_PLANS_FILE
-_disk_cache: dict[str, dict] | None = None
-_disk_dirty = False
+_disk_caches: dict[str, dict[str, dict]] = {}
+_disk_dirty_libs: set[str] = set()
 _disk_flush_timer: threading.Timer | None = None
 _DISK_FLUSH_SEC = 1.0
 
 
+def _disk_path() -> Path:
+    return playback_plans_file(current_library_id())
+
+
 def _load_disk_cache() -> dict[str, dict]:
-    global _disk_cache
-    if _disk_cache is not None:
-        return _disk_cache
-    _DISK_FILE.parent.mkdir(parents=True, exist_ok=True)
-    if not _DISK_FILE.is_file():
-        _disk_cache = {}
-        return _disk_cache
+    lid = current_library_id()
+    cached = _disk_caches.get(lid)
+    if cached is not None:
+        return cached
+    path = _disk_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.is_file():
+        _disk_caches[lid] = {}
+        return _disk_caches[lid]
     try:
-        raw = json.loads(_DISK_FILE.read_text(encoding="utf-8"))
-        _disk_cache = raw if isinstance(raw, dict) else {}
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        _disk_caches[lid] = raw if isinstance(raw, dict) else {}
     except (json.JSONDecodeError, OSError):
-        _disk_cache = {}
-    return _disk_cache
+        _disk_caches[lid] = {}
+    return _disk_caches[lid]
 
 
 def _schedule_disk_flush() -> None:
-    global _disk_flush_timer, _disk_dirty
-    _disk_dirty = True
+    global _disk_flush_timer
+    _disk_dirty_libs.add(current_library_id())
 
     def _flush() -> None:
-        global _disk_dirty, _disk_flush_timer
-        with _plan_lock:
-            if not _disk_dirty or _disk_cache is None:
-                _disk_flush_timer = None
-                return
-            data = _disk_cache
-            _disk_dirty = False
-            _disk_flush_timer = None
-        try:
-            _DISK_FILE.parent.mkdir(parents=True, exist_ok=True)
-            tmp = _DISK_FILE.with_suffix(".tmp")
-            tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-            tmp.replace(_DISK_FILE)
-        except OSError:
+        global _disk_flush_timer
+        lids = list(_disk_dirty_libs)
+        for lid in lids:
             with _plan_lock:
-                _disk_dirty = True
-
+                store = _disk_caches.get(lid)
+                if store is None:
+                    _disk_dirty_libs.discard(lid)
+                    continue
+                data = store
+            path = playback_plans_file(lid)
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                tmp = path.with_suffix(".tmp")
+                tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+                tmp.replace(path)
+                _disk_dirty_libs.discard(lid)
+            except OSError:
+                pass
+        with _plan_lock:
+            _disk_flush_timer = None
 
     with _plan_lock:
         if _disk_flush_timer is not None:
@@ -324,15 +333,16 @@ def get_playback_plan(path: Path) -> dict:
     return out
 
 
-def schedule_probe_for_ids(video_ids: list[str]) -> int:
+def schedule_probe_for_ids(video_ids: list[str], library_id: str | None = None) -> int:
     """后台预分析播放策略并写入 playback_plans.json。"""
     if not video_ids:
         return 0
     from avv_gallery.scanner import get_by_id
 
+    lid = library_id or current_library_id()
     paths: list[Path] = []
     for vid in video_ids:
-        item = get_by_id(vid)
+        item = get_by_id(lid, vid)
         if item:
             p = Path(item.path)
             if is_ready_for_processing(p):
@@ -341,14 +351,15 @@ def schedule_probe_for_ids(video_ids: list[str]) -> int:
         return 0
     threading.Thread(
         target=_probe_paths_worker,
-        args=(paths,),
+        args=(lid, paths),
         daemon=True,
         name="playback-probe",
     ).start()
     return len(paths)
 
 
-def _probe_paths_worker(paths: list[Path]) -> None:
+def _probe_paths_worker(library_id: str, paths: list[Path]) -> None:
+    set_thread_library(library_id)
     for path in paths:
         try:
             get_playback_plan(path)

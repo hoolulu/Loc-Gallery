@@ -12,7 +12,9 @@ from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 
-from avv_gallery.config import THUMB_DIR, THUMB_INDEX_FILE, THUMB_WORKERS, FILE_STABLE_CHECK_DELAY
+from avv_gallery.config import THUMB_WORKERS, FILE_STABLE_CHECK_DELAY, thumb_dir, thumb_index_file
+from avv_gallery.library_context import current_library_id, set_thread_library
+from avv_gallery.library_store import list_libraries
 from avv_gallery.file_stability import is_ready_for_processing, is_ready_for_video
 from avv_gallery.process_util import hidden_subprocess_kwargs
 from avv_gallery.scanner import VideoItem, get_all, get_by_id
@@ -40,10 +42,12 @@ class QueueItem:
     priority: int
     added_at: float
     video_id: str
+    library_id: str = ""
 
 
 _lock = threading.RLock()
-_index: dict[str, dict] = {}
+_indexes: dict[str, dict[str, dict]] = {}
+_dirty_libs: set[str] = set()
 
 _paused = False
 _queue: list[QueueItem] = []
@@ -53,7 +57,6 @@ _position_override: dict[str, float] = {}
 _executor: ThreadPoolExecutor | None = None
 _worker_thread: threading.Thread | None = None
 _stop_worker = False
-_index_dirty = False
 _flush_lock = threading.Lock()
 _flush_timer: threading.Timer | None = None
 
@@ -111,57 +114,78 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
-def _thumb_file(video_id: str) -> Path:
-    return THUMB_DIR / f"{video_id}.jpg"
+def _lid(library_id: str | None = None) -> str:
+    return library_id or current_library_id()
+
+
+def _idx(library_id: str | None = None) -> dict[str, dict]:
+    lid = _lid(library_id)
+    if lid not in _indexes:
+        _indexes[lid] = {}
+    return _indexes[lid]
+
+
+def _tdir(library_id: str | None = None) -> Path:
+    return thumb_dir(_lid(library_id))
+
+
+def _thumb_file(video_id: str, library_id: str | None = None) -> Path:
+    return _tdir(library_id) / f"{video_id}.jpg"
 
 
 def _purge_thumb_files(video_id: str) -> None:
     """删除该视频所有缩略图文件（含历史残留）。"""
-    THUMB_DIR.mkdir(parents=True, exist_ok=True)
-    for p in THUMB_DIR.glob(f"{video_id}*.jpg"):
+    tdir = _tdir()
+    tdir.mkdir(parents=True, exist_ok=True)
+    for p in tdir.glob(f"{video_id}*.jpg"):
         try:
             p.unlink(missing_ok=True)
         except OSError:
             pass
 
 
-def _load_index() -> None:
-    global _index
-    THUMB_DIR.mkdir(parents=True, exist_ok=True)
-    if THUMB_INDEX_FILE.exists():
+def _load_index(library_id: str) -> None:
+    lid = _lid(library_id)
+    tdir = _tdir(lid)
+    tdir.mkdir(parents=True, exist_ok=True)
+    idx_path = thumb_index_file(lid)
+    if idx_path.exists():
         try:
-            text = THUMB_INDEX_FILE.read_text(encoding="utf-8").strip()
-            _index = json.loads(text) if text else {}
+            text = idx_path.read_text(encoding="utf-8").strip()
+            _indexes[lid] = json.loads(text) if text else {}
         except (json.JSONDecodeError, OSError):
-            backup = THUMB_INDEX_FILE.with_suffix(".json.bak")
-            if THUMB_INDEX_FILE.exists():
-                THUMB_INDEX_FILE.rename(backup)
-            _index = {}
+            backup = idx_path.with_suffix(".json.bak")
+            if idx_path.exists():
+                idx_path.rename(backup)
+            _indexes[lid] = {}
     else:
-        _index = {}
+        _indexes[lid] = {}
 
 
-def _flush_index_sync() -> None:
+def _flush_index_sync(library_id: str | None = None) -> None:
     """同步写入索引（仅在启动/关闭时调用）。"""
-    global _index_dirty
-    if not _index_dirty:
-        return
-    with _flush_lock:
-        if not _index_dirty:
-            return
-        data = json.dumps(_index, ensure_ascii=False, indent=2)
-        tmp = THUMB_INDEX_FILE.with_suffix(".json.tmp")
+    lids = [_lid(library_id)] if library_id else list(_dirty_libs) or [_lid()]
+    for lid in lids:
+        if lid not in _dirty_libs and library_id is None:
+            continue
+        idx = _indexes.get(lid)
+        if idx is None:
+            continue
+        idx_path = thumb_index_file(lid)
+        data = json.dumps(idx, ensure_ascii=False, indent=2)
+        tmp = idx_path.with_suffix(".json.tmp")
         for attempt in range(8):
             try:
+                idx_path.parent.mkdir(parents=True, exist_ok=True)
                 tmp.write_text(data, encoding="utf-8")
-                tmp.replace(THUMB_INDEX_FILE)
-                _index_dirty = False
+                tmp.replace(idx_path)
+                _dirty_libs.discard(lid)
                 return
             except (PermissionError, OSError):
                 time.sleep(0.15 * (attempt + 1))
         try:
-            THUMB_INDEX_FILE.write_text(data, encoding="utf-8")
-            _index_dirty = False
+            idx_path.write_text(data, encoding="utf-8")
+            _dirty_libs.discard(lid)
         except OSError:
             pass
 
@@ -181,32 +205,37 @@ def _flush_index() -> None:
     _schedule_flush()
 
 
-def _mark_dirty() -> None:
-    global _index_dirty
-    _index_dirty = True
+def _mark_dirty(library_id: str | None = None) -> None:
+    _dirty_libs.add(_lid(library_id))
+
+
+def _task_key(library_id: str, video_id: str) -> str:
+    return f"{library_id}:{video_id}"
 
 
 def _recover_stale_states() -> None:
     """重启后清理无效状态；失败项保留，避免无限自动重试。"""
-    with _lock:
-        changed = False
-        for entry in _index.values():
-            st = entry.get("status")
-            if st in (STATUS_QUEUED, STATUS_GENERATING):
-                entry["status"] = STATUS_MISSING
-                entry["error"] = None
-                changed = True
-        if changed:
-            _mark_dirty()
-    _flush_index_sync()
+    for lib in list_libraries():
+        set_thread_library(lib.id)
+        with _lock:
+            changed = False
+            for entry in _idx(lib.id).values():
+                st = entry.get("status")
+                if st in (STATUS_QUEUED, STATUS_GENERATING):
+                    entry["status"] = STATUS_MISSING
+                    entry["error"] = None
+                    changed = True
+            if changed:
+                _mark_dirty(lib.id)
+        _flush_index_sync(lib.id)
 
 
-def _has_usable_thumb(video_id: str) -> bool:
+def _has_usable_thumb(video_id: str, library_id: str | None = None) -> bool:
     """磁盘上已有可用缩略图（不受队列状态影响）。"""
-    if not _thumb_file(video_id).exists():
+    if not _thumb_file(video_id, library_id).exists():
         return False
     with _lock:
-        entry = _index.get(video_id)
+        entry = _idx(library_id).get(video_id)
         return bool(entry and entry.get("status") == STATUS_READY)
 
 
@@ -215,7 +244,10 @@ def _prune_ready_from_queue() -> int:
     removed = 0
     with _lock:
         before = len(_queue)
-        _queue[:] = [q for q in _queue if not _has_usable_thumb(q.video_id)]
+        _queue[:] = [
+            q for q in _queue
+            if not _has_usable_thumb(q.video_id, q.library_id or _lid())
+        ]
         removed = before - len(_queue)
     if removed:
         _notify_progress()
@@ -224,7 +256,7 @@ def _prune_ready_from_queue() -> int:
 
 def _is_failed(video_id: str) -> bool:
     with _lock:
-        entry = _index.get(video_id)
+        entry = _idx().get(video_id)
         return bool(entry and entry.get("status") == STATUS_FAILED)
 
 
@@ -232,7 +264,7 @@ def _should_schedule_auto(video_id: str) -> bool:
     """自动队列：跳过已有缩略图、已失败项、以及仍在写入的文件。"""
     if _has_usable_thumb(video_id) or _is_failed(video_id):
         return False
-    item = get_by_id(video_id)
+    item = get_by_id(_lid(), video_id)
     if not item:
         return False
     return _video_is_processable(item)
@@ -257,8 +289,8 @@ def reconcile_deferred_thumbs() -> int:
     """下载/写入中的视频若被标为失败，改回等待状态，不计入失败列表。"""
     changed = 0
     with _lock:
-        for vid, entry in list(_index.items()):
-            item = get_by_id(vid)
+        for vid, entry in list(_idx().items()):
+            item = get_by_id(_lid(), vid)
             if item and _video_is_processable(item):
                 continue
             st = entry.get("status")
@@ -270,16 +302,17 @@ def reconcile_deferred_thumbs() -> int:
                 entry["status"] = STATUS_MISSING
                 entry["thumb_file"] = None
                 changed += 1
-        for vid in list(_generating):
-            item = get_by_id(vid)
+        for tkey in list(_generating):
+            lid, vid = tkey.split(":", 1)
+            item = get_by_id(lid, vid)
             if not item or not _video_is_processable(item):
-                _generating.discard(vid)
-                _generating_started.pop(vid, None)
+                _generating.discard(tkey)
+                _generating_started.pop(tkey, None)
                 changed += 1
         before_q = len(_queue)
         _queue[:] = [
             q for q in _queue
-            if (item := get_by_id(q.video_id)) and _video_is_processable(item)
+            if (item := get_by_id(q.library_id or _lid(), q.video_id)) and _video_is_processable(item)
         ]
         if len(_queue) != before_q:
             changed += 1
@@ -293,14 +326,14 @@ def reconcile_deferred_thumbs() -> int:
 def get_failed_items() -> list[dict]:
     reconcile_deferred_thumbs()
     with _lock:
-        failed_ids = [vid for vid, e in _index.items() if e.get("status") == STATUS_FAILED]
+        failed_ids = [vid for vid, e in _idx().items() if e.get("status") == STATUS_FAILED]
     result = []
     for vid in failed_ids:
-        item = get_by_id(vid)
+        item = get_by_id(_lid(), vid)
         if not item or not _video_is_processable(item):
             continue
         with _lock:
-            err = _index.get(vid, {}).get("error")
+            err = _idx().get(vid, {}).get("error")
         result.append({
             "id": vid,
             "title": item.title,
@@ -314,11 +347,16 @@ def get_failed_items() -> list[dict]:
     return result
 
 
-def _is_busy(video_id: str) -> bool:
+def _is_busy(video_id: str, library_id: str | None = None) -> bool:
+    lid = _lid(library_id)
+    tkey = _task_key(lid, video_id)
     with _lock:
-        if video_id in _generating:
+        if tkey in _generating:
             return True
-        return any(q.video_id == video_id for q in _queue)
+        return any(
+            q.video_id == video_id and (q.library_id or _lid()) == lid
+            for q in _queue
+        )
 
 
 def init_manager() -> None:
@@ -329,7 +367,8 @@ def init_manager() -> None:
         ffprobe_path()
     except FileNotFoundError as exc:
         print(f"[thumb] 警告: {exc}")
-    _load_index()
+    for lib in list_libraries():
+        _load_index(lib.id)
     _recover_stale_states()
     with _lock:
         _queue.clear()
@@ -339,8 +378,11 @@ def init_manager() -> None:
     _executor = ThreadPoolExecutor(max_workers=workers)
     _worker_thread = threading.Thread(target=_worker_loop, daemon=True, name="thumb-worker")
     _worker_thread.start()
-    sync_index_with_videos()
-    _flush_index_sync()
+    for lib in list_libraries():
+        set_thread_library(lib.id)
+        sync_index_with_videos()
+    for lib in list_libraries():
+        _flush_index_sync(lib.id)
     _prune_ready_from_queue()
     reconcile_deferred_thumbs()
     if get_setting("thumb_idle_scan"):
@@ -352,8 +394,8 @@ def shutdown_manager() -> None:
     _stop_worker = True
     if _flush_timer:
         _flush_timer.cancel()
-    _flush_index_sync()
-    if _executor:
+    for lib in list(_indexes.keys()):
+        _flush_index_sync(lib)
         _executor.shutdown(wait=False, cancel_futures=True)
 
 
@@ -362,7 +404,7 @@ def _file_matches(item: VideoItem) -> bool:
     if not thumb.exists():
         return False
     with _lock:
-        entry = _index.get(item.id)
+        entry = _idx().get(item.id)
     if not entry:
         return False
     return entry.get("mtime") == item.mtime and entry.get("size") == item.size
@@ -370,13 +412,24 @@ def _file_matches(item: VideoItem) -> bool:
 
 def sync_index_with_videos() -> list[str]:
     """同步缩略图索引，返回新增或源文件已变更的视频 id。"""
-    videos = {v.id: v for v in get_all()}
+    videos = {v.id: v for v in get_all(_lid())}
     changed_ids: list[str] = []
     with _lock:
         for vid, item in videos.items():
-            entry = _index.get(vid)
+            entry = _idx().get(vid)
             if _file_matches(item):
-                _index[vid] = {
+                _idx()[vid] = {
+                    "video_id": vid,
+                    "path": item.path,
+                    "mtime": item.mtime,
+                    "size": item.size,
+                    "thumb_file": _thumb_file(vid).name,
+                    "status": STATUS_READY,
+                    "generated_at": entry.get("generated_at") if entry else _now_iso(),
+                    "error": None,
+                }
+            elif _thumb_file(vid).exists() and _thumb_file(vid).stat().st_size > 0:
+                _idx()[vid] = {
                     "video_id": vid,
                     "path": item.path,
                     "mtime": item.mtime,
@@ -388,7 +441,7 @@ def sync_index_with_videos() -> list[str]:
                 }
             elif entry is None:
                 changed_ids.append(vid)
-                _index[vid] = {
+                _idx()[vid] = {
                     "video_id": vid,
                     "path": item.path,
                     "mtime": item.mtime,
@@ -411,8 +464,8 @@ def sync_index_with_videos() -> list[str]:
                     entry["status"] = STATUS_MISSING
                     entry["thumb_file"] = None
 
-        for vid in [v for v in _index if v not in videos]:
-            del _index[vid]
+        for vid in [v for v in _idx() if v not in videos]:
+            del _idx()[vid]
 
         _mark_dirty()
     _schedule_flush()
@@ -422,7 +475,7 @@ def sync_index_with_videos() -> list[str]:
 
 def _rebuild_status_cache() -> None:
     global _cached_status
-    items = get_all()
+    items = get_all(_lid())
     counts = {
         "total": len(items), "ready": 0, "missing": 0,
         "queued": 0, "generating": 0, "failed": 0,
@@ -447,7 +500,7 @@ def _rebuild_status_cache() -> None:
             if vid in queued_ids:
                 counts["queued"] += 1
                 continue
-            entry = _index.get(vid, {})
+            entry = _idx().get(vid, {})
             st = entry.get("status", STATUS_MISSING)
             if st == STATUS_FAILED and _video_is_processable(item):
                 counts["failed"] += 1
@@ -491,8 +544,8 @@ def get_status(category: str | None = None, page_ids: list[str] | None = None) -
                 counts["queued"] += 1
             else:
                 with _lock:
-                    st = _index.get(vid, {}).get("status", STATUS_MISSING)
-                item = get_by_id(vid)
+                    st = _idx().get(vid, {}).get("status", STATUS_MISSING)
+                item = get_by_id(_lid(), vid)
                 if st == STATUS_FAILED and item and _video_is_processable(item):
                     counts["failed"] += 1
                 else:
@@ -510,7 +563,7 @@ def get_status(category: str | None = None, page_ids: list[str] | None = None) -
             out["generating"] = len(_generating)
         return out
 
-    items = [v for v in get_all() if v.category == category]
+    items = [v for v in get_all(_lid()) if v.category == category]
     counts = {
         "scope": "category",
         "total": len(items), "ready": 0, "missing": 0,
@@ -531,7 +584,7 @@ def get_status(category: str | None = None, page_ids: list[str] | None = None) -
             counts["queued"] += 1
         else:
             with _lock:
-                st = _index.get(vid, {}).get("status", STATUS_MISSING)
+                st = _idx().get(vid, {}).get("status", STATUS_MISSING)
             if st == STATUS_FAILED:
                 counts["failed"] += 1
             else:
@@ -543,7 +596,7 @@ def get_status(category: str | None = None, page_ids: list[str] | None = None) -
 def get_video_thumb_status_fast(video_id: str) -> str:
     if _has_usable_thumb(video_id):
         return STATUS_READY
-    item = get_by_id(video_id)
+    item = get_by_id(_lid(), video_id)
     if item and not _video_is_processable(item):
         return STATUS_MISSING
     with _lock:
@@ -551,7 +604,7 @@ def get_video_thumb_status_fast(video_id: str) -> str:
             return STATUS_GENERATING
         if any(q.video_id == video_id for q in _queue):
             return STATUS_QUEUED
-        entry = _index.get(video_id)
+        entry = _idx().get(video_id)
         if entry:
             return entry.get("status", STATUS_MISSING)
     return STATUS_MISSING
@@ -563,7 +616,7 @@ def get_video_thumb_status(video_id: str) -> str:
 
 def get_thumb_version(video_id: str) -> str | None:
     with _lock:
-        entry = _index.get(video_id)
+        entry = _idx().get(video_id)
         if entry and entry.get("status") == STATUS_READY:
             generated = entry.get("generated_at")
             seek = entry.get("thumb_seek")
@@ -575,7 +628,7 @@ def get_thumb_version(video_id: str) -> str | None:
 
 def get_video_thumb_error(video_id: str) -> str | None:
     with _lock:
-        entry = _index.get(video_id)
+        entry = _idx().get(video_id)
         if entry and entry.get("status") == STATUS_FAILED:
             return entry.get("error")
     return None
@@ -624,18 +677,25 @@ def is_paused() -> bool:
     return _paused
 
 
-def _enqueue(video_id: str, priority: Priority = Priority.NORMAL) -> None:
-    if _has_usable_thumb(video_id):
+def _enqueue(video_id: str, priority: Priority = Priority.NORMAL, library_id: str | None = None) -> None:
+    lid = _lid(library_id)
+    tkey = _task_key(lid, video_id)
+    if _has_usable_thumb(video_id, lid):
         return
     with _lock:
         if len(_queue) >= MAX_QUEUE_SIZE and priority != Priority.HIGH:
             return
-        if video_id in _generating:
+        if tkey in _generating:
             return
-        _queue[:] = [q for q in _queue if q.video_id != video_id]
-        _queue.append(QueueItem(priority=priority.value, added_at=time.time(), video_id=video_id))
+        _queue[:] = [
+            q for q in _queue
+            if not (q.video_id == video_id and (q.library_id or _lid()) == lid)
+        ]
+        _queue.append(QueueItem(
+            priority=priority.value, added_at=time.time(), video_id=video_id, library_id=lid,
+        ))
         _queue.sort()
-        entry = _index.setdefault(video_id, {"video_id": video_id})
+        entry = _idx(lid).setdefault(video_id, {"video_id": video_id})
         if entry.get("status") not in (STATUS_GENERATING, STATUS_READY):
             entry["status"] = STATUS_QUEUED
             _mark_dirty()
@@ -663,14 +723,14 @@ def schedule_ids(video_ids: list[str], priority: Priority = Priority.NORMAL) -> 
 
 
 def schedule_category(category: str, priority: Priority = Priority.NORMAL) -> int:
-    ids = [v.id for v in get_all() if v.category == category and not is_thumb_ready(v.id)]
+    ids = [v.id for v in get_all(_lid()) if v.category == category and not is_thumb_ready(v.id)]
     return schedule_ids(ids, priority)
 
 
 def schedule_all_missing(priority: Priority = Priority.LOW) -> int:
     if not get_setting("thumb_idle_scan"):
         return 0
-    ids = [v.id for v in get_all() if not is_thumb_ready(v.id)]
+    ids = [v.id for v in get_all(_lid()) if not is_thumb_ready(v.id)]
     with _lock:
         room = max(0, MAX_QUEUE_SIZE - len(_queue))
     if room == 0:
@@ -700,16 +760,17 @@ def regenerate_ids(
     versions: dict[str, str] = {}
     positions: dict[str, float] = {}
     for vid in video_ids:
-        item = get_by_id(vid)
+        item = get_by_id(_lid(), vid)
         if not item:
             continue
         _purge_thumb_files(vid)
         bust = str(time.time())
         versions[vid] = bust
         with _lock:
-            if vid in _generating:
-                _generating.discard(vid)
-            _generating_started.pop(vid, None)
+            tkey = _task_key(_lid(), vid)
+            if tkey in _generating:
+                _generating.discard(tkey)
+            _generating_started.pop(tkey, None)
             _queue[:] = [q for q in _queue if q.video_id != vid]
             if random_position:
                 pos = _random_thumb_position()
@@ -732,27 +793,27 @@ def regenerate_ids(
 
 def _set_entry(video_id: str, **fields) -> None:
     with _lock:
-        entry = _index.setdefault(video_id, {"video_id": video_id})
+        entry = _idx().setdefault(video_id, {"video_id": video_id})
         entry.update(fields)
         _mark_dirty()
     _schedule_flush()
 
 
 def regenerate_category(category: str) -> tuple[int, dict[str, str]]:
-    ids = [v.id for v in get_all() if v.category == category]
+    ids = [v.id for v in get_all(_lid()) if v.category == category]
     return regenerate_ids(ids)
 
 
 def regenerate_failed() -> tuple[int, dict[str, str], dict[str, float]]:
     with _lock:
-        failed_ids = [vid for vid, e in _index.items() if e.get("status") == STATUS_FAILED]
+        failed_ids = [vid for vid, e in _idx().items() if e.get("status") == STATUS_FAILED]
     return regenerate_ids(failed_ids)
 
 
 def remove_thumbs(video_ids: list[str]) -> None:
     with _lock:
         for vid in video_ids:
-            _index.pop(vid, None)
+            _idx().pop(vid, None)
             thumb = _thumb_file(vid)
             if thumb.exists():
                 thumb.unlink(missing_ok=True)
@@ -761,11 +822,11 @@ def remove_thumbs(video_ids: list[str]) -> None:
 
 
 def cleanup_orphans() -> int:
-    videos = {v.id for v in get_all()}
+    videos = {v.id for v in get_all(_lid())}
     removed = 0
     with _lock:
-        for vid in [v for v in _index if v not in videos]:
-            del _index[vid]
+        for vid in [v for v in _idx() if v not in videos]:
+            del _idx()[vid]
             thumb = _thumb_file(vid)
             if thumb.exists():
                 thumb.unlink(missing_ok=True)
@@ -838,21 +899,23 @@ def _recover_stuck_tasks() -> None:
     now = time.time()
     stuck: list[str] = []
     with _lock:
-        for vid in list(_generating):
-            started = _generating_started.get(vid, now)
+        for tkey in list(_generating):
+            started = _generating_started.get(tkey, now)
             if now - started > GENERATING_TIMEOUT:
-                stuck.append(vid)
-    for vid in stuck:
-        if _has_usable_thumb(vid):
+                stuck.append(tkey)
+    for tkey in stuck:
+        lid, vid = tkey.split(":", 1)
+        set_thread_library(lid)
+        if _has_usable_thumb(vid, lid):
             with _lock:
-                _generating.discard(vid)
-                _generating_started.pop(vid, None)
+                _generating.discard(tkey)
+                _generating_started.pop(tkey, None)
             continue
         with _lock:
-            _generating.discard(vid)
-            _generating_started.pop(vid, None)
+            _generating.discard(tkey)
+            _generating_started.pop(tkey, None)
         _set_entry(vid, status=STATUS_MISSING, error="生成超时，已重新排队")
-        _enqueue(vid, Priority.HIGH)
+        _enqueue(vid, Priority.HIGH, lid)
     if stuck:
         _notify_progress()
 
@@ -915,7 +978,7 @@ def _generate_thumb_file(
     else:
         position = max(0.05, min(0.95, float(position)))
     output = _thumb_file(item.id)
-    THUMB_DIR.mkdir(parents=True, exist_ok=True)
+    _tdir().mkdir(parents=True, exist_ok=True)
 
     modes = [True] if _has_png_header(item.path) else [False]
 
@@ -965,32 +1028,34 @@ def _generate_thumb_file(
     return False
 
 
-def _process_one(video_id: str) -> None:
-    item = get_by_id(video_id)
+def _process_one(library_id: str, video_id: str) -> None:
+    set_thread_library(library_id)
+    tkey = _task_key(library_id, video_id)
+    item = get_by_id(library_id, video_id)
     if not item:
         return
 
     if not _video_is_processable(item):
         with _lock:
-            entry = _index.get(video_id)
+            entry = _idx(library_id).get(video_id)
             if entry and entry.get("status") == STATUS_FAILED:
                 entry["status"] = STATUS_MISSING
                 entry["error"] = None
-                _mark_dirty()
+                _mark_dirty(library_id)
         threading.Timer(
             FILE_STABLE_CHECK_DELAY,
-            lambda: _enqueue(video_id, Priority.LOW),
+            lambda: _enqueue(video_id, Priority.LOW, library_id),
         ).start()
         return
 
     with _lock:
         has_override = video_id in _position_override
-    if not has_override and _has_usable_thumb(video_id):
+    if not has_override and _has_usable_thumb(video_id, library_id):
         return
 
     with _lock:
-        _generating.add(video_id)
-        _generating_started[video_id] = time.time()
+        _generating.add(tkey)
+        _generating_started[tkey] = time.time()
         pos = _position_override.pop(video_id, None)
     explicit = pos is not None
     _set_entry(video_id, status=STATUS_GENERATING, error=None)
@@ -1004,7 +1069,7 @@ def _process_one(video_id: str) -> None:
                 path=item.path,
                 mtime=item.mtime,
                 size=item.size,
-                thumb_file=_thumb_file(video_id).name,
+                thumb_file=_thumb_file(video_id, library_id).name,
                 status=STATUS_READY,
                 generated_at=_now_iso(),
                 thumb_seek=seek_val,
@@ -1017,8 +1082,8 @@ def _process_one(video_id: str) -> None:
         _set_entry(video_id, status=STATUS_FAILED, error=str(exc))
     finally:
         with _lock:
-            _generating.discard(video_id)
-            _generating_started.pop(video_id, None)
+            _generating.discard(tkey)
+            _generating_started.pop(tkey, None)
         _notify_progress()
 
 
@@ -1036,13 +1101,16 @@ def _worker_loop() -> None:
                 continue
 
             task_id = None
+            task_lid = None
             max_workers = int(get_setting("thumb_workers") or THUMB_WORKERS)
             with _lock:
                 if _queue and len(_generating) < max_workers:
-                    task_id = _queue.pop(0).video_id
+                    task = _queue.pop(0)
+                    task_lid = task.library_id or _lid()
+                    task_id = task.video_id
 
-            if task_id and _executor:
-                _executor.submit(_process_one, task_id)
+            if task_id and task_lid and _executor:
+                _executor.submit(_process_one, task_lid, task_id)
             else:
                 time.sleep(0.2)
         except Exception:
@@ -1075,7 +1143,7 @@ def start_idle_scan_background() -> None:
                 with _lock:
                     busy = set(_generating) | {q.video_id for q in _queue}
                 ids = [
-                    v.id for v in get_all()
+                    v.id for v in get_all(_lid())
                     if v.id not in busy and _should_schedule_auto(v.id)
                 ][:room]
                 if ids:

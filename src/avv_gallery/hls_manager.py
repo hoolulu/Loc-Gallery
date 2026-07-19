@@ -10,7 +10,8 @@ import threading
 import time
 from pathlib import Path
 
-from avv_gallery.config import HLS_CACHE_DIR, HLS_CACHE_MAX_BYTES, service_environ
+from avv_gallery.config import HLS_CACHE_MAX_BYTES, hls_cache_dir, service_environ
+from avv_gallery.library_context import current_library_id
 from avv_gallery.process_util import hidden_subprocess_kwargs
 from avv_gallery.thumb_manager import ffmpeg_path
 
@@ -28,16 +29,20 @@ _COMPLETE_MARK = ".complete"
 _META_FILE = ".meta.json"
 
 
+def _hls_root() -> Path:
+    return hls_cache_dir(current_library_id())
+
+
 def _ensure_root() -> None:
-    HLS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    _hls_root().mkdir(parents=True, exist_ok=True)
 
 
 def _work_dir(video_id: str) -> Path:
-    return HLS_CACHE_DIR / video_id
+    return _hls_root() / video_id
 
 
 def _load_lru() -> dict:
-    path = HLS_CACHE_DIR / _LRU_FILE
+    path = _hls_root() / _LRU_FILE
     if not path.is_file():
         return {}
     try:
@@ -49,7 +54,7 @@ def _load_lru() -> dict:
 
 def _save_lru(data: dict) -> None:
     _ensure_root()
-    path = HLS_CACHE_DIR / _LRU_FILE
+    path = _hls_root() / _LRU_FILE
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     tmp.replace(path)
@@ -71,7 +76,7 @@ def _dir_size(path: Path) -> int:
 def _list_cache_dirs() -> list[Path]:
     _ensure_root()
     out: list[Path] = []
-    for p in HLS_CACHE_DIR.iterdir():
+    for p in _hls_root().iterdir():
         if p.is_dir() and not p.name.startswith("_"):
             out.append(p)
     return out

@@ -114,7 +114,8 @@ def wait_service_ready() -> bool:
         f"{URL}/static/tailwind.css",
         f"{URL}/static/style.css",
     )
-    for _ in range(40):
+    print("正在等待服务就绪...", flush=True)
+    for attempt in range(40):
         time.sleep(0.25)
         ok = True
         for check_url in checks:
@@ -134,6 +135,8 @@ def wait_service_ready() -> bool:
         if ok:
             time.sleep(0.4)
             return True
+        if attempt == 0 or (attempt + 1) % 8 == 0:
+            print(f"  仍在启动中（{attempt + 1}/40）...", flush=True)
     return False
 
 

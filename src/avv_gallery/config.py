@@ -10,28 +10,44 @@ SRC_DIR = PACKAGE_DIR.parent
 PROJECT_ROOT = SRC_DIR.parent
 WEB_ROOT = PROJECT_ROOT
 DATA_DIR = PROJECT_ROOT / "data"
+LIBRARIES_FILE = DATA_DIR / "libraries.json"
+LIBRARIES_ROOT = DATA_DIR / "libraries"
 
 VIDEO_ROOT = Path(r"F:\AVV")
 
-# 运行时数据目录
-THUMB_DIR = DATA_DIR / ".thumbs"
-HLS_CACHE_DIR = DATA_DIR / "cache" / "hls"
-HLS_CACHE_MAX_BYTES = 5 * 1024 * 1024 * 1024  # 5 GB
-PLAYBACK_PLANS_FILE = DATA_DIR / "cache" / "playback_plans.json"
-LARGE_FILE_HLS_BYTES = 300 * 1024 * 1024  # 300 MB
-THUMB_INDEX_FILE = THUMB_DIR / "index.json"
+# 全局设置（应用级）
 SETTINGS_FILE = DATA_DIR / "settings.json"
-CATEGORY_META_FILE = DATA_DIR / "category_meta.json"
-FAVORITES_FILE = DATA_DIR / "favorites.json"
-HISTORY_FILE = DATA_DIR / "play_history.json"
 LOG_FILE = DATA_DIR / "logs" / "server.log"
 PID_FILE = DATA_DIR / ".server.pid"
+
+HLS_CACHE_MAX_BYTES = 5 * 1024 * 1024 * 1024  # 5 GB
+LARGE_FILE_HLS_BYTES = 300 * 1024 * 1024  # 300 MB
 
 PORT = 3456
 HOST = "127.0.0.1"
 
-POTPLAYER_PATH = Path("")  # 请在设置页或 data/settings.json 中配置本机路径
+POTPLAYER_PATH = Path("")
+POTPLAYER_CANDIDATES = [
+    Path(r"C:\Program Files\DAUM\PotPlayer\PotPlayerMini64.exe"),
+    Path(r"C:\Program Files\DAUM\PotPlayer\PotPlayer64.exe"),
+    Path(r"D:\Program Files\DAUM\PotPlayer\PotPlayerMini64.exe"),
+    Path(r"D:\Program Files\DAUM\PotPlayer\PotPlayer64.exe"),
+    Path(r"C:\Program Files (x86)\DAUM\PotPlayer\PotPlayerMini.exe"),
+]
 PLAYER_MODE = "potplayer"
+
+
+def detect_potplayer_path() -> str:
+    """探测本机 PotPlayer 可执行文件路径。"""
+    configured = str(POTPLAYER_PATH or "").strip()
+    if configured:
+        p = Path(configured)
+        if p.is_file():
+            return str(p)
+    for candidate in POTPLAYER_CANDIDATES:
+        if candidate.is_file():
+            return str(candidate)
+    return ""
 
 THUMB_POSITION = 0.6
 THUMB_RANDOM_MIN = 0.5
@@ -41,10 +57,9 @@ THUMB_IDLE_SCAN = False
 DEFAULT_PAGE_SIZE = 32
 HISTORY_RETENTION_DAYS = 180
 
-# 未完成下载 / 写入中的文件：稳定检测参数
-FILE_STABLE_CHECK_DELAY = 5.0       # 最后一次变更后等待秒数
-FILE_STABLE_SAMPLE_INTERVAL = 2.0   # 稳定性采样间隔
-FILE_RECENT_MODIFY_SEC = 20.0       # 启动扫描时，mtime 在此秒数内的文件先观察
+FILE_STABLE_CHECK_DELAY = 5.0
+FILE_STABLE_SAMPLE_INTERVAL = 2.0
+FILE_RECENT_MODIFY_SEC = 20.0
 
 VIDEO_EXTENSIONS = {
     ".mp4", ".mkv", ".avi", ".wmv", ".mov", ".flv",
@@ -53,49 +68,77 @@ VIDEO_EXTENSIONS = {
 
 IGNORE_DIRS = {
     ".thumbs", "WEB", "Loc-Gallery", "AVV-Gallery", "__pycache__", ".git",
-    "cache", "data", "node_modules", "src", "scripts", "tests",
+    "cache", "data", "node_modules", "src", "scripts", "tests", "libraries",
 }
+
+# 兼容旧 import
+THUMB_DIR = DATA_DIR / ".thumbs"
+HLS_CACHE_DIR = DATA_DIR / "cache" / "hls"
+PLAYBACK_PLANS_FILE = DATA_DIR / "cache" / "playback_plans.json"
+THUMB_INDEX_FILE = THUMB_DIR / "index.json"
+CATEGORY_META_FILE = DATA_DIR / "category_meta.json"
+FAVORITES_FILE = DATA_DIR / "favorites.json"
+HISTORY_FILE = DATA_DIR / "play_history.json"
+
+
+def library_data_dir(library_id: str) -> Path:
+    from avv_gallery.library_store import library_data_dir as _dir
+    return _dir(library_id)
+
+
+def favorites_file(library_id: str) -> Path:
+    return library_data_dir(library_id) / "favorites.json"
+
+
+def history_file(library_id: str) -> Path:
+    return library_data_dir(library_id) / "play_history.json"
+
+
+def category_meta_file(library_id: str) -> Path:
+    return library_data_dir(library_id) / "category_meta.json"
+
+
+def library_settings_file(library_id: str) -> Path:
+    return library_data_dir(library_id) / "settings.json"
+
+
+def thumb_dir(library_id: str) -> Path:
+    return library_data_dir(library_id) / ".thumbs"
+
+
+def thumb_index_file(library_id: str) -> Path:
+    return thumb_dir(library_id) / "index.json"
+
+
+def hls_cache_dir(library_id: str) -> Path:
+    return library_data_dir(library_id) / "cache" / "hls"
+
+
+def playback_plans_file(library_id: str) -> Path:
+    return library_data_dir(library_id) / "cache" / "playback_plans.json"
 
 
 def _migrate_legacy_data() -> None:
-    """首次升级时把根目录下的运行时文件迁入 data/。"""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    (DATA_DIR / "cache" / "hls").mkdir(parents=True, exist_ok=True)
     (DATA_DIR / "logs").mkdir(parents=True, exist_ok=True)
 
-    moves: list[tuple[Path, Path]] = [
+    legacy_moves: list[tuple[Path, Path]] = [
         (WEB_ROOT / "settings.json", SETTINGS_FILE),
-        (WEB_ROOT / "category_meta.json", CATEGORY_META_FILE),
-        (WEB_ROOT / ".thumbs", THUMB_DIR),
-        (WEB_ROOT / "cache" / "playback_plans.json", PLAYBACK_PLANS_FILE),
         (WEB_ROOT / ".server.pid", PID_FILE),
     ]
-    for src, dst in moves:
+    for src, dst in legacy_moves:
         if src.exists() and not dst.exists():
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(src), str(dst))
 
-    legacy_hls = WEB_ROOT / "cache" / "hls"
-    if legacy_hls.exists() and legacy_hls != HLS_CACHE_DIR:
-        for item in legacy_hls.iterdir():
-            target = HLS_CACHE_DIR / item.name
-            if not target.exists():
-                shutil.move(str(item), str(target))
-        try:
-            legacy_hls.rmdir()
-        except OSError:
-            pass
-        try:
-            (WEB_ROOT / "cache").rmdir()
-        except OSError:
-            pass
+    from avv_gallery.library_store import migrate_single_library
+    migrate_single_library()
 
 
 _migrate_legacy_data()
 
 
 def service_environ() -> dict:
-    """双击启动时补全 PATH，确保子进程能找到 WinGet 安装的 ffmpeg。"""
     import os
 
     extra = [

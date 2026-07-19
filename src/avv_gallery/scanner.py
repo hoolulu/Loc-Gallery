@@ -4,7 +4,7 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 
-from avv_gallery.config import IGNORE_DIRS, VIDEO_EXTENSIONS, VIDEO_ROOT, WEB_ROOT
+from avv_gallery.config import IGNORE_DIRS, VIDEO_EXTENSIONS, WEB_ROOT
 from avv_gallery.file_stability import is_ready_for_index
 from avv_gallery.title import extract_title
 
@@ -19,11 +19,12 @@ class VideoItem:
     filename: str
     size: int
     mtime: float
+    library_id: str = ""
 
 
 _lock = threading.Lock()
-_cache: dict[str, VideoItem] = {}
-_version = 0
+_caches: dict[str, dict[str, VideoItem]] = {}
+_versions: dict[str, int] = {}
 
 
 def _make_id(rel_path: str) -> str:
@@ -38,15 +39,15 @@ def _should_skip_dir(path: Path) -> bool:
     return path.name in IGNORE_DIRS or path == WEB_ROOT
 
 
-def scan_all() -> list[VideoItem]:
-    """全量扫描视频库，仅收录视频文件。"""
+def scan_all(video_root: Path, library_id: str) -> list[VideoItem]:
     items: list[VideoItem] = []
+    video_root = video_root.resolve()
 
-    if not VIDEO_ROOT.exists():
+    if not video_root.exists():
         return items
 
     def _add_video(video_path: Path, category: str, category_dir: Path) -> None:
-        rel = video_path.relative_to(VIDEO_ROOT).as_posix()
+        rel = video_path.relative_to(video_root).as_posix()
         rel_in_cat = video_path.relative_to(category_dir)
         subfolder = "" if rel_in_cat.parent == Path(".") else rel_in_cat.parent.as_posix()
         stat = video_path.stat()
@@ -59,72 +60,86 @@ def scan_all() -> list[VideoItem]:
             filename=video_path.name,
             size=stat.st_size,
             mtime=stat.st_mtime,
+            library_id=library_id,
         ))
 
-    # 根目录下的视频（不含 WEB 子目录）
-    for entry in VIDEO_ROOT.iterdir():
-        if _is_video(entry):
-            _add_video(entry, "根目录", VIDEO_ROOT)
+    try:
+        for entry in video_root.iterdir():
+            if _is_video(entry):
+                _add_video(entry, "根目录", video_root)
+    except OSError:
+        return items
 
-    for category_dir in sorted(VIDEO_ROOT.iterdir()):
-        if not category_dir.is_dir() or _should_skip_dir(category_dir):
-            continue
-
-        category = category_dir.name
-        for video_path in category_dir.rglob("*"):
-            if not _is_video(video_path):
+    try:
+        for category_dir in sorted(video_root.iterdir()):
+            if not category_dir.is_dir() or _should_skip_dir(category_dir):
                 continue
-            _add_video(video_path, category, category_dir)
+            category = category_dir.name
+            for video_path in category_dir.rglob("*"):
+                if not _is_video(video_path):
+                    continue
+                _add_video(video_path, category, category_dir)
+    except OSError:
+        pass
 
     return items
 
 
-def refresh_cache() -> int:
-    """刷新内存缓存，返回新版本号。"""
-    global _version
-    items = scan_all()
+def refresh_cache(library_id: str, video_root: Path | None = None) -> int:
+    if video_root is None:
+        from avv_gallery.library_store import get_library
+        lib = get_library(library_id)
+        if not lib:
+            raise ValueError("视频库不存在")
+        video_root = lib.path_obj
+    items = scan_all(video_root, library_id)
     new_cache = {item.id: item for item in items}
     with _lock:
-        _cache.clear()
-        _cache.update(new_cache)
-        _version += 1
-        return _version
+        _caches[library_id] = new_cache
+        _versions[library_id] = _versions.get(library_id, 0) + 1
+        return _versions[library_id]
 
 
-def get_version() -> int:
+def refresh_all_libraries() -> None:
+    from avv_gallery.library_store import list_libraries
+    for lib in list_libraries():
+        refresh_cache(lib.id, lib.path_obj)
+
+
+def get_version(library_id: str) -> int:
     with _lock:
-        return _version
+        return _versions.get(library_id, 0)
 
 
-def get_all() -> list[VideoItem]:
+def get_all(library_id: str) -> list[VideoItem]:
     with _lock:
-        return list(_cache.values())
+        return list((_caches.get(library_id) or {}).values())
 
 
-def get_by_id(video_id: str) -> VideoItem | None:
+def get_by_id(library_id: str, video_id: str) -> VideoItem | None:
     with _lock:
-        return _cache.get(video_id)
+        return (_caches.get(library_id) or {}).get(video_id)
 
 
-def get_categories() -> list[dict]:
+def get_categories(library_id: str) -> list[dict]:
     with _lock:
+        cache = _caches.get(library_id) or {}
         counts: dict[str, int] = {}
         has_subfolders: dict[str, bool] = {}
-        for item in _cache.values():
+        for item in cache.values():
             counts[item.category] = counts.get(item.category, 0) + 1
             if item.subfolder:
                 has_subfolders[item.category] = True
     from avv_gallery.category_store import sort_categories
-    cats = sort_categories(counts)
+    cats = sort_categories(library_id, counts)
     for c in cats:
         c["has_subfolders"] = has_subfolders.get(c["name"], False)
     return cats
 
 
-def get_folder_tree(category: str) -> dict:
-    """返回分类下的子目录树（仅直接子级递归嵌套）。"""
+def get_folder_tree(library_id: str, category: str) -> dict:
     with _lock:
-        items = [v for v in _cache.values() if v.category == category]
+        items = [v for v in (_caches.get(library_id) or {}).values() if v.category == category]
 
     direct_count = sum(1 for v in items if not v.subfolder)
     nested: dict = {}
