@@ -144,7 +144,7 @@
             <div class="player-playlist-wrap flex w-full shrink-0 flex-col border-t border-surface-border lg:w-72 lg:border-l lg:border-t-0">
               <div class="player-playlist-head flex shrink-0 items-center justify-between gap-2 border-b border-surface-border px-2 py-1.5">
                 <span class="text-xs font-medium text-zinc-400">播放列表</span>
-                <select id="player-playlist-sort" class="player-playlist-sort" title="播放列表排序（HTML5 模式播完自动连播下一集）">
+                <select id="player-playlist-sort" class="player-playlist-sort" title="播放列表排序（连播时按此顺序下一集）">
                   <option value="page">列表顺序</option>
                   <option value="filename_asc">文件名 A→Z（自然）</option>
                   <option value="filename_desc">文件名 Z→A（自然）</option>
@@ -181,7 +181,7 @@
   </div>
 
   <div id="video-engine-host" aria-hidden="true">
-    <video id="html5-player" class="player-video" controls playsinline preload="metadata"></video>
+    <video id="html5-player" class="player-video" controls playsinline preload="none"></video>
   </div>
 
   <div id="selection-bar" class="selection-bar hidden">
@@ -321,6 +321,22 @@
             </label>
 
             <label class="opt-cell opt-span-2">
+              <span class="settings-field-label">HTML5 记忆播放位置</span>
+              <select id="set-html5-resume-playback" class="dlg-input compact-input" title="退出或切换后再次打开从上次进度继续（距结尾不足 45 秒视为看完）">
+                <option value="true">开启续播</option>
+                <option value="false">每次从头播</option>
+              </select>
+            </label>
+
+            <label class="opt-cell opt-span-2">
+              <span class="settings-field-label">HTML5 播放列表连播</span>
+              <select id="set-html5-playlist-autoplay" class="dlg-input compact-input" title="按右侧播放列表顺序，当前集播完后是否自动播下一集">
+                <option value="true">播完自动下一集</option>
+                <option value="false">播完停止</option>
+              </select>
+            </label>
+
+            <label class="opt-cell opt-span-2">
               <span class="settings-field-label">碎片化 MP4（HTML5）</span>
               <select id="set-html5-fragmented-mp4" class="dlg-input compact-input" title="碎片化 MP4 无法用浏览器直连，可选本地播放器或切片">
                 <option value="external">PotPlayer（省磁盘，推荐）</option>
@@ -408,6 +424,6 @@
   </dialog>
 
   <script src="/static/vendor/hls.min.js"></script>
-  <script src="/static/app.js?v=88"></script>
+  <script src="/static/app.js?v=93"></script>
 </body>
 </html>

@@ -11,6 +11,8 @@ from loc_gallery.config import (
     HLS_LARGE_H264,
     HLS_MOOV_END_H264,
     HTML5_FRAGMENTED_MP4,
+    HTML5_PLAYLIST_AUTOPLAY,
+    HTML5_RESUME_PLAYBACK,
     PLAYER_MODE,
     SETTINGS_FILE,
     THUMB_IDLE_SCAN,
@@ -37,6 +39,8 @@ _DEFAULTS = {
     "hls_large_h264": HLS_LARGE_H264,
     "hls_moov_end_h264": HLS_MOOV_END_H264,
     "html5_fragmented_mp4": HTML5_FRAGMENTED_MP4,
+    "html5_playlist_autoplay": HTML5_PLAYLIST_AUTOPLAY,
+    "html5_resume_playback": HTML5_RESUME_PLAYBACK,
 }
 
 _LIBRARY_OVERRIDE_KEYS = {
@@ -52,6 +56,8 @@ _LIBRARY_OVERRIDE_KEYS = {
     "hls_large_h264",
     "hls_moov_end_h264",
     "html5_fragmented_mp4",
+    "html5_playlist_autoplay",
+    "html5_resume_playback",
 }
 
 

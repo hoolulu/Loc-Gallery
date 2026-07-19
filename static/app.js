@@ -33,6 +33,8 @@
     libraryId: "",
     libraries: [],
     playlistSort: "page",
+    playlistAutoplay: true,
+    resumePlayback: true,
   };
 
   let searchTimer = null;
@@ -161,9 +163,12 @@
     video._directStreamHandlers = { onPause, onPlay, onClick };
   }
 
-  /** 立刻断开浏览器视频拉流，停止 Range 请求与后台缓冲 */
-  function detachVideoStream(video) {
-    if (!video) return;
+  /** 立刻断开浏览器视频拉流，停止 Range 请求与后台缓冲；hard 时替换节点（退出播放页用） */
+  function detachVideoStream(video, { hard = false } = {}) {
+    if (!video) {
+      if (hard) recreateVideoElement();
+      return getPlaybackVideo();
+    }
     clearTimeout(directPauseDetachTimer);
     unbindDirectStreamLifecycle(video);
     unbindSlicePauseResume(video);
@@ -184,6 +189,21 @@
     video.src = "";
     [...video.querySelectorAll("source")].forEach(el => el.remove());
     try { video.load(); } catch (_) { /* ignore */ }
+    if (hard) recreateVideoElement();
+    return getPlaybackVideo();
+  }
+
+  /** 替换 DOM 节点，迫使浏览器取消所有媒体 Range 请求 */
+  function recreateVideoElement() {
+    const old = document.getElementById("html5-player");
+    if (!old?.parentElement) return;
+    const video = document.createElement("video");
+    video.id = "html5-player";
+    video.className = old.className;
+    video.controls = true;
+    video.playsInline = true;
+    video.preload = "none";
+    old.parentElement.replaceChild(video, old);
   }
 
   function loadState() {
@@ -405,7 +425,17 @@
     hls_large_h264: false,
     hls_moov_end_h264: false,
     html5_fragmented_mp4: "external",
+    html5_playlist_autoplay: true,
+    html5_resume_playback: true,
   };
+
+  function playlistAutoplayEnabled() {
+    return state.playlistAutoplay !== false;
+  }
+
+  function resumePlaybackEnabled() {
+    return state.resumePlayback !== false;
+  }
 
   function normalizePlayerMode(mode) {
     const m = (mode || SETTINGS_DEFAULTS.player_mode).trim().toLowerCase();
@@ -430,6 +460,10 @@
     setVal("set-hls-large-h264", String(!!s.hls_large_h264));
     setVal("set-hls-moov-end-h264", String(!!s.hls_moov_end_h264));
     setVal("set-html5-fragmented-mp4", s.html5_fragmented_mp4 || "external");
+    setVal("set-html5-playlist-autoplay", String(s.html5_playlist_autoplay !== false));
+    setVal("set-html5-resume-playback", String(s.html5_resume_playback !== false));
+    state.playlistAutoplay = s.html5_playlist_autoplay !== false;
+    state.resumePlayback = s.html5_resume_playback !== false;
     document.querySelectorAll('input[name="player-mode"]').forEach(r => {
       r.checked = r.value === state.playerMode;
     });
@@ -1711,6 +1745,8 @@
     try {
       const s = await api("/api/settings");
       state.playerMode = normalizePlayerMode(s.player_mode);
+      state.playlistAutoplay = s.html5_playlist_autoplay !== false;
+      state.resumePlayback = s.html5_resume_playback !== false;
       return s;
     } catch (_) {
       return null;
@@ -1789,24 +1825,11 @@
           <p class="truncate text-[10px] text-zinc-600">${esc(v.filename)}</p>
         </div>
       </button>`).join("");
-    el.querySelectorAll(".player-pl-item").forEach(btn => {
-      btn.addEventListener("click", () => playVideo(btn.dataset.id));
-    });
     el.querySelectorAll(".player-pl-thumb").forEach((wrap, i) => {
       const v = items[i];
       if (v) applyThumbToWrap(wrap, v);
     });
     scrollPlaylistToActive();
-  }
-
-  function setupPlaylistAutoplay() {
-    const video = getPlaybackVideo();
-    if (!video || video.dataset.playlistBound) return;
-    video.dataset.playlistBound = "1";
-    video.addEventListener("ended", () => {
-      if (!state.playerViewOpen || normalizePlayerMode(state.playerMode) !== "html5") return;
-      playAdjacentVideo(1);
-    });
   }
 
   function destroyHlsPlayer() {
@@ -1824,6 +1847,7 @@
   async function abortIfStale(session) {
     if (session === state.playSession) return false;
     state.activeSliceVideoId = null;
+    detachVideoStream(getPlaybackVideo(), { hard: true });
     await stopActiveSlice();
     return true;
   }
@@ -1882,7 +1906,7 @@
     pendingPlayId = null;
     hidePlayOverlay();
     const video = getPlaybackVideo();
-    detachVideoStream(video);
+    detachVideoStream(video, { hard: true });
     resetVideoDisplay(video);
     state.activeSliceVideoId = null;
     await stopActiveSlice();
@@ -1981,6 +2005,7 @@
   }
 
   function getSavedPlaybackPosition(item) {
+    if (!resumePlaybackEnabled()) return null;
     if (!item) return null;
     const pos = Number(item.playPosition);
     const dur = Number(item.playDuration);
@@ -2003,6 +2028,7 @@
   }
 
   async function savePlaybackPosition(id, positionSec, durationSec) {
+    if (!resumePlaybackEnabled()) return;
     const pos = Number(positionSec);
     if (!id || !Number.isFinite(pos) || pos < 1) return;
     const dur = durationSec != null && Number.isFinite(durationSec) ? durationSec : null;
@@ -2056,6 +2082,13 @@
     const onEnded = () => {
       const dur = Number.isFinite(video.duration) ? video.duration : null;
       void savePlaybackPosition(id, dur || video.currentTime, dur);
+      if (
+        playlistAutoplayEnabled()
+        && state.playerViewOpen
+        && normalizePlayerMode(state.playerMode) === "html5"
+      ) {
+        playAdjacentVideo(1);
+      }
     };
     video.addEventListener("timeupdate", onTimeupdate);
     video.addEventListener("pause", onPause);
@@ -2072,12 +2105,42 @@
   }
 
   function applyPlaybackResume(video, item) {
+    if (!resumePlaybackEnabled()) return null;
     if (!video) return null;
     const target = resolveResumeStart(item, video);
     if (target <= 0) return null;
     try {
       video.currentTime = target;
     } catch (_) { /* ignore */ }
+    return target;
+  }
+
+  async function seekToSavedPosition(video, item) {
+    if (!resumePlaybackEnabled() || !video) return null;
+    const target = resolveResumeStart(item, video);
+    if (target <= 0) return null;
+    try {
+      video.currentTime = target;
+    } catch (_) {
+      return null;
+    }
+    await new Promise((resolve) => {
+      if (Math.abs(video.currentTime - target) < 0.35) {
+        resolve();
+        return;
+      }
+      let timer;
+      const onSeeked = () => {
+        clearTimeout(timer);
+        video.removeEventListener("seeked", onSeeked);
+        resolve();
+      };
+      timer = setTimeout(() => {
+        video.removeEventListener("seeked", onSeeked);
+        resolve();
+      }, 2500);
+      video.addEventListener("seeked", onSeeked, { once: true });
+    });
     return target;
   }
 
@@ -2306,12 +2369,14 @@
   async function startDirectStream(id, item, session, info) {
     destroyHlsPlayer();
     parkVideoEngine();
-    const video = getPlaybackVideo();
+    let video = getPlaybackVideo();
     if (!video) return;
     resetVideoDisplay(video);
     mountVideoToPlayer();
     openPlayerView(item);
     detachVideoStream(video);
+    video = getPlaybackVideo();
+    if (!video) return;
     video.preload = "metadata";
     const libQ = state.libraryId ? `?library_id=${encodeURIComponent(state.libraryId)}` : "";
     video.src = `/api/stream/${id}${libQ}`;
@@ -2333,10 +2398,10 @@
     });
     if (await abortIfStale(session)) return;
     updatePlayOverlay("即将播放", "正在启动播放器…", { progress: 95 });
-    const resumed = applyPlaybackResume(video, item);
+    const resumed = await seekToSavedPosition(video, item);
     if (resumed != null) setPlayerStatus(`从 ${formatPlaybackTime(resumed)} 继续播放`);
     await video.play().catch(() => {});
-    applyPlaybackResume(video, item);
+    await seekToSavedPosition(video, item);
     await waitPlaying(video, session);
     if (await abortIfStale(session)) return;
     hidePlayOverlay();
@@ -2366,7 +2431,6 @@
         hlsInstance.loadSource(url);
         hlsInstance.attachMedia(video);
         hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
-          applyPlaybackResume(video, item);
           clearTimeout(timer);
           resolve();
         });
@@ -2381,10 +2445,10 @@
       });
       if (await abortIfStale(session)) return;
       updatePlayOverlay("即将播放", "正在启动播放器…", { progress: 95 });
-      const resumed = applyPlaybackResume(video, item);
+      const resumed = await seekToSavedPosition(video, item);
       if (resumed != null) setPlayerStatus(`从 ${formatPlaybackTime(resumed)} 继续播放`);
       await video.play().catch(() => {});
-      applyPlaybackResume(video, item);
+      await seekToSavedPosition(video, item);
       await waitPlaying(video, session);
       if (await abortIfStale(session)) return;
       hidePlayOverlay();
@@ -2395,10 +2459,10 @@
       video.src = url;
       await waitCanPlay(video, session, transcode ? 180000 : 120000);
       if (await abortIfStale(session)) return;
-      const resumed = applyPlaybackResume(video, item);
+      const resumed = await seekToSavedPosition(video, item);
       if (resumed != null) setPlayerStatus(`从 ${formatPlaybackTime(resumed)} 继续播放`);
       await video.play().catch(() => {});
-      applyPlaybackResume(video, item);
+      await seekToSavedPosition(video, item);
       await waitPlaying(video, session);
       if (await abortIfStale(session)) return;
       hidePlayOverlay();
@@ -2464,22 +2528,31 @@
   async function playVideoHtml5(id, item) {
     const prevId = state.playingId;
     const prevVideo = getPlaybackVideo();
+    const session = ++state.playSession;
+    pendingPlayId = id;
+    state.playingId = id;
+
     if (prevId && prevId !== id && prevVideo && Number.isFinite(prevVideo.currentTime) && prevVideo.currentTime >= 1) {
-      await savePlaybackPosition(
+      void savePlaybackPosition(
         prevId,
         prevVideo.currentTime,
         Number.isFinite(prevVideo.duration) ? prevVideo.duration : null,
       );
     }
     unbindPlaybackProgressSaver();
+    clearTimeout(directPauseDetachTimer);
 
-    detachVideoStream(getPlaybackVideo());
+    detachVideoStream(getPlaybackVideo(), { hard: true });
     await stopActiveSlice();
 
-    const session = ++state.playSession;
-    pendingPlayId = id;
-    state.playingId = id;
     if (state.playerViewOpen) {
+      const navItem = getItemById(id) || item || { id, title: id, filename: "" };
+      $("#player-title").textContent = navItem.title || navItem.filename || id;
+      const pathEl = $("#player-path");
+      if (pathEl && navItem.path) {
+        pathEl.textContent = navItem.path;
+        pathEl.title = navItem.path;
+      }
       updatePlayerPlaylistActive();
       scrollPlaylistToActive();
       highlightPlayingCard();
@@ -2498,6 +2571,15 @@
       if (info.title) base.title = info.title;
       if (info.path) base.path = info.path;
       if (info.filename) base.filename = info.filename;
+      if (info.playPosition != null && Number(info.playPosition) > 0) {
+        applyLocalPlaybackPosition(
+          base,
+          Number(info.playPosition),
+          info.playDuration != null ? Number(info.playDuration) : null,
+        );
+        const cached = getItemById(id);
+        if (cached) applyLocalPlaybackPosition(cached, Number(info.playPosition), info.playDuration);
+      }
 
       setPlayOverlayContext(base, info);
       updatePlayOverlay(
@@ -2579,7 +2661,7 @@
   async function runVideoRemux(id, item, { batchLabel = "" } = {}) {
     const session = ++state.playSession;
     pendingPlayId = null;
-    detachVideoStream(getPlaybackVideo());
+    detachVideoStream(getPlaybackVideo(), { hard: true });
     await stopActiveSlice();
     const base = item || { id, title: id, filename: "", path: "" };
     const overlayTitle = batchLabel ? `修复视频（${batchLabel}）` : "修复视频";
@@ -2702,10 +2784,10 @@
     const saveTime = video && Number.isFinite(video.currentTime) ? video.currentTime : null;
     const saveDur = video && Number.isFinite(video.duration) ? video.duration : null;
     unbindPlaybackProgressSaver();
-    detachVideoStream(video);
+    detachVideoStream(video, { hard: true });
     state.activeSliceVideoId = null;
     await stopActiveSlice();
-    if (saveId && saveTime != null && saveTime >= 1) {
+    if (saveId && saveTime != null && saveTime >= 1 && resumePlaybackEnabled()) {
       void savePlaybackPosition(saveId, saveTime, saveDur);
     }
     state.playerViewOpen = false;
@@ -3043,11 +3125,15 @@
           hls_large_h264: $("#set-hls-large-h264")?.value === "true",
           hls_moov_end_h264: $("#set-hls-moov-end-h264")?.value === "true",
           html5_fragmented_mp4: $("#set-html5-fragmented-mp4")?.value || "external",
+          html5_playlist_autoplay: $("#set-html5-playlist-autoplay")?.value === "true",
+          html5_resume_playback: $("#set-html5-resume-playback")?.value === "true",
           history_retention_days: historyDays,
           scope: "global",
         }),
       });
       state.playerMode = document.querySelector('input[name="player-mode"]:checked')?.value || SETTINGS_DEFAULTS.player_mode;
+      state.playlistAutoplay = $("#set-html5-playlist-autoplay")?.value === "true";
+      state.resumePlayback = $("#set-html5-resume-playback")?.value === "true";
       $("#settings-dialog")?.close();
       loadProgress();
       if ($("#set-idle-scan")?.value === "true") {
@@ -3288,6 +3374,13 @@
     saveState();
     renderPlayerPlaylist(true);
   });
+  $("#player-playlist")?.addEventListener("click", (e) => {
+    const btn = e.target.closest(".player-pl-item");
+    const vid = btn?.dataset?.id;
+    if (!vid) return;
+    e.preventDefault();
+    void playVideo(vid);
+  });
   $("#btn-player-potplayer").addEventListener("click", () => {
     if (state.playingId) playVideoExternal(state.playingId);
   });
@@ -3367,7 +3460,20 @@
   document.addEventListener("click", hideCtxMenu);
 
   window.addEventListener("pagehide", () => {
-    detachVideoStream(getPlaybackVideo());
+    const video = getPlaybackVideo();
+    const id = state.playingId;
+    if (resumePlaybackEnabled() && id && video && Number.isFinite(video.currentTime) && video.currentTime >= 1) {
+      const dur = Number.isFinite(video.duration) ? video.duration : null;
+      let url = "/api/history/position";
+      if (state.libraryId) url += `?library_id=${encodeURIComponent(state.libraryId)}`;
+      fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, position_sec: video.currentTime, duration_sec: dur }),
+        keepalive: true,
+      }).catch(() => {});
+    }
+    detachVideoStream(getPlaybackVideo(), { hard: true });
     fetch("/api/play/stop", { method: "POST", keepalive: true }).catch(() => {});
   });
 
@@ -3394,7 +3500,6 @@
 
   // --- Init ---
   parkVideoEngine();
-  setupPlaylistAutoplay();
   loadState();
   syncPlaylistSortSelect();
   parseUrl();

@@ -7,7 +7,7 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -16,6 +16,7 @@ from watchdog.observers import Observer
 
 from loc_gallery.category_store import get_meta, set_order, set_sort_mode, set_starred, sort_categories
 from loc_gallery.config import HOST, PORT, POTPLAYER_CANDIDATES, POTPLAYER_PATH, VIDEO_EXTENSIONS, WEB_ROOT
+from loc_gallery.range_stream import stream_file_with_disconnect
 
 
 def _resolve_potplayer(settings: dict) -> Path:
@@ -198,6 +199,8 @@ class SettingsUpdate(BaseModel):
     hls_large_h264: bool | None = None
     hls_moov_end_h264: bool | None = None
     html5_fragmented_mp4: str | None = None
+    html5_playlist_autoplay: bool | None = None
+    html5_resume_playback: bool | None = None
     scope: str | None = None  # global | library
 
 
@@ -743,7 +746,11 @@ async def api_thumb(video_id: str, library_id: str = Depends(resolve_library_id)
 
 
 @app.get("/api/stream/{video_id}")
-async def api_stream(video_id: str, library_id: str = Depends(resolve_library_id)):
+async def api_stream(
+    request: Request,
+    video_id: str,
+    library_id: str = Depends(resolve_library_id),
+):
     item = get_by_id(library_id, video_id)
     if not item:
         raise HTTPException(404, "视频不存在")
@@ -753,7 +760,11 @@ async def api_stream(video_id: str, library_id: str = Depends(resolve_library_id
     media_type, _ = mimetypes.guess_type(str(path))
     if not media_type or not media_type.startswith("video/"):
         media_type = "application/octet-stream"
-    return FileResponse(path, media_type=media_type, filename=path.name)
+    return await stream_file_with_disconnect(
+        request,
+        path,
+        media_type=media_type,
+    )
 
 
 @app.get("/api/play/info/{video_id}")
@@ -763,12 +774,16 @@ async def api_play_info(video_id: str, library_id: str = Depends(resolve_library
         raise HTTPException(404, "视频不存在")
     plan = get_playback_plan(Path(item.path))
     remuxable, remux_reason = can_remux_video(library_id, video_id)
+    hist = get_history_entry(library_id, video_id) or {}
     return {
         "id": video_id,
         "title": item.title,
         "path": item.path,
+        "filename": item.filename,
         "remuxable": remuxable,
         "remux_reason": remux_reason,
+        "playPosition": hist.get("position_sec"),
+        "playDuration": hist.get("duration_sec"),
         **plan,
     }
 

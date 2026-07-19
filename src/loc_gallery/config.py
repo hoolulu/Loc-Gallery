@@ -26,6 +26,8 @@ HLS_LARGE_H264 = False  # 大文件 H.264 是否强制 HLS（HTML5）
 HLS_MOOV_END_H264 = False  # 索引在末尾的 H.264 是否强制 HLS（HTML5）
 # 碎片化 MP4：external=本地播放器（省磁盘），hls=边切边播
 HTML5_FRAGMENTED_MP4 = "external"
+HTML5_PLAYLIST_AUTOPLAY = True  # HTML5 播放页列表播完是否自动下一集
+HTML5_RESUME_PLAYBACK = True  # HTML5 是否记忆播放位置并续播
 
 PORT = 3456
 HOST = "127.0.0.1"
