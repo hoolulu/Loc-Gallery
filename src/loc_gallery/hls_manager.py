@@ -419,6 +419,7 @@ def _start_ffmpeg(
             "-f", "hls",
             "-hls_time", str(HLS_SEGMENT_SECONDS),
             "-hls_list_size", "0",
+            "-hls_playlist_type", "event",
             "-hls_flags", "independent_segments+temp_file",
             "-hls_segment_filename", segment_pattern,
             str(playlist),
@@ -443,6 +444,7 @@ def _start_ffmpeg(
             "-f", "hls",
             "-hls_time", str(HLS_SEGMENT_SECONDS),
             "-hls_list_size", "0",
+            "-hls_playlist_type", "event",
             "-hls_flags", "independent_segments+temp_file",
             "-hls_segment_filename", segment_pattern,
             str(playlist),
@@ -461,6 +463,7 @@ def _start_ffmpeg(
             "-f", "hls",
             "-hls_time", str(HLS_SEGMENT_SECONDS),
             "-hls_list_size", "0",
+            "-hls_playlist_type", "event",
             "-hls_flags", "independent_segments+temp_file",
             "-hls_segment_filename", segment_pattern,
             str(playlist),
@@ -558,6 +561,26 @@ def prepare(
             input_format=input_format,
             input_offset=input_offset,
         )
+
+
+def normalize_playlist_m3u8(text: str) -> str:
+    """边切边播清单无 ENDLIST 时，部分播放器会当作直播并从末尾起播。"""
+    normalized = text.replace("\r\n", "\n").strip()
+    if not normalized:
+        return text
+    lines = normalized.split("\n")
+    if lines[0].strip() != "#EXTM3U":
+        return text
+    rest = lines[1:]
+    has_endlist = any(line.strip() == "#EXT-X-ENDLIST" for line in rest)
+    if has_endlist:
+        return normalized + "\n"
+    inject: list[str] = []
+    if not any(line.strip().startswith("#EXT-X-PLAYLIST-TYPE") for line in rest):
+        inject.append("#EXT-X-PLAYLIST-TYPE:EVENT")
+    if not any(line.strip().startswith("#EXT-X-START") for line in rest):
+        inject.append("#EXT-X-START:TIME-OFFSET=0")
+    return "\n".join([lines[0], *inject, *rest]) + "\n"
 
 
 def resolve_hls_file(video_id: str, filename: str) -> Path | None:

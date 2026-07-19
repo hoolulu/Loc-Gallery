@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Loc Gallery</title>
   <link rel="stylesheet" href="/static/tailwind.css?v=1">
-  <link rel="stylesheet" href="/static/style.css?v=50">
+  <link rel="stylesheet" href="/static/style.css?v=51">
 </head>
 <body class="flex h-full flex-col overflow-hidden bg-surface text-zinc-100 antialiased">
 
@@ -133,6 +133,7 @@
               <p id="player-status" class="player-status hidden text-xs text-amber-400/90"></p>
             </div>
             <div class="flex gap-2">
+              <button type="button" id="btn-player-favorite" class="ui-btn sm player-fav-btn rounded px-2 py-1 text-xs" aria-pressed="false" title="加入收藏">♡ 收藏</button>
               <button type="button" id="btn-player-prev" class="ui-btn sm rounded px-2 py-1 text-xs">上一个</button>
               <button type="button" id="btn-player-next" class="ui-btn sm rounded px-2 py-1 text-xs">下一个</button>
               <button type="button" id="btn-player-potplayer" class="ui-btn sm rounded px-2 py-1 text-xs">PotPlayer</button>
@@ -366,6 +367,6 @@
   </dialog>
 
   <script src="/static/vendor/hls.min.js"></script>
-  <script src="/static/app.js?v=60"></script>
+  <script src="/static/app.js?v=62"></script>
 </body>
 </html>

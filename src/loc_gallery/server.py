@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from watchdog.events import FileSystemEventHandler
@@ -740,11 +740,14 @@ async def api_hls_file(video_id: str, filename: str, library_id: str = Depends(r
     if not path:
         raise HTTPException(404, "HLS 文件不存在")
     media = "application/vnd.apple.mpegurl" if filename.endswith(".m3u8") else "video/mp2t"
-    return FileResponse(
-        path,
-        media_type=media,
-        headers={"Cache-Control": "no-store"},
-    )
+    headers = {"Cache-Control": "no-store"}
+    if filename.endswith(".m3u8"):
+        try:
+            body = hls_manager.normalize_playlist_m3u8(path.read_text(encoding="utf-8"))
+        except OSError:
+            raise HTTPException(404, "HLS 文件不存在") from None
+        return Response(content=body, media_type=media, headers=headers)
+    return FileResponse(path, media_type=media, headers=headers)
 
 
 @app.post("/api/play/{video_id}")

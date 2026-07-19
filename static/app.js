@@ -974,6 +974,19 @@
     });
   }
 
+  function updatePlayerFavoriteButton(itemOrId) {
+    const btn = $("#btn-player-favorite");
+    if (!btn) return;
+    const id = typeof itemOrId === "string" ? itemOrId : itemOrId?.id;
+    const item = typeof itemOrId === "object" && itemOrId ? itemOrId : (id ? getItemById(id) : null);
+    const favorited = !!item?.favorited;
+    btn.classList.toggle("on", favorited);
+    btn.textContent = favorited ? "♥ 已收藏" : "♡ 收藏";
+    btn.title = favorited ? "取消收藏" : "加入收藏";
+    btn.setAttribute("aria-label", favorited ? "取消收藏" : "加入收藏");
+    btn.setAttribute("aria-pressed", favorited ? "true" : "false");
+  }
+
   async function toggleFavorite(id) {
     try {
       const r = await api("/api/favorites/toggle", {
@@ -988,6 +1001,9 @@
       }
       const card = document.querySelector(`.card[data-id="${CSS.escape(id)}"]`);
       if (card) updateCardFavorite(card, item || { id, favorited: r.favorited });
+      if (state.playerViewOpen && state.playingId === id) {
+        updatePlayerFavoriteButton(item || { id, favorited: r.favorited });
+      }
       if (state.viewMode === "favorites" && !r.favorited) {
         await loadVideos({ forceRebuild: true });
       }
@@ -1710,6 +1726,13 @@
     hidePlayOverlay();
   }
 
+  function seekVideoToStart(video) {
+    if (!video) return;
+    try {
+      if (video.currentTime > 0.05) video.currentTime = 0;
+    } catch (_) { /* ignore */ }
+  }
+
   function getPlaybackVideo() {
     return $("#html5-player");
   }
@@ -1812,6 +1835,7 @@
     }
     renderPlayerPlaylist();
     highlightPlayingCard();
+    updatePlayerFavoriteButton(item);
   }
 
   function resetVideoDisplay(video) {
@@ -1940,7 +1964,9 @@
     });
     if (session !== state.playSession) return;
     updatePlayOverlay("即将播放", "正在启动播放器…", { progress: 95 });
+    seekVideoToStart(video);
     await video.play().catch(() => {});
+    seekVideoToStart(video);
     await waitPlaying(video, session);
     if (session !== state.playSession) return;
     hidePlayOverlay();
@@ -1965,10 +1991,11 @@
     if (window.Hls && Hls.isSupported()) {
       await new Promise((resolve, reject) => {
         let timer = setTimeout(() => reject(new Error("HLS 清单加载超时，请重试或改用 PotPlayer")), 45000);
-        hlsInstance = new Hls({ enableWorker: true });
+        hlsInstance = new Hls({ enableWorker: true, startPosition: 0 });
         hlsInstance.loadSource(url);
         hlsInstance.attachMedia(video);
         hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+          seekVideoToStart(video);
           clearTimeout(timer);
           resolve();
         });
@@ -1983,7 +2010,9 @@
       });
       if (session !== state.playSession) return;
       updatePlayOverlay("即将播放", "正在启动播放器…", { progress: 95 });
+      seekVideoToStart(video);
       await video.play().catch(() => {});
+      seekVideoToStart(video);
       await waitPlaying(video, session);
       if (session !== state.playSession) return;
       hidePlayOverlay();
@@ -1994,7 +2023,9 @@
       video.src = url;
       await waitCanPlay(video, session, transcode ? 180000 : 120000);
       if (session !== state.playSession) return;
+      seekVideoToStart(video);
       await video.play().catch(() => {});
+      seekVideoToStart(video);
       await waitPlaying(video, session);
       if (session !== state.playSession) return;
       hidePlayOverlay();
@@ -2678,6 +2709,9 @@
   });
 
   $("#btn-player-back").addEventListener("click", hideHtml5Player);
+  $("#btn-player-favorite")?.addEventListener("click", () => {
+    if (state.playingId) toggleFavorite(state.playingId);
+  });
   $("#play-overlay-close")?.addEventListener("click", cancelPlayback);
   $("#play-overlay-potplayer")?.addEventListener("click", async () => {
     const id = pendingPlayId;

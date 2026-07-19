@@ -513,6 +513,16 @@ html {
   border-color: rgba(229, 9, 20, 0.5);
 }
 
+.player-fav-btn.on {
+  color: #e50914;
+  border-color: rgba(229, 9, 20, 0.45);
+}
+
+.player-fav-btn.on:hover {
+  color: #ff4455;
+  border-color: rgba(255, 68, 85, 0.55);
+}
+
 #gallery-view,
 #player-playlist,
 #failed-list,
