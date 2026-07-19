@@ -68,7 +68,13 @@ from loc_gallery.history_store import (
     save_position,
 )
 from loc_gallery import hls_manager
-from loc_gallery.media_probe import get_playback_plan, schedule_probe_for_ids
+from loc_gallery.media_probe import (
+    get_format_badge,
+    get_format_badges,
+    get_playback_plan,
+    schedule_probe_for_ids,
+)
+from loc_gallery.remux_manager import can_remux_video, get_status as remux_status, start_remux
 from loc_gallery.library_context import set_thread_library
 from loc_gallery.library_store import (
     add_library,
@@ -189,6 +195,9 @@ class SettingsUpdate(BaseModel):
     potplayer_path: str | None = None
     player_mode: str | None = None
     history_retention_days: int | None = None
+    hls_large_h264: bool | None = None
+    hls_moov_end_h264: bool | None = None
+    html5_fragmented_mp4: str | None = None
     scope: str | None = None  # global | library
 
 
@@ -350,6 +359,7 @@ def _video_to_dict(library_id: str, v) -> dict:
         "playCount": hist.get("play_count") if hist else None,
         "playPosition": hist.get("position_sec") if hist else None,
         "playDuration": hist.get("duration_sec") if hist else None,
+        "formatBadge": get_format_badge(Path(v.path)),
     }
 
 
@@ -583,6 +593,8 @@ async def api_videos(
         page_items = items[start:start + page_size]
         effective_size = page_size
 
+    schedule_probe_for_ids([v.id for v in page_items[:64]], library_id)
+
     return {
         "items": [_video_to_dict(library_id, v) for v in page_items],
         "total": total,
@@ -592,6 +604,25 @@ async def api_videos(
         "view": "favorites" if favorites else ("history" if history else "browse"),
         "library_id": library_id,
     }
+
+
+@app.get("/api/play/badges")
+async def api_play_badges(
+    ids: str = "",
+    library_id: str = Depends(resolve_library_id),
+):
+    """批量读取已缓存的格式角标（不触发分析）。"""
+    id_list = [x.strip() for x in ids.split(",") if x.strip()]
+    paths: dict[str, Path] = {}
+    for vid in id_list[:128]:
+        item = get_by_id(library_id, vid)
+        if item:
+            paths[vid] = Path(item.path)
+    badges = get_format_badges(paths)
+    missing = [vid for vid in id_list if vid not in badges]
+    if missing:
+        schedule_probe_for_ids(missing[:64], library_id)
+    return {"badges": badges}
 
 
 @app.get("/api/videos/{video_id}")
@@ -731,7 +762,21 @@ async def api_play_info(video_id: str, library_id: str = Depends(resolve_library
     if not item:
         raise HTTPException(404, "视频不存在")
     plan = get_playback_plan(Path(item.path))
-    return {"id": video_id, "title": item.title, "path": item.path, **plan}
+    remuxable, _ = can_remux_video(library_id, video_id)
+    return {"id": video_id, "title": item.title, "path": item.path, "remuxable": remuxable, **plan}
+
+
+@app.post("/api/videos/{video_id}/remux")
+async def api_video_remux_start(video_id: str, library_id: str = Depends(resolve_library_id)):
+    result = start_remux(library_id, video_id)
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error") or "无法开始修复")
+    return result
+
+
+@app.get("/api/videos/{video_id}/remux")
+async def api_video_remux_status(video_id: str, library_id: str = Depends(resolve_library_id)):
+    return remux_status(library_id, video_id)
 
 
 @app.post("/api/play/prepare/{video_id}")

@@ -27,6 +27,8 @@
     failedItems: [],
     playSession: 0,
     activeSliceVideoId: null,
+    directStreamVideoId: null,
+    directStreamPausedAt: null,
     viewMode: "browse",
     libraryId: "",
     libraries: [],
@@ -41,6 +43,141 @@
   let versionDebounceTimer = null;
   let lastLibraryVersion = "";
   let hlsInstance = null;
+  let directPauseDetachTimer = null;
+
+  function captureVideoFrame(video) {
+    if (!video || video.videoWidth <= 0 || video.videoHeight <= 0) return null;
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return null;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL("image/jpeg", 0.82);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async function resumeDirectStream(video, id) {
+    if (!video || video._resumingStream) return;
+    const resume = state.directStreamPausedAt;
+    if (!resume || resume.id !== id) return;
+    video._resumingStream = true;
+    try {
+      setPlayerStatus("正在恢复播放…");
+      const libQ = state.libraryId ? `?library_id=${encodeURIComponent(state.libraryId)}` : "";
+      video.preload = "metadata";
+      video.src = `/api/stream/${id}${libQ}`;
+      await new Promise((resolve, reject) => {
+        const cleanup = () => {
+          video.removeEventListener("loadeddata", onReady);
+          video.removeEventListener("error", onErr);
+        };
+        const onReady = () => { cleanup(); resolve(); };
+        const onErr = () => { cleanup(); reject(new Error("加载失败")); };
+        video.addEventListener("loadeddata", onReady, { once: true });
+        video.addEventListener("error", onErr, { once: true });
+      });
+      if (resume.time > 0) {
+        video.currentTime = resume.time;
+        await new Promise((resolve) => {
+          if (video.readyState >= 2) {
+            resolve();
+            return;
+          }
+          video.addEventListener("seeked", () => resolve(), { once: true });
+          setTimeout(resolve, 800);
+        });
+      }
+      video.removeAttribute("poster");
+      state.directStreamPausedAt = null;
+      state.directStreamVideoId = id;
+      const resumed = resume.time >= 1 ? `从 ${formatPlaybackTime(resume.time)} 继续` : "";
+      setPlayerStatus(resumed);
+      await video.play();
+    } catch (_) {
+      setPlayerStatus("恢复播放失败，请再点一次播放");
+      if (resume.poster) video.poster = resume.poster;
+    } finally {
+      video._resumingStream = false;
+    }
+  }
+
+  function unbindDirectStreamLifecycle(video) {
+    if (!video?._directStreamHandlers) return;
+    const { onPause, onPlay, onClick } = video._directStreamHandlers;
+    clearTimeout(directPauseDetachTimer);
+    video.removeEventListener("pause", onPause);
+    video.removeEventListener("play", onPlay);
+    video.removeEventListener("click", onClick);
+    delete video._directStreamHandlers;
+  }
+
+  function bindDirectStreamLifecycle(video, id) {
+    unbindDirectStreamLifecycle(video);
+    if (!video || !id) return;
+
+    const onPause = () => {
+      if (state.activeSliceVideoId) return;
+      if (state.directStreamVideoId !== id) return;
+      clearTimeout(directPauseDetachTimer);
+      directPauseDetachTimer = setTimeout(() => {
+        if (!video.paused || state.directStreamVideoId !== id) return;
+        const poster = captureVideoFrame(video);
+        state.directStreamPausedAt = {
+          id,
+          time: video.currentTime,
+          duration: Number.isFinite(video.duration) ? video.duration : null,
+          poster,
+        };
+        if (poster) video.poster = poster;
+        video.preload = "none";
+        video.removeAttribute("src");
+        video.src = "";
+        video.load();
+        state.directStreamVideoId = null;
+        setPlayerStatus("已暂停（已停止读盘，点播放继续）");
+      }, 600);
+    };
+
+    const onPlay = () => {
+      clearTimeout(directPauseDetachTimer);
+      if (state.directStreamPausedAt?.id === id) {
+        void resumeDirectStream(video, id);
+      }
+    };
+
+    const onClick = () => {
+      if (state.directStreamPausedAt?.id === id && video.paused) {
+        void resumeDirectStream(video, id);
+      }
+    };
+
+    video.addEventListener("pause", onPause);
+    video.addEventListener("play", onPlay);
+    video.addEventListener("click", onClick);
+    video._directStreamHandlers = { onPause, onPlay, onClick };
+  }
+
+  /** 立刻断开浏览器视频拉流，停止 Range 请求与后台缓冲 */
+  function detachVideoStream(video) {
+    if (!video) return;
+    clearTimeout(directPauseDetachTimer);
+    unbindDirectStreamLifecycle(video);
+    unbindSlicePauseResume(video);
+    destroyHlsPlayer();
+    state.directStreamVideoId = null;
+    state.directStreamPausedAt = null;
+    video.pause();
+    try { video.preload = "none"; } catch (_) { /* ignore */ }
+    video.removeAttribute("poster");
+    video.removeAttribute("src");
+    video.src = "";
+    [...video.querySelectorAll("source")].forEach(el => el.remove());
+    video.load();
+  }
 
   function loadState() {
     try {
@@ -258,6 +395,9 @@
     default_page_size: 32,
     potplayer_path: "",
     history_retention_days: 180,
+    hls_large_h264: false,
+    hls_moov_end_h264: false,
+    html5_fragmented_mp4: "external",
   };
 
   function fillSettingsForm(raw) {
@@ -275,6 +415,9 @@
     setVal("set-page-size", String(s.default_page_size ?? 32));
     setVal("set-potplayer", s.potplayer_path || "");
     setVal("set-history-days", s.history_retention_days ?? 180);
+    setVal("set-hls-large-h264", String(!!s.hls_large_h264));
+    setVal("set-hls-moov-end-h264", String(!!s.hls_moov_end_h264));
+    setVal("set-html5-fragmented-mp4", s.html5_fragmented_mp4 || "external");
     document.querySelectorAll('input[name="player-mode"]').forEach(r => {
       r.checked = r.value === state.playerMode;
     });
@@ -896,25 +1039,76 @@
     });
   }
 
+  function thumbFormatBadgeHtml(v) {
+    if (v.formatBadge !== "non_standard") return "";
+    return '<span class="thumb-format-badge" title="非标准格式（碎片化/伪装），HTML5 建议用 PotPlayer">非标准</span>';
+  }
+
   function renderThumbHtml(v) {
+    const badge = thumbFormatBadgeHtml(v);
     if (v.thumbReady) {
       const bust = thumbCacheKey(v);
-      return `<img src="${libThumbUrl(v.id, bust)}" alt="${esc(v.title)}" loading="lazy">`;
+      return `<img src="${libThumbUrl(v.id, bust)}" alt="${esc(v.title)}" loading="lazy">${badge}`;
     }
     if (v.thumbStatus === "failed") {
       const hint = v.thumbError || "缩略图失败";
       let label = "缩略图失败";
       if (hint.includes("图片")) label = "非视频文件";
       else if (hint.includes("分辨率")) label = "占位文件";
-      return `<div class="thumb-placeholder failed" title="${esc(hint)}">${esc(label)}</div>`;
+      return `<div class="thumb-placeholder failed" title="${esc(hint)}">${esc(label)}</div>${badge}`;
     }
     if (v.thumbStatus === "generating") {
-      return `<div class="thumb-placeholder">生成中...</div>`;
+      return `<div class="thumb-placeholder">生成中...</div>${badge}`;
     }
     if (v.thumbStatus === "queued") {
-      return `<div class="thumb-placeholder">排队中...</div>`;
+      return `<div class="thumb-placeholder">排队中...</div>${badge}`;
     }
-    return `<div class="thumb-placeholder">等待中...</div>`;
+    return `<div class="thumb-placeholder">等待中...</div>${badge}`;
+  }
+
+  let formatBadgePollTimer = null;
+
+  function patchGridFormatBadges() {
+    state.pageItems.forEach(v => {
+      const wrap = document.getElementById(`thumb-${v.id}`);
+      if (!wrap) return;
+      let badge = wrap.querySelector(".thumb-format-badge");
+      if (v.formatBadge === "non_standard") {
+        if (!badge) wrap.insertAdjacentHTML("beforeend", thumbFormatBadgeHtml(v));
+      } else if (badge) {
+        badge.remove();
+      }
+    });
+  }
+
+  function scheduleFormatBadgePoll() {
+    clearTimeout(formatBadgePollTimer);
+    let left = 8;
+    const tick = async () => {
+      const need = state.pageItems
+        .filter(v => !v.formatBadge && /\.(mp4|m4v|mov)$/i.test(v.filename || v.title || ""))
+        .map(v => v.id);
+      if (!need.length || left <= 0) return;
+      left -= 1;
+      try {
+        const data = await api(`/api/play/badges?ids=${need.join(",")}`);
+        let changed = false;
+        Object.entries(data.badges || {}).forEach(([id, badge]) => {
+          const item = state.pageItems.find(v => v.id === id);
+          if (item && item.formatBadge !== badge) {
+            item.formatBadge = badge;
+            changed = true;
+          }
+        });
+        if (changed) patchGridFormatBadges();
+        if (need.some(id => !(data.badges || {})[id]) && left > 0) {
+          formatBadgePollTimer = setTimeout(tick, 2500);
+        }
+      } catch (_) {
+        if (left > 0) formatBadgePollTimer = setTimeout(tick, 2500);
+      }
+    };
+    formatBadgePollTimer = setTimeout(tick, 1500);
   }
 
   function bindThumbImgError(img, v) {
@@ -1122,7 +1316,7 @@
   }
 
   async function loadVideos({ forceRebuild = false } = {}) {
-    if (state.playerViewOpen) hideHtml5Player();
+    if (state.playerViewOpen) await hideHtml5Player();
     const params = buildVideosParams();
 
     let data;
@@ -1168,6 +1362,7 @@
       updatePageSelectAll();
       renderPlayerPlaylist();
       highlightPlayingCard();
+      scheduleFormatBadgePoll();
       return;
     }
 
@@ -1212,6 +1407,7 @@
     updatePageSelectAll();
     renderPlayerPlaylist();
     highlightPlayingCard();
+    scheduleFormatBadgePoll();
   }
 
   function updateUrl() {
@@ -1370,7 +1566,7 @@
     const item = state.failedItems.find(i => i.id === id);
     if (!item) return;
     $("#failed-dialog")?.close();
-    hideHtml5Player();
+    await hideHtml5Player();
     state.category = item.category || "";
     state.folder = item.subfolder || "";
     state.query = item.filename || "";
@@ -1608,9 +1804,16 @@
     }
   }
 
+  /** 会话已失效时停止切片并返回 true */
+  async function abortIfStale(session) {
+    if (session === state.playSession) return false;
+    state.activeSliceVideoId = null;
+    await stopActiveSlice();
+    return true;
+  }
+
   /** 立即停止服务端 HLS 切片/转码进程（保留磁盘缓存） */
   async function stopActiveSlice() {
-    unbindSlicePauseResume(getPlaybackVideo());
     destroyHlsPlayer();
     state.activeSliceVideoId = null;
     try {
@@ -1658,19 +1861,14 @@
   let playOverlayStarted = 0;
   let pendingPlayId = null;
 
-  function cancelPlayback() {
+  async function cancelPlayback() {
     state.playSession += 1;
     pendingPlayId = null;
     hidePlayOverlay();
-    parkVideoEngine();
     const video = getPlaybackVideo();
+    detachVideoStream(video);
     resetVideoDisplay(video);
-    if (video) {
-      video.pause();
-      video.removeAttribute("src");
-      video.load();
-    }
-    stopActiveSlice();
+    await stopActiveSlice();
     if (state.playerViewOpen) {
       state.playerViewOpen = false;
       $("#player-view")?.classList.add("hidden");
@@ -1897,7 +2095,10 @@
       const mins = info.structure?.duration_sec
         ? ` · 约 ${Math.round(info.structure.duration_sec / 60)} 分钟`
         : "";
-      return { text: `伪装格式 · 切片播放${mins}`, cls: "fmt-disguised" };
+      return { text: `伪装格式${mins}`, cls: "fmt-disguised" };
+    }
+    if (info.mode === "external") {
+      return { text: `非标准 MP4${codec ? ` · ${codec}` : ""}`, cls: "fmt-fragmented" };
     }
     if (info.mode === "hls" && info.transcode) {
       return { text: `转码播放${codec ? ` · ${codec}` : ""}`, cls: "fmt-transcode" };
@@ -1984,6 +2185,9 @@
     if (video) bindPlaybackProgressSaver(video, item.id);
     if (video && state.activeSliceVideoId === item.id) {
       bindSlicePauseResume(video, item.id);
+    } else if (video) {
+      state.directStreamVideoId = item.id;
+      bindDirectStreamLifecycle(video, item.id);
     }
   }
 
@@ -2083,30 +2287,34 @@
     resetVideoDisplay(video);
     mountVideoToPlayer();
     openPlayerView(item);
-    video.removeAttribute("src");
-    video.load();
+    detachVideoStream(video);
+    video.preload = "metadata";
     const libQ = state.libraryId ? `?library_id=${encodeURIComponent(state.libraryId)}` : "";
     video.src = `/api/stream/${id}${libQ}`;
     const moovEnd = info?.structure?.kind === "moov_end";
-    const sizeHint = info?.structure?.size_bytes ? formatSize(info.structure.size_bytes) : "";
+    const sizeBytes = info?.structure?.size_bytes || 0;
+    const sizeHint = sizeBytes ? formatSize(sizeBytes) : "";
+    const largeHint = sizeBytes >= 300 * 1024 * 1024
+      ? " · 大文件 HTML5 会持续读盘，建议用 PotPlayer"
+      : "";
     updatePlayOverlay(
       "加载视频",
       moovEnd
-        ? `索引在文件末尾${sizeHint ? `（${sizeHint}）` : ""}，正在拉取…`
-        : `正在缓冲${sizeHint ? `（${sizeHint}）` : ""}…`,
+        ? `索引在文件末尾${sizeHint ? `（${sizeHint}）` : ""}，正在拉取…${largeHint}`
+        : `正在缓冲${sizeHint ? `（${sizeHint}）` : ""}…${largeHint}`,
       { indeterminate: true },
     );
     await waitCanPlay(video, session, moovEnd ? 180000 : 90000, (ratio) => {
       updatePlayOverlay(null, `已缓冲 ${Math.round(ratio * 100)}%`, { progress: ratio * 100 });
     });
-    if (session !== state.playSession) return;
+    if (await abortIfStale(session)) return;
     updatePlayOverlay("即将播放", "正在启动播放器…", { progress: 95 });
     const resumed = applyPlaybackResume(video, item);
     if (resumed != null) setPlayerStatus(`从 ${formatPlaybackTime(resumed)} 继续播放`);
     await video.play().catch(() => {});
     applyPlaybackResume(video, item);
     await waitPlaying(video, session);
-    if (session !== state.playSession) return;
+    if (await abortIfStale(session)) return;
     hidePlayOverlay();
     revealPlayerView(item, video);
   }
@@ -2147,14 +2355,14 @@
       await waitCanPlay(video, session, transcode ? 180000 : 120000, (ratio) => {
         updatePlayOverlay(null, `已缓冲 ${Math.round(ratio * 100)}%`, { progress: ratio * 100 });
       });
-      if (session !== state.playSession) return;
+      if (await abortIfStale(session)) return;
       updatePlayOverlay("即将播放", "正在启动播放器…", { progress: 95 });
       const resumed = applyPlaybackResume(video, item);
       if (resumed != null) setPlayerStatus(`从 ${formatPlaybackTime(resumed)} 继续播放`);
       await video.play().catch(() => {});
       applyPlaybackResume(video, item);
       await waitPlaying(video, session);
-      if (session !== state.playSession) return;
+      if (await abortIfStale(session)) return;
       hidePlayOverlay();
       revealPlayerView(item, video);
       return;
@@ -2162,13 +2370,13 @@
     if (video.canPlayType("application/vnd.apple.mpegurl")) {
       video.src = url;
       await waitCanPlay(video, session, transcode ? 180000 : 120000);
-      if (session !== state.playSession) return;
+      if (await abortIfStale(session)) return;
       const resumed = applyPlaybackResume(video, item);
       if (resumed != null) setPlayerStatus(`从 ${formatPlaybackTime(resumed)} 继续播放`);
       await video.play().catch(() => {});
       applyPlaybackResume(video, item);
       await waitPlaying(video, session);
-      if (session !== state.playSession) return;
+      if (await abortIfStale(session)) return;
       hidePlayOverlay();
       revealPlayerView(item, video);
       return;
@@ -2181,7 +2389,7 @@
     const start = Date.now();
     let lastSeg = 0;
     while (Date.now() - start < limitSec * 1000) {
-      if (session !== state.playSession) throw new Error("已切换视频");
+      if (await abortIfStale(session)) throw new Error("已切换视频");
       const st = await api(`/api/play/status/${id}`);
       if (st.ready) {
         updatePlayOverlay(transcode ? "转码完成" : "切片就绪", "即将加载播放器…", { progress: 100 });
@@ -2216,6 +2424,9 @@
     }
     unbindPlaybackProgressSaver();
 
+    detachVideoStream(getPlaybackVideo());
+    await stopActiveSlice();
+
     const session = ++state.playSession;
     pendingPlayId = id;
     state.playingId = id;
@@ -2225,9 +2436,6 @@
       highlightPlayingCard();
     }
 
-    // 切换视频时立刻停掉上一路的 ffmpeg，避免在检测格式期间旧进程仍在读写磁盘
-    await stopActiveSlice();
-
     const base = item || { id, title: id, filename: "", path: "" };
     parkVideoEngine();
     hidePlayerPreparing();
@@ -2235,9 +2443,9 @@
     showPlayOverlay("检测兼容性", "正在分析视频格式…", { indeterminate: true, item: base });
 
     try {
-      if (session !== state.playSession) return;
+      if (await abortIfStale(session)) return;
       const info = await api(`/api/play/info/${id}`);
-      if (session !== state.playSession) return;
+      if (await abortIfStale(session)) return;
       if (info.title) base.title = info.title;
       if (info.path) base.path = info.path;
       if (info.filename) base.filename = info.filename;
@@ -2257,6 +2465,11 @@
         return;
       }
 
+      if (info.mode === "external") {
+        await handleNonStandardPlayback(id, base, info);
+        return;
+      }
+
       if (info.mode === "hls") {
         const transcode = !!info.transcode;
         state.activeSliceVideoId = id;
@@ -2266,7 +2479,7 @@
           { indeterminate: true, item: base, info },
         );
         const prep = await api(`/api/play/prepare/${id}`, { method: "POST" });
-        if (session !== state.playSession) return;
+        if (await abortIfStale(session)) return;
         if (prep.error && prep.state === "error") throw new Error(prep.error);
         if (prep.cached) {
           updatePlayOverlay("使用缓存", "跳过转码，直接加载…", { progress: 80 });
@@ -2278,14 +2491,14 @@
           );
           await waitHlsReady(id, session, 180, transcode);
         }
-        if (session !== state.playSession) return;
+        if (await abortIfStale(session)) return;
         await startHlsStream(id, base, session, transcode);
         return;
       }
 
       await startDirectStream(id, base, session, info);
     } catch (err) {
-      if (session !== state.playSession || err.message === "已切换视频") return;
+      if (await abortIfStale(session)) return;
       pendingPlayId = null;
       hidePlayOverlay();
       parkVideoEngine();
@@ -2294,9 +2507,96 @@
       if (confirm(`播放失败: ${msg}\n\n是否用 PotPlayer 打开？`)) {
         await playVideoExternal(id);
       } else {
-        hideHtml5Player();
+        void hideHtml5Player();
       }
     }
+  }
+
+  let nonStandardResolve = null;
+
+  function showNonStandardDialog({ reason, remuxable = false } = {}) {
+    return new Promise((resolve) => {
+      const dlg = $("#nonstandard-dialog");
+      if (!dlg) {
+        resolve(remuxable ? "remux" : "potplayer");
+        return;
+      }
+      nonStandardResolve = resolve;
+      const msg = $("#nonstandard-dialog-msg");
+      if (msg) msg.textContent = reason || "该视频为非标准格式。";
+      $("#nonstandard-btn-remux")?.classList.toggle("hidden", !remuxable);
+      dlg.showModal();
+    });
+  }
+
+  function resolveNonStandardDialog(choice) {
+    const dlg = $("#nonstandard-dialog");
+    dlg?.close();
+    if (nonStandardResolve) {
+      nonStandardResolve(choice);
+      nonStandardResolve = null;
+    }
+  }
+
+  async function runVideoRemux(id, item) {
+    const session = ++state.playSession;
+    const base = item || { id, title: id, filename: "", path: "" };
+    showPlayOverlay("修复视频", "正在启动重封装…", { indeterminate: true, item: base });
+    try {
+      const start = await api(`/api/videos/${id}/remux`, { method: "POST" });
+      if (!start.ok) throw new Error(start.error || "无法开始修复");
+      while (true) {
+        if (session !== state.playSession) return;
+        const st = await api(`/api/videos/${id}/remux`);
+        if (st.state === "queued" || st.state === "running") {
+          updatePlayOverlay(
+            "正在修复",
+            st.message || "重封装中（流复制，不重新编码）…",
+            {
+              progress: st.progress_pct > 0 ? st.progress_pct : null,
+              indeterminate: !st.progress_pct || st.progress_pct <= 0,
+              item: base,
+            },
+          );
+        }
+        if (st.state === "done") {
+          hidePlayOverlay();
+          alert(
+            `修复完成！\n\n原文件已备份为：${st.backup_name || "（同目录 .bak）"}\n现在为标准 MP4，可直接 HTML5 播放。`,
+          );
+          await loadVideos({ forceRebuild: true });
+          if ((state.playerMode || SETTINGS_DEFAULTS.player_mode) === "html5") {
+            const fresh = getItemById(id) || base;
+            await playVideoHtml5(id, fresh);
+          }
+          return;
+        }
+        if (st.state === "error") {
+          hidePlayOverlay();
+          alert(`修复失败：${st.error || "未知错误"}`);
+          return;
+        }
+        if (st.state === "idle") {
+          hidePlayOverlay();
+          return;
+        }
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    } catch (err) {
+      if (session !== state.playSession) return;
+      hidePlayOverlay();
+      alert(`修复失败：${err.message || "未知错误"}`);
+    }
+  }
+
+  async function handleNonStandardPlayback(id, base, info) {
+    hidePlayOverlay();
+    const choice = await showNonStandardDialog({
+      reason: info.reason,
+      remuxable: !!info.remuxable,
+    });
+    if (choice === "potplayer") await playVideoExternal(id);
+    else if (choice === "remux") await runVideoRemux(id, base);
   }
 
   function prepTitle(transcode, prep) {
@@ -2309,7 +2609,7 @@
     playVideoHtml5(item.id, item);
   }
 
-  function hideHtml5Player() {
+  async function hideHtml5Player() {
     state.playSession += 1;
     hidePlayOverlay();
     const video = getPlaybackVideo();
@@ -2321,7 +2621,8 @@
       );
     }
     unbindPlaybackProgressSaver();
-    stopActiveSlice();
+    detachVideoStream(video);
+    await stopActiveSlice();
     state.playerViewOpen = false;
     hidePlayerPreparing();
     resetVideoDisplay(video);
@@ -2330,11 +2631,6 @@
     $("#player-view")?.classList.remove("flex");
     $("#gallery-view")?.classList.remove("hidden");
     $("#gallery-toolbar")?.classList.remove("hidden");
-    if (video) {
-      video.pause();
-      video.removeAttribute("src");
-      video.load();
-    }
     state.playingId = null;
     highlightPlayingCard();
   }
@@ -2658,6 +2954,9 @@
           default_page_size: parseInt($("#set-page-size")?.value, 10),
           potplayer_path: $("#set-potplayer")?.value || "",
           player_mode: document.querySelector('input[name="player-mode"]:checked')?.value || SETTINGS_DEFAULTS.player_mode,
+          hls_large_h264: $("#set-hls-large-h264")?.value === "true",
+          hls_moov_end_h264: $("#set-hls-moov-end-h264")?.value === "true",
+          html5_fragmented_mp4: $("#set-html5-fragmented-mp4")?.value || "external",
           history_retention_days: historyDays,
           scope: "global",
         }),
@@ -2863,14 +3162,19 @@
     r.addEventListener("change", updatePotplayerPathVisibility);
   });
 
-  $("#btn-player-back").addEventListener("click", hideHtml5Player);
+  $("#btn-player-back").addEventListener("click", () => { void hideHtml5Player(); });
   $("#btn-player-favorite")?.addEventListener("click", () => {
     if (state.playingId) toggleFavorite(state.playingId);
   });
-  $("#play-overlay-close")?.addEventListener("click", cancelPlayback);
+  $("#nonstandard-btn-potplayer")?.addEventListener("click", () => resolveNonStandardDialog("potplayer"));
+  $("#nonstandard-btn-remux")?.addEventListener("click", () => resolveNonStandardDialog("remux"));
+  $("#nonstandard-dialog")?.addEventListener("close", () => {
+    if (nonStandardResolve) resolveNonStandardDialog("cancel");
+  });
+  $("#play-overlay-close")?.addEventListener("click", () => { void cancelPlayback(); });
   $("#play-overlay-potplayer")?.addEventListener("click", async () => {
     const id = pendingPlayId;
-    cancelPlayback();
+    await cancelPlayback();
     if (id) await playVideoExternal(id);
   });
   $("#progress-text")?.addEventListener("click", () => {
@@ -2967,6 +3271,7 @@
   document.addEventListener("click", hideCtxMenu);
 
   window.addEventListener("pagehide", () => {
+    detachVideoStream(getPlaybackVideo());
     fetch("/api/play/stop", { method: "POST", keepalive: true }).catch(() => {});
   });
 
@@ -2976,7 +3281,7 @@
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !$("#play-overlay")?.classList.contains("hidden")) {
       e.preventDefault();
-      cancelPlayback();
+      void cancelPlayback();
       return;
     }
     if (e.key === "/" && document.activeElement !== $("#search")) {

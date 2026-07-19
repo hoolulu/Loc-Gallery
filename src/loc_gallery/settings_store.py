@@ -8,6 +8,9 @@ from pathlib import Path
 from loc_gallery.config import (
     DEFAULT_PAGE_SIZE,
     HISTORY_RETENTION_DAYS,
+    HLS_LARGE_H264,
+    HLS_MOOV_END_H264,
+    HTML5_FRAGMENTED_MP4,
     PLAYER_MODE,
     SETTINGS_FILE,
     THUMB_IDLE_SCAN,
@@ -31,6 +34,9 @@ _DEFAULTS = {
     "potplayer_path": detect_potplayer_path(),
     "player_mode": PLAYER_MODE,
     "history_retention_days": HISTORY_RETENTION_DAYS,
+    "hls_large_h264": HLS_LARGE_H264,
+    "hls_moov_end_h264": HLS_MOOV_END_H264,
+    "html5_fragmented_mp4": HTML5_FRAGMENTED_MP4,
 }
 
 _LIBRARY_OVERRIDE_KEYS = {
@@ -43,6 +49,9 @@ _LIBRARY_OVERRIDE_KEYS = {
     "potplayer_path",
     "player_mode",
     "history_retention_days",
+    "hls_large_h264",
+    "hls_moov_end_h264",
+    "html5_fragmented_mp4",
 }
 
 

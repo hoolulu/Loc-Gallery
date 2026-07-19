@@ -181,7 +181,7 @@
   </div>
 
   <div id="video-engine-host" aria-hidden="true">
-    <video id="html5-player" class="player-video" controls playsinline preload="auto"></video>
+    <video id="html5-player" class="player-video" controls playsinline preload="metadata"></video>
   </div>
 
   <div id="selection-bar" class="selection-bar hidden">
@@ -303,6 +303,30 @@
               <input type="text" id="set-potplayer" class="dlg-input compact-input" placeholder="自动检测">
             </div>
 
+            <label class="opt-cell opt-span-2">
+              <span class="settings-field-label">大文件 H.264 强制 HLS</span>
+              <select id="set-hls-large-h264" class="dlg-input compact-input" title="HTML5 模式下，≥300MB 的 H.264 MP4 是否切片播放">
+                <option value="false">否（直连，省磁盘）</option>
+                <option value="true">是（切片，起播更快）</option>
+              </select>
+            </label>
+
+            <label class="opt-cell opt-span-2">
+              <span class="settings-field-label">索引在末尾 H.264 强制 HLS</span>
+              <select id="set-hls-moov-end-h264" class="dlg-input compact-input" title="HTML5 模式下，moov 在文件后半段的 H.264 是否切片播放">
+                <option value="false">否（直连）</option>
+                <option value="true">是（切片）</option>
+              </select>
+            </label>
+
+            <label class="opt-cell opt-span-2">
+              <span class="settings-field-label">碎片化 MP4（HTML5）</span>
+              <select id="set-html5-fragmented-mp4" class="dlg-input compact-input" title="碎片化 MP4 无法用浏览器直连，可选本地播放器或切片">
+                <option value="external">PotPlayer（省磁盘，推荐）</option>
+                <option value="hls">边切边播（耗硬盘）</option>
+              </select>
+            </label>
+
             <label class="opt-cell">
               <span class="settings-field-label">默认每页</span>
               <select id="set-page-size" class="dlg-input compact-input">
@@ -354,6 +378,21 @@
     </form>
   </dialog>
 
+  <dialog id="nonstandard-dialog" class="app-dialog app-dialog-wide">
+    <form method="dialog" class="p-6">
+      <h2 class="text-lg font-semibold text-zinc-100">非标准格式视频</h2>
+      <p id="nonstandard-dialog-msg" class="mt-3 text-sm leading-relaxed text-zinc-300"></p>
+      <p class="mt-3 text-xs leading-relaxed text-zinc-500">
+        「修复」将流复制重封装为标准 MP4（+faststart，不重新编码）。完成后<strong class="text-zinc-400">替换原文件名</strong>，旧文件备份为同目录下的 <code class="text-zinc-400">*.bak.mp4</code>。大文件可能耗时较久。
+      </p>
+      <div class="dialog-btns mt-6 flex flex-wrap justify-end gap-2">
+        <button type="button" id="nonstandard-btn-remux" class="ui-btn ui-btn-primary rounded-lg px-4 py-2">修复为标准 MP4</button>
+        <button type="button" id="nonstandard-btn-potplayer" class="ui-btn rounded-lg px-4 py-2">PotPlayer 播放</button>
+        <button type="submit" class="ui-btn rounded-lg px-4 py-2" value="cancel">取消</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="failed-dialog" class="app-dialog app-dialog-wide">
     <div class="p-6">
       <h2 class="text-lg font-semibold">缩略图生成失败</h2>
@@ -367,6 +406,6 @@
   </dialog>
 
   <script src="/static/vendor/hls.min.js"></script>
-  <script src="/static/app.js?v=77"></script>
+  <script src="/static/app.js?v=83"></script>
 </body>
 </html>

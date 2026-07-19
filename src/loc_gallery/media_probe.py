@@ -14,11 +14,12 @@ from loc_gallery.process_util import hidden_subprocess_kwargs
 from loc_gallery.config import LARGE_FILE_HLS_BYTES, playback_plans_file
 from loc_gallery.file_stability import is_ready_for_processing
 from loc_gallery.library_context import current_library_id, set_thread_library
+from loc_gallery.settings_store import get_setting
 
 _BROWSER_UNSUPPORTED_VIDEO = {"mpeg2video", "vc1"}
 _HLS_TRANSCODE_VIDEO = {"av1", "hevc", "h265", "vp9"}
 _IMAGE_CODECS = {"png", "mjpeg", "jpeg", "apng", "gif", "bmp", "webp"}
-_PLAN_VERSION = 5
+_PLAN_VERSION = 8
 _H264_NAL_SIGS = (
     b"\x00\x00\x00\x01\x67", b"\x00\x00\x00\x01\x68", b"\x00\x00\x00\x01\x65",
     b"\x00\x00\x01\x67", b"\x00\x00\x01\x68",
@@ -88,6 +89,15 @@ def _schedule_disk_flush() -> None:
         _disk_flush_timer.start()
 
 
+def _hls_policy_tag() -> str:
+    large = bool(get_setting("hls_large_h264"))
+    moov = bool(get_setting("hls_moov_end_h264"))
+    frag = str(get_setting("html5_fragmented_mp4") or "external").strip().lower()
+    if frag not in ("external", "hls"):
+        frag = "external"
+    return f"{int(large)}{int(moov)}:{frag}"
+
+
 def _disk_cache_get(key: str, mtime: float, size: int) -> dict | None:
     entry = _load_disk_cache().get(key)
     if not entry or not isinstance(entry, dict):
@@ -99,6 +109,8 @@ def _disk_cache_get(key: str, mtime: float, size: int) -> dict | None:
         return None
     if entry.get("v", 1) < _PLAN_VERSION:
         return None
+    if entry.get("policy") != _hls_policy_tag():
+        return None
     return dict(plan)
 
 
@@ -109,6 +121,7 @@ def _disk_cache_put(key: str, mtime: float, size: int, plan: dict) -> None:
             "mtime": mtime,
             "size": size,
             "v": _PLAN_VERSION,
+            "policy": _hls_policy_tag(),
             "plan": {k: v for k, v in plan.items() if k != "cached"},
             "at": time.time(),
         }
@@ -291,6 +304,58 @@ def probe_video_codec(path: Path) -> str:
         return "unknown"
 
 
+def _peek_cached_plan(path: Path) -> dict | None:
+    """仅读内存/磁盘缓存，不触发 ffprobe。"""
+    if not path.is_file():
+        return None
+    key = str(path.resolve())
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    with _plan_lock:
+        cached = _plan_cache.get(key)
+        if cached and cached[0] == st.st_mtime and cached[1] == st.st_size:
+            plan = dict(cached[2])
+            if plan.get("_policy") == _hls_policy_tag():
+                plan.pop("_policy", None)
+                return plan
+        return _disk_cache_get(key, st.st_mtime, st.st_size)
+
+
+def get_format_badge(path: Path) -> str | None:
+    """已分析过的非标准格式角标；未缓存则返回 None。"""
+    plan = _peek_cached_plan(path)
+    if not plan:
+        return None
+    kind = (plan.get("structure") or {}).get("kind")
+    if plan.get("disguised") or kind in ("fragmented", "disguised_mpegts"):
+        return "non_standard"
+    return None
+
+
+def get_format_badges(paths: dict[str, Path]) -> dict[str, str]:
+    """批量读取角标（仅缓存命中）。"""
+    out: dict[str, str] = {}
+    for vid, path in paths.items():
+        badge = get_format_badge(path)
+        if badge:
+            out[vid] = badge
+    return out
+
+
+def invalidate_playback_plan(path: Path) -> None:
+    """清除播放策略缓存（文件被修复/替换后调用）。"""
+    key = str(path.resolve())
+    with _plan_lock:
+        _plan_cache.pop(key, None)
+        store = _load_disk_cache()
+        if key in store:
+            store.pop(key, None)
+            _schedule_disk_flush()
+    _purge_hls_for_path(path)
+
+
 def get_playback_plan(path: Path) -> dict:
     if not path.is_file():
         return {"mode": "error", "reason": "文件不存在", "cached": False}
@@ -307,14 +372,16 @@ def get_playback_plan(path: Path) -> dict:
     with _plan_lock:
         cached = _plan_cache.get(key)
         if cached and cached[0] == st.st_mtime and cached[1] == st.st_size:
-            if not _plan_needs_rebuild(path, cached[2]):
+            if cached[2].get("_policy") == _hls_policy_tag() and not _plan_needs_rebuild(path, cached[2]):
                 plan = dict(cached[2])
+                plan.pop("_policy", None)
                 plan["cached"] = True
                 return plan
 
         disk = _disk_cache_get(key, st.st_mtime, st.st_size)
         if disk and not _plan_needs_rebuild(path, disk):
-            _plan_cache[key] = (st.st_mtime, st.st_size, disk)
+            tagged = {**disk, "_policy": _hls_policy_tag()}
+            _plan_cache[key] = (st.st_mtime, st.st_size, tagged)
             plan = dict(disk)
             plan["cached"] = True
             return plan
@@ -325,10 +392,12 @@ def get_playback_plan(path: Path) -> dict:
             _purge_hls_for_path(path)
 
     plan = _build_playback_plan(path)
+    plan["_policy"] = _hls_policy_tag()
     with _plan_lock:
         _plan_cache[key] = (st.st_mtime, st.st_size, plan)
     _disk_cache_put(key, st.st_mtime, st.st_size, plan)
     out = dict(plan)
+    out.pop("_policy", None)
     out["cached"] = False
     return out
 
@@ -425,16 +494,28 @@ def _build_playback_plan(path: Path) -> dict:
         }
 
     if kind == "fragmented":
+        frag_mode = str(get_setting("html5_fragmented_mp4") or "external").strip().lower()
+        if frag_mode == "hls":
+            return {
+                "mode": "hls",
+                "transcode": False,
+                "reason": "碎片化 MP4，将边切边播",
+                "codec": codec,
+                "structure": structure,
+            }
         return {
-            "mode": "hls",
+            "mode": "external",
             "transcode": False,
-            "reason": "碎片化 MP4，将边切边播",
+            "reason": "碎片化 MP4，浏览器无法直连；切片非常耗硬盘，请用 PotPlayer",
             "codec": codec,
             "structure": structure,
         }
 
     size_bytes = structure.get("size_bytes") or 0
-    if kind == "moov_end":
+    moov_hls = bool(get_setting("hls_moov_end_h264"))
+    large_hls = bool(get_setting("hls_large_h264"))
+
+    if moov_hls and kind == "moov_end":
         return {
             "mode": "hls",
             "transcode": False,
@@ -443,7 +524,7 @@ def _build_playback_plan(path: Path) -> dict:
             "structure": structure,
         }
 
-    if size_bytes >= LARGE_FILE_HLS_BYTES:
+    if large_hls and size_bytes >= LARGE_FILE_HLS_BYTES:
         return {
             "mode": "hls",
             "transcode": False,
@@ -452,10 +533,15 @@ def _build_playback_plan(path: Path) -> dict:
             "structure": structure,
         }
 
+    if kind == "moov_end":
+        reason = "H.264 MP4，直接播放（索引在文件末尾，起播可能稍慢）"
+    else:
+        reason = "H.264 MP4，直接播放"
+
     return {
         "mode": "direct",
         "transcode": False,
-        "reason": "标准 MP4，直接播放",
+        "reason": reason,
         "codec": codec,
         "structure": structure,
     }

@@ -353,6 +353,11 @@ def stop_playback(video_id: str | None = None, *, force: bool = False) -> bool:
         )
         if not force and video_id is not None and _current_id not in (None, video_id):
             return False
+        if _slice_paused:
+            pid = _active_pid()
+            if pid:
+                resume_process(pid)
+            _slice_paused = False
         _kill_process_only()
         _current_id = None
         _error = None

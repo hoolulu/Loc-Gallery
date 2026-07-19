@@ -1255,6 +1255,24 @@ body.has-selection .card-check {
   display: block;
 }
 
+.thumb-format-badge {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  z-index: 2;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.625rem;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: 0.02em;
+  color: #fff;
+  background: rgba(229, 9, 20, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  pointer-events: none;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.5);
+}
+
 .thumb-placeholder {
   width: 100%;
   height: 100%;
