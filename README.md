@@ -417,3 +417,5 @@ python -m pytest tests\test_file_stability.py
 ---
 
 **Loc Gallery** — 本地视频，浏览器里看。
+
+讨论与交流 → [LINUX.DO 社区](https://linux.do)
