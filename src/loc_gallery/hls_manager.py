@@ -10,10 +10,10 @@ import threading
 import time
 from pathlib import Path
 
-from avv_gallery.config import HLS_CACHE_MAX_BYTES, hls_cache_dir, service_environ
-from avv_gallery.library_context import current_library_id
-from avv_gallery.process_util import hidden_subprocess_kwargs
-from avv_gallery.thumb_manager import ffmpeg_path
+from loc_gallery.config import HLS_CACHE_MAX_BYTES, hls_cache_dir, service_environ
+from loc_gallery.library_context import current_library_id
+from loc_gallery.process_util import hidden_subprocess_kwargs
+from loc_gallery.thumb_manager import ffmpeg_path
 
 _lock = threading.RLock()
 _current_id: str | None = None

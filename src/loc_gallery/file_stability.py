@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
-from avv_gallery.config import (
+from loc_gallery.config import (
     FILE_RECENT_MODIFY_SEC,
     FILE_STABLE_CHECK_DELAY,
     FILE_STABLE_SAMPLE_INTERVAL,
@@ -136,7 +136,7 @@ def _run_stability_check(path: Path) -> None:
             library_id = _path_libraries.pop(key, None)
         if _on_stable_callback:
             if library_id:
-                from avv_gallery.library_context import set_thread_library
+                from loc_gallery.library_context import set_thread_library
                 set_thread_library(library_id)
             _on_stable_callback()
         return
@@ -148,7 +148,7 @@ def _run_stability_check(path: Path) -> None:
             library_id = _path_libraries.pop(key, None)
         if _on_stable_callback:
             if library_id:
-                from avv_gallery.library_context import set_thread_library
+                from loc_gallery.library_context import set_thread_library
                 set_thread_library(library_id)
             _on_stable_callback()
         return

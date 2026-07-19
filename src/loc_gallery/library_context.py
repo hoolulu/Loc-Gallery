@@ -18,5 +18,5 @@ def current_library_id() -> str:
     lid = _thread_library.get(threading.get_ident()) or _library_ctx.get()
     if lid:
         return lid
-    from avv_gallery.library_store import get_active_library_id
+    from loc_gallery.library_store import get_active_library_id
     return get_active_library_id()

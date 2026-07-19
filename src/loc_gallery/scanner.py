@@ -4,9 +4,9 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 
-from avv_gallery.config import IGNORE_DIRS, VIDEO_EXTENSIONS, WEB_ROOT
-from avv_gallery.file_stability import is_ready_for_index
-from avv_gallery.title import extract_title
+from loc_gallery.config import IGNORE_DIRS, VIDEO_EXTENSIONS, WEB_ROOT
+from loc_gallery.file_stability import is_ready_for_index
+from loc_gallery.title import extract_title
 
 
 @dataclass
@@ -87,7 +87,7 @@ def scan_all(video_root: Path, library_id: str) -> list[VideoItem]:
 
 def refresh_cache(library_id: str, video_root: Path | None = None) -> int:
     if video_root is None:
-        from avv_gallery.library_store import get_library
+        from loc_gallery.library_store import get_library
         lib = get_library(library_id)
         if not lib:
             raise ValueError("视频库不存在")
@@ -101,7 +101,7 @@ def refresh_cache(library_id: str, video_root: Path | None = None) -> int:
 
 
 def refresh_all_libraries() -> None:
-    from avv_gallery.library_store import list_libraries
+    from loc_gallery.library_store import list_libraries
     for lib in list_libraries():
         refresh_cache(lib.id, lib.path_obj)
 
@@ -130,7 +130,7 @@ def get_categories(library_id: str) -> list[dict]:
             counts[item.category] = counts.get(item.category, 0) + 1
             if item.subfolder:
                 has_subfolders[item.category] = True
-    from avv_gallery.category_store import sort_categories
+    from loc_gallery.category_store import sort_categories
     cats = sort_categories(library_id, counts)
     for c in cats:
         c["has_subfolders"] = has_subfolders.get(c["name"], False)

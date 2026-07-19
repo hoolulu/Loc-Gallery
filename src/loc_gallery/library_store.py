@@ -11,7 +11,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from avv_gallery.config import DATA_DIR, IGNORE_DIRS, LIBRARIES_FILE, LIBRARIES_ROOT, PROJECT_ROOT, VIDEO_ROOT
+from loc_gallery.config import DATA_DIR, IGNORE_DIRS, LIBRARIES_FILE, LIBRARIES_ROOT, PROJECT_ROOT, VIDEO_ROOT
 
 _lock = threading.RLock()
 DEFAULT_LIBRARY_ID = "lib-default"

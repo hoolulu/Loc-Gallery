@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-from avv_gallery.file_stability import (
+from loc_gallery.file_stability import (
     is_file_stable,
     is_incomplete_filename,
     is_ready_for_index,
@@ -33,7 +33,7 @@ def test_stable_file_indexed(tmp_path):
 
 def test_pending_blocks_index(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "avv_gallery.file_stability.FILE_RECENT_MODIFY_SEC",
+        "loc_gallery.file_stability.FILE_RECENT_MODIFY_SEC",
         0,
     )
     p = tmp_path / "growing.mp4"

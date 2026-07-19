@@ -67,7 +67,7 @@
 └────────────────────────┬────────────────────────────────┘
                          │ HTTP / SSE
 ┌────────────────────────▼────────────────────────────────┐
-│              FastAPI (avv_gallery.server)                │
+│              FastAPI (loc_gallery.server)                │
 │  API · 静态文件 · SSE 事件推送                            │
 ├──────────┬──────────┬──────────┬──────────┬─────────────┤
 │ scanner  │thumb_mgr │hls_mgr   │media_probe│category/   │
@@ -83,7 +83,7 @@
 
 | 路径 | 职责 |
 |------|------|
-| `src/avv_gallery/` | Python 后端源码包 |
+| `src/loc_gallery/` | Python 后端源码包 |
 | `static/` | 前端静态资源 |
 | `scripts/` | 重启脚本、CSS 构建 |
 | `config/` | 配置模板 |
@@ -399,7 +399,7 @@ python restart.py
 
 ### 8.3 配置
 
-- 视频库：`src/avv_gallery/config.py` → `VIDEO_ROOT`
+- 视频库：`src/loc_gallery/config.py` → `VIDEO_ROOT`
 - 端口：默认 `3456`
 - HLS 缓存上限：默认 5GB
 

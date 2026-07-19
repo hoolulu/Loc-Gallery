@@ -14,8 +14,8 @@ from pydantic import BaseModel
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-from avv_gallery.category_store import get_meta, set_order, set_sort_mode, set_starred, sort_categories
-from avv_gallery.config import HOST, PORT, POTPLAYER_CANDIDATES, POTPLAYER_PATH, VIDEO_EXTENSIONS, WEB_ROOT
+from loc_gallery.category_store import get_meta, set_order, set_sort_mode, set_starred, sort_categories
+from loc_gallery.config import HOST, PORT, POTPLAYER_CANDIDATES, POTPLAYER_PATH, VIDEO_EXTENSIONS, WEB_ROOT
 
 
 def _resolve_potplayer(settings: dict) -> Path:
@@ -44,8 +44,8 @@ def _launch_potplayer(player: Path, video_path: str) -> None:
         )
     except OSError as exc:
         raise HTTPException(500, f"无法启动 PotPlayer: {exc}") from exc
-from avv_gallery.file_stability import is_incomplete_filename, notify_file_activity, set_stable_callback
-from avv_gallery.favorite_store import (
+from loc_gallery.file_stability import is_incomplete_filename, notify_file_activity, set_stable_callback
+from loc_gallery.favorite_store import (
     batch_favorites,
     get_added_at,
     get_favorite_count,
@@ -56,8 +56,8 @@ from avv_gallery.favorite_store import (
     remove_favorites,
     toggle_favorite,
 )
-from avv_gallery.file_ops import delete_videos, move_videos, rename_video
-from avv_gallery.history_store import (
+from loc_gallery.file_ops import delete_videos, move_videos, rename_video
+from loc_gallery.history_store import (
     clear_history,
     get_entry as get_history_entry,
     get_history_count,
@@ -66,10 +66,10 @@ from avv_gallery.history_store import (
     record_play,
     remove_history,
 )
-from avv_gallery import hls_manager
-from avv_gallery.media_probe import get_playback_plan, schedule_probe_for_ids
-from avv_gallery.library_context import set_thread_library
-from avv_gallery.library_store import (
+from loc_gallery import hls_manager
+from loc_gallery.media_probe import get_playback_plan, schedule_probe_for_ids
+from loc_gallery.library_context import set_thread_library
+from loc_gallery.library_store import (
     add_library,
     get_active_library_id,
     get_library,
@@ -79,12 +79,12 @@ from avv_gallery.library_store import (
     set_active_library,
     update_library,
 )
-from avv_gallery.scanner import (
+from loc_gallery.scanner import (
     get_all, get_by_id, get_categories, get_folder_tree, get_version, refresh_all_libraries,
     refresh_cache,
 )
-from avv_gallery.settings_store import load_settings, save_settings
-from avv_gallery.thumb_manager import (
+from loc_gallery.settings_store import load_settings, save_settings
+from loc_gallery.thumb_manager import (
     Priority,
     cleanup_orphans,
     ensure_scheduled,
@@ -283,7 +283,7 @@ def _restart_watchers() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     def _stable_cb():
-        from avv_gallery.library_context import current_library_id
+        from loc_gallery.library_context import current_library_id
         _on_library_changed(current_library_id())
 
     set_stable_callback(_stable_cb)

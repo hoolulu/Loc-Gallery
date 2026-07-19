@@ -6,8 +6,8 @@ import json
 import threading
 import time
 
-from avv_gallery.config import history_file
-from avv_gallery.settings_store import get_setting
+from loc_gallery.config import history_file
+from loc_gallery.settings_store import get_setting
 
 _lock = threading.Lock()
 

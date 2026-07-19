@@ -11,8 +11,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from avv_gallery.process_util import hidden_subprocess_kwargs
-from avv_gallery.thumb_manager import ffmpeg_path
+from loc_gallery.process_util import hidden_subprocess_kwargs
+from loc_gallery.thumb_manager import ffmpeg_path
 
 SOURCE = Path(os.environ.get("LOC_GALLERY_DISGUISED_SAMPLE", ""))
 OFFSET = int(os.environ.get("LOC_GALLERY_DISGUISED_OFFSET", "475"))

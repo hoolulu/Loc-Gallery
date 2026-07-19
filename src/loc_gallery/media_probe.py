@@ -9,11 +9,11 @@ import threading
 import time
 from pathlib import Path
 
-from avv_gallery.thumb_manager import ffprobe_path, _get_duration_mpegts
-from avv_gallery.process_util import hidden_subprocess_kwargs
-from avv_gallery.config import LARGE_FILE_HLS_BYTES, playback_plans_file
-from avv_gallery.file_stability import is_ready_for_processing
-from avv_gallery.library_context import current_library_id, set_thread_library
+from loc_gallery.thumb_manager import ffprobe_path, _get_duration_mpegts
+from loc_gallery.process_util import hidden_subprocess_kwargs
+from loc_gallery.config import LARGE_FILE_HLS_BYTES, playback_plans_file
+from loc_gallery.file_stability import is_ready_for_processing
+from loc_gallery.library_context import current_library_id, set_thread_library
 
 _BROWSER_UNSUPPORTED_VIDEO = {"mpeg2video", "vc1"}
 _HLS_TRANSCODE_VIDEO = {"av1", "hevc", "h265", "vp9"}
@@ -248,8 +248,8 @@ def _purge_hls_for_path(path: Path) -> None:
     try:
         import hashlib
 
-        from avv_gallery.config import VIDEO_ROOT
-        from avv_gallery import hls_manager
+        from loc_gallery.config import VIDEO_ROOT
+        from loc_gallery import hls_manager
 
         rel = path.resolve().relative_to(VIDEO_ROOT.resolve()).as_posix()
         video_id = hashlib.md5(rel.encode("utf-8")).hexdigest()
@@ -337,7 +337,7 @@ def schedule_probe_for_ids(video_ids: list[str], library_id: str | None = None) 
     """后台预分析播放策略并写入 playback_plans.json。"""
     if not video_ids:
         return 0
-    from avv_gallery.scanner import get_by_id
+    from loc_gallery.scanner import get_by_id
 
     lid = library_id or current_library_id()
     paths: list[Path] = []

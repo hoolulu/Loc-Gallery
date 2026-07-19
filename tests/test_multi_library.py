@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from avv_gallery import favorite_store, history_store, settings_store
+from loc_gallery import favorite_store, history_store, settings_store
 
 
 class MultiLibraryIsolationTest(unittest.TestCase):
@@ -33,13 +33,13 @@ class MultiLibraryIsolationTest(unittest.TestCase):
             encoding="utf-8",
         )
         patches = {
-            "avv_gallery.config.DATA_DIR": data,
-            "avv_gallery.config.LIBRARIES_FILE": data / "libraries.json",
-            "avv_gallery.config.LIBRARIES_ROOT": data / "libraries",
-            "avv_gallery.config.SETTINGS_FILE": data / "settings.json",
-            "avv_gallery.library_store.LIBRARIES_FILE": data / "libraries.json",
-            "avv_gallery.library_store.LIBRARIES_ROOT": data / "libraries",
-            "avv_gallery.library_store.DATA_DIR": data,
+            "loc_gallery.config.DATA_DIR": data,
+            "loc_gallery.config.LIBRARIES_FILE": data / "libraries.json",
+            "loc_gallery.config.LIBRARIES_ROOT": data / "libraries",
+            "loc_gallery.config.SETTINGS_FILE": data / "settings.json",
+            "loc_gallery.library_store.LIBRARIES_FILE": data / "libraries.json",
+            "loc_gallery.library_store.LIBRARIES_ROOT": data / "libraries",
+            "loc_gallery.library_store.DATA_DIR": data,
         }
         self._mocks = [mock.patch(k, v) for k, v in patches.items()]
         for m in self._mocks:

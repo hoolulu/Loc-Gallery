@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.0.1] - 2026-07-19
+
+### 变更
+
+- Python 包 **`avv_gallery`** 重命名为 **`loc_gallery`**，源码目录改为 `src/loc_gallery/`
+- 更新所有 import、uvicorn 入口、文档、脚本与测试中的模块路径
+- `package-lock.json` 与 demo 页面品牌统一为 Loc Gallery
+
 ## [2.0.0] - 2026-07-19
 
 ### 新增
@@ -19,7 +27,7 @@
 
 ### 说明
 
-- 应用版本号统一为 **2.0.0**（Python 包 `avv_gallery`）
+- 应用版本号统一为 **2.0.0**（Python 包当时仍为 `avv_gallery`，见 2.0.1）
 - 全局设置保存在 `data/settings.json`；库列表在 `data/libraries.json`
 
 ## [1.0.0] - 更早版本

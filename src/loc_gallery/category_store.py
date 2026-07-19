@@ -4,7 +4,7 @@ import json
 import threading
 from copy import deepcopy
 
-from avv_gallery.config import category_meta_file
+from loc_gallery.config import category_meta_file
 
 _lock = threading.Lock()
 

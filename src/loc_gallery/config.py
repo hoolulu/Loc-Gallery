@@ -67,7 +67,7 @@ VIDEO_EXTENSIONS = {
 }
 
 IGNORE_DIRS = {
-    ".thumbs", "WEB", "Loc-Gallery", "AVV-Gallery", "__pycache__", ".git",
+    ".thumbs", "WEB", "Loc-Gallery", "loc-gallery", "AVV-Gallery", "avv-gallery", "__pycache__", ".git",
     "cache", "data", "node_modules", "src", "scripts", "tests", "libraries",
 }
 
@@ -82,7 +82,7 @@ HISTORY_FILE = DATA_DIR / "play_history.json"
 
 
 def library_data_dir(library_id: str) -> Path:
-    from avv_gallery.library_store import library_data_dir as _dir
+    from loc_gallery.library_store import library_data_dir as _dir
     return _dir(library_id)
 
 
@@ -131,7 +131,7 @@ def _migrate_legacy_data() -> None:
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(src), str(dst))
 
-    from avv_gallery.library_store import migrate_single_library
+    from loc_gallery.library_store import migrate_single_library
     migrate_single_library()
 
 

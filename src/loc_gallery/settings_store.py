@@ -5,7 +5,7 @@ from copy import deepcopy
 
 from pathlib import Path
 
-from avv_gallery.config import (
+from loc_gallery.config import (
     DEFAULT_PAGE_SIZE,
     HISTORY_RETENTION_DAYS,
     PLAYER_MODE,
@@ -67,7 +67,7 @@ def _load_global() -> dict:
             pass
     merged = deepcopy(_DEFAULTS)
     # 无全局 settings.json 时，继承 lib-default 库内配置（单库升级后的常见情况）
-    from avv_gallery.library_store import DEFAULT_LIBRARY_ID
+    from loc_gallery.library_store import DEFAULT_LIBRARY_ID
 
     fallback = library_settings_file(DEFAULT_LIBRARY_ID)
     if fallback.exists():

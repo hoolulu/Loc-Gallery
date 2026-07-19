@@ -12,13 +12,13 @@ from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 
-from avv_gallery.config import THUMB_WORKERS, FILE_STABLE_CHECK_DELAY, thumb_dir, thumb_index_file
-from avv_gallery.library_context import current_library_id, set_thread_library
-from avv_gallery.library_store import list_libraries
-from avv_gallery.file_stability import is_ready_for_processing, is_ready_for_video
-from avv_gallery.process_util import hidden_subprocess_kwargs
-from avv_gallery.scanner import VideoItem, get_all, get_by_id
-from avv_gallery.settings_store import get_setting
+from loc_gallery.config import THUMB_WORKERS, FILE_STABLE_CHECK_DELAY, thumb_dir, thumb_index_file
+from loc_gallery.library_context import current_library_id, set_thread_library
+from loc_gallery.library_store import list_libraries
+from loc_gallery.file_stability import is_ready_for_processing, is_ready_for_video
+from loc_gallery.process_util import hidden_subprocess_kwargs
+from loc_gallery.scanner import VideoItem, get_all, get_by_id
+from loc_gallery.settings_store import get_setting
 
 STATUS_MISSING = "missing"
 STATUS_QUEUED = "queued"

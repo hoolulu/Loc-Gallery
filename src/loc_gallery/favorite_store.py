@@ -6,7 +6,7 @@ import json
 import threading
 import time
 
-from avv_gallery.config import favorites_file
+from loc_gallery.config import favorites_file
 
 _lock = threading.Lock()
 

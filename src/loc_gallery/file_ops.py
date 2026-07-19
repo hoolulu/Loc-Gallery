@@ -7,9 +7,9 @@ import sys
 from ctypes import wintypes
 from pathlib import Path
 
-from avv_gallery.config import IGNORE_DIRS
-from avv_gallery.library_store import get_library
-from avv_gallery.scanner import VideoItem, get_by_id, refresh_cache
+from loc_gallery.config import IGNORE_DIRS
+from loc_gallery.library_store import get_library
+from loc_gallery.scanner import VideoItem, get_by_id, refresh_cache
 
 _INVALID_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -172,5 +172,5 @@ def move_videos(library_id: str, video_ids: list[str], category: str) -> dict:
 
 
 def get_all(library_id: str):
-    from avv_gallery.scanner import get_all as _get_all
+    from loc_gallery.scanner import get_all as _get_all
     return _get_all(library_id)

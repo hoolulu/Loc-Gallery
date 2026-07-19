@@ -14,7 +14,7 @@ SRC_DIR = PROJECT_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from avv_gallery.config import HOST, LOG_FILE, PID_FILE, PORT, service_environ  # noqa: E402
+from loc_gallery.config import HOST, LOG_FILE, PID_FILE, PORT, service_environ  # noqa: E402
 
 URL = f"http://{HOST}:{PORT}"
 
@@ -153,7 +153,7 @@ def start_service() -> int | None:
     proc = subprocess.Popen(
         [
             sys.executable, "-m", "uvicorn",
-            "avv_gallery.server:app",
+            "loc_gallery.server:app",
             "--host", HOST,
             "--port", str(PORT),
         ],
