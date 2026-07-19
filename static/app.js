@@ -22,7 +22,7 @@
     ctxTarget: null,
     thumbBust: {},
     playingId: null,
-    playerMode: "potplayer",
+    playerMode: "html5",
     playerViewOpen: false,
     failedItems: [],
     playSession: 0,
@@ -170,13 +170,20 @@
     destroyHlsPlayer();
     state.directStreamVideoId = null;
     state.directStreamPausedAt = null;
-    video.pause();
+    try { video.pause(); } catch (_) { /* ignore */ }
     try { video.preload = "none"; } catch (_) { /* ignore */ }
     video.removeAttribute("poster");
+    try {
+      if (video.srcObject) {
+        const tracks = video.srcObject.getTracks?.();
+        if (tracks) tracks.forEach((t) => { try { t.stop(); } catch (_) { /* ignore */ } });
+        video.srcObject = null;
+      }
+    } catch (_) { /* ignore */ }
     video.removeAttribute("src");
     video.src = "";
     [...video.querySelectorAll("source")].forEach(el => el.remove());
-    video.load();
+    try { video.load(); } catch (_) { /* ignore */ }
   }
 
   function loadState() {
@@ -386,7 +393,7 @@
   }
 
   const SETTINGS_DEFAULTS = {
-    player_mode: "potplayer",
+    player_mode: "html5",
     thumb_position: 0.6,
     thumb_random_min: 0.5,
     thumb_random_max: 0.8,
@@ -400,9 +407,14 @@
     html5_fragmented_mp4: "external",
   };
 
+  function normalizePlayerMode(mode) {
+    const m = (mode || SETTINGS_DEFAULTS.player_mode).trim().toLowerCase();
+    return m === "smart" ? "html5" : m;
+  }
+
   function fillSettingsForm(raw) {
     const s = { ...SETTINGS_DEFAULTS, ...(raw || {}) };
-    state.playerMode = s.player_mode || SETTINGS_DEFAULTS.player_mode;
+    state.playerMode = normalizePlayerMode(s.player_mode);
     const setVal = (id, val) => {
       const el = document.getElementById(id);
       if (el) el.value = val ?? "";
@@ -1041,7 +1053,7 @@
 
   function thumbFormatBadgeHtml(v) {
     if (v.formatBadge !== "non_standard") return "";
-    return '<span class="thumb-format-badge" title="非标准格式（碎片化/伪装），HTML5 建议用 PotPlayer">非标准</span>';
+    return '<span class="thumb-format-badge" title="非标准格式（碎片化/转码/伪装等），建议 PotPlayer 或修复">非标准</span>';
   }
 
   function renderThumbHtml(v) {
@@ -1698,7 +1710,7 @@
   async function loadPlayerSettings() {
     try {
       const s = await api("/api/settings");
-      state.playerMode = s.player_mode || SETTINGS_DEFAULTS.player_mode;
+      state.playerMode = normalizePlayerMode(s.player_mode);
       return s;
     } catch (_) {
       return null;
@@ -1792,14 +1804,18 @@
     if (!video || video.dataset.playlistBound) return;
     video.dataset.playlistBound = "1";
     video.addEventListener("ended", () => {
-      if (!state.playerViewOpen || (state.playerMode || "potplayer") !== "html5") return;
+      if (!state.playerViewOpen || normalizePlayerMode(state.playerMode) !== "html5") return;
       playAdjacentVideo(1);
     });
   }
 
   function destroyHlsPlayer() {
     if (hlsInstance) {
-      try { hlsInstance.destroy(); } catch (_) { /* ignore */ }
+      try {
+        hlsInstance.stopLoad();
+        hlsInstance.detachMedia();
+        hlsInstance.destroy();
+      } catch (_) { /* ignore */ }
       hlsInstance = null;
     }
   }
@@ -1868,6 +1884,7 @@
     const video = getPlaybackVideo();
     detachVideoStream(video);
     resetVideoDisplay(video);
+    state.activeSliceVideoId = null;
     await stopActiveSlice();
     if (state.playerViewOpen) {
       state.playerViewOpen = false;
@@ -2237,7 +2254,14 @@
         cleanup();
         reject(new Error(videoHasPicture(video) ? "视频缓冲超时" : "浏览器无法解码此视频"));
       }, timeoutMs);
-      tickTimer = setInterval(onProgressEvt, 500);
+      tickTimer = setInterval(() => {
+        if (session !== state.playSession) {
+          cleanup();
+          reject(new Error("已取消"));
+          return;
+        }
+        onProgressEvt();
+      }, 500);
       video.addEventListener("canplay", onReady);
       video.addEventListener("loadeddata", onReady);
       video.addEventListener("progress", onProgressEvt);
@@ -2412,6 +2436,31 @@
     throw new Error(transcode ? "转码准备超时，请使用 PotPlayer" : "准备超时，请使用 PotPlayer");
   }
 
+  async function startWebHlsPlayback(id, base, session, info) {
+    const transcode = !!info.transcode;
+    state.activeSliceVideoId = id;
+    updatePlayOverlay(
+      prepTitle(transcode, null),
+      "正在准备切片任务…",
+      { indeterminate: true, item: base, info },
+    );
+    const prep = await api(`/api/play/prepare/${id}`, { method: "POST" });
+    if (await abortIfStale(session)) return;
+    if (prep.error && prep.state === "error") throw new Error(prep.error);
+    if (prep.cached) {
+      updatePlayOverlay("使用缓存", "跳过转码，直接加载…", { progress: 80, item: base, info });
+    } else if (!prep.ready) {
+      updatePlayOverlay(
+        prepTitle(transcode, prep),
+        transcode ? "首次转码可能较慢，请稍候" : "边切边播，首段就绪即可播放",
+        { indeterminate: true, item: base, info },
+      );
+      await waitHlsReady(id, session, 180, transcode);
+    }
+    if (await abortIfStale(session)) return;
+    await startHlsStream(id, base, session, transcode);
+  }
+
   async function playVideoHtml5(id, item) {
     const prevId = state.playingId;
     const prevVideo = getPlaybackVideo();
@@ -2471,28 +2520,7 @@
       }
 
       if (info.mode === "hls") {
-        const transcode = !!info.transcode;
-        state.activeSliceVideoId = id;
-        updatePlayOverlay(
-          prepTitle(transcode, null),
-          "正在准备切片任务…",
-          { indeterminate: true, item: base, info },
-        );
-        const prep = await api(`/api/play/prepare/${id}`, { method: "POST" });
-        if (await abortIfStale(session)) return;
-        if (prep.error && prep.state === "error") throw new Error(prep.error);
-        if (prep.cached) {
-          updatePlayOverlay("使用缓存", "跳过转码，直接加载…", { progress: 80 });
-        } else if (!prep.ready) {
-          updatePlayOverlay(
-            prepTitle(transcode, prep),
-            transcode ? "首次转码可能较慢，请稍候" : "边切边播，首段就绪即可播放",
-            { indeterminate: true },
-          );
-          await waitHlsReady(id, session, 180, transcode);
-        }
-        if (await abortIfStale(session)) return;
-        await startHlsStream(id, base, session, transcode);
+        await startWebHlsPlayback(id, base, session, info);
         return;
       }
 
@@ -2513,18 +2541,28 @@
   }
 
   let nonStandardResolve = null;
+  let nonStandardDialogCtx = null;
 
-  function showNonStandardDialog({ reason, remuxable = false } = {}) {
+  function showNonStandardDialog({ reason, remuxable = false, remuxReason = "" } = {}) {
     return new Promise((resolve) => {
       const dlg = $("#nonstandard-dialog");
+      nonStandardDialogCtx = { remuxable, remuxReason };
       if (!dlg) {
         resolve(remuxable ? "remux" : "potplayer");
         return;
       }
       nonStandardResolve = resolve;
       const msg = $("#nonstandard-dialog-msg");
-      if (msg) msg.textContent = reason || "该视频为非标准格式。";
-      $("#nonstandard-btn-remux")?.classList.toggle("hidden", !remuxable);
+      if (msg) msg.textContent = reason || "该视频为碎片化 MP4，浏览器无法直连。";
+      const remuxBtn = $("#nonstandard-btn-remux");
+      if (remuxBtn) {
+        remuxBtn.classList.toggle("hidden", !remuxable);
+        remuxBtn.disabled = false;
+        remuxBtn.title = remuxable
+          ? "流复制重封装为标准 MP4（不重新编码，仅碎片化 H.264）"
+          : (remuxReason || "仅碎片化 H.264 MP4 支持修复");
+      }
+      $("#nonstandard-btn-web")?.classList.add("hidden");
       dlg.showModal();
     });
   }
@@ -2538,10 +2576,14 @@
     }
   }
 
-  async function runVideoRemux(id, item) {
+  async function runVideoRemux(id, item, { batchLabel = "" } = {}) {
     const session = ++state.playSession;
+    pendingPlayId = null;
+    detachVideoStream(getPlaybackVideo());
+    await stopActiveSlice();
     const base = item || { id, title: id, filename: "", path: "" };
-    showPlayOverlay("修复视频", "正在启动重封装…", { indeterminate: true, item: base });
+    const overlayTitle = batchLabel ? `修复视频（${batchLabel}）` : "修复视频";
+    showPlayOverlay(overlayTitle, "正在启动重封装…", { indeterminate: true, item: base });
     try {
       const start = await api(`/api/videos/${id}/remux`, { method: "POST" });
       if (!start.ok) throw new Error(start.error || "无法开始修复");
@@ -2565,7 +2607,7 @@
             `修复完成！\n\n原文件已备份为：${st.backup_name || "（同目录 .bak）"}\n现在为标准 MP4，可直接 HTML5 播放。`,
           );
           await loadVideos({ forceRebuild: true });
-          if ((state.playerMode || SETTINGS_DEFAULTS.player_mode) === "html5") {
+          if (normalizePlayerMode(state.playerMode) === "html5") {
             const fresh = getItemById(id) || base;
             await playVideoHtml5(id, fresh);
           }
@@ -2594,9 +2636,51 @@
     const choice = await showNonStandardDialog({
       reason: info.reason,
       remuxable: !!info.remuxable,
+      remuxReason: info.remux_reason || "",
     });
     if (choice === "potplayer") await playVideoExternal(id);
-    else if (choice === "remux") await runVideoRemux(id, base);
+    else if (choice === "remux") {
+      if (!info.remuxable) {
+        alert(info.remux_reason || "当前视频不支持修复为标准 MP4。\n\n仅碎片化 H.264 MP4 可流复制修复。");
+        return;
+      }
+      await runVideoRemux(id, base);
+    }
+  }
+
+  async function batchRemuxSelected() {
+    const ids = [...state.selected];
+    if (!ids.length) return;
+    enableBatchMode();
+    const remuxable = [];
+    for (const id of ids) {
+      try {
+        const info = await api(`/api/play/info/${id}`);
+        if (info.remuxable) {
+          remuxable.push({
+            id,
+            title: info.title || getItemById(id)?.title || id,
+          });
+        }
+      } catch (_) { /* skip */ }
+    }
+    if (!remuxable.length) {
+      alert("所选视频中没有可修复的碎片化 H.264 MP4。\n\n仅碎片化 MP4 支持「流复制」修复；AV1/HEVC 等请用 PotPlayer。");
+      return;
+    }
+    const skipped = ids.length - remuxable.length;
+    const skipHint = skipped > 0 ? `\n（已跳过 ${skipped} 个不可修复项）` : "";
+    if (!confirm(`将依次修复 ${remuxable.length} 个视频为标准 MP4（流复制，不重新编码）。${skipHint}\n\n修复期间请勿播放同一文件。继续？`)) {
+      return;
+    }
+    for (let i = 0; i < remuxable.length; i++) {
+      const { id, title } = remuxable[i];
+      const label = `${i + 1}/${remuxable.length}`;
+      await runVideoRemux(id, { id, title, filename: "", path: "" }, { batchLabel: label });
+    }
+    await loadVideos({ forceRebuild: true });
+    patchGridFormatBadges();
+    scheduleFormatBadgePoll();
   }
 
   function prepTitle(transcode, prep) {
@@ -2611,18 +2695,19 @@
 
   async function hideHtml5Player() {
     state.playSession += 1;
+    pendingPlayId = null;
     hidePlayOverlay();
     const video = getPlaybackVideo();
-    if (video && state.playingId && Number.isFinite(video.currentTime) && video.currentTime >= 1) {
-      void savePlaybackPosition(
-        state.playingId,
-        video.currentTime,
-        Number.isFinite(video.duration) ? video.duration : null,
-      );
-    }
+    const saveId = state.playingId;
+    const saveTime = video && Number.isFinite(video.currentTime) ? video.currentTime : null;
+    const saveDur = video && Number.isFinite(video.duration) ? video.duration : null;
     unbindPlaybackProgressSaver();
     detachVideoStream(video);
+    state.activeSliceVideoId = null;
     await stopActiveSlice();
+    if (saveId && saveTime != null && saveTime >= 1) {
+      void savePlaybackPosition(saveId, saveTime, saveDur);
+    }
     state.playerViewOpen = false;
     hidePlayerPreparing();
     resetVideoDisplay(video);
@@ -2655,7 +2740,7 @@
 
   async function playVideo(id) {
     const item = getItemById(id);
-    const mode = state.playerMode || SETTINGS_DEFAULTS.player_mode;
+    const mode = normalizePlayerMode(state.playerMode);
 
     if (mode === "html5") {
       await playVideoHtml5(id, item || { id, title: id, filename: "", path: "" });
@@ -2729,6 +2814,7 @@
     $("#btn-sel-move").disabled = n === 0;
     $("#btn-sel-delete").disabled = n === 0;
     $("#btn-sel-regen").disabled = n === 0;
+    $("#btn-sel-remux").disabled = n === 0;
     $("#btn-sel-fav-add").disabled = n === 0;
     $("#btn-sel-fav-remove").disabled = n === 0;
   }
@@ -3109,6 +3195,8 @@
     if (ids.length) regenerateRandomThumbs(ids);
   });
 
+  $("#btn-sel-remux").addEventListener("click", () => { void batchRemuxSelected(); });
+
   $("#btn-sel-rename").addEventListener("click", () => {
     const id = [...state.selected][0];
     if (id) openRenameDialog(id);
@@ -3167,7 +3255,15 @@
     if (state.playingId) toggleFavorite(state.playingId);
   });
   $("#nonstandard-btn-potplayer")?.addEventListener("click", () => resolveNonStandardDialog("potplayer"));
-  $("#nonstandard-btn-remux")?.addEventListener("click", () => resolveNonStandardDialog("remux"));
+  $("#nonstandard-btn-remux")?.addEventListener("click", () => {
+    const ctx = nonStandardDialogCtx;
+    if (ctx && !ctx.remuxable) {
+      alert(ctx.remuxReason || "当前视频不支持修复为标准 MP4。\n\n仅碎片化 H.264 MP4 可流复制修复；AV1/HEVC 等请用 PotPlayer。");
+      return;
+    }
+    resolveNonStandardDialog("remux");
+  });
+  $("#nonstandard-btn-web")?.addEventListener("click", () => resolveNonStandardDialog("web"));
   $("#nonstandard-dialog")?.addEventListener("close", () => {
     if (nonStandardResolve) resolveNonStandardDialog("cancel");
   });

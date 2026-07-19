@@ -762,8 +762,15 @@ async def api_play_info(video_id: str, library_id: str = Depends(resolve_library
     if not item:
         raise HTTPException(404, "视频不存在")
     plan = get_playback_plan(Path(item.path))
-    remuxable, _ = can_remux_video(library_id, video_id)
-    return {"id": video_id, "title": item.title, "path": item.path, "remuxable": remuxable, **plan}
+    remuxable, remux_reason = can_remux_video(library_id, video_id)
+    return {
+        "id": video_id,
+        "title": item.title,
+        "path": item.path,
+        "remuxable": remuxable,
+        "remux_reason": remux_reason,
+        **plan,
+    }
 
 
 @app.post("/api/videos/{video_id}/remux")
@@ -843,7 +850,7 @@ async def api_play(video_id: str, library_id: str = Depends(resolve_library_id))
         raise HTTPException(404, "视频不存在")
 
     settings = load_settings(library_id)
-    if settings.get("player_mode") == "html5":
+    if (settings.get("player_mode") or "").strip().lower() in ("html5", "smart"):
         plan = get_playback_plan(Path(item.path))
         return {
             "ok": True,

@@ -19,7 +19,7 @@ from loc_gallery.settings_store import get_setting
 _BROWSER_UNSUPPORTED_VIDEO = {"mpeg2video", "vc1"}
 _HLS_TRANSCODE_VIDEO = {"av1", "hevc", "h265", "vp9"}
 _IMAGE_CODECS = {"png", "mjpeg", "jpeg", "apng", "gif", "bmp", "webp"}
-_PLAN_VERSION = 8
+_PLAN_VERSION = 13
 _H264_NAL_SIGS = (
     b"\x00\x00\x00\x01\x67", b"\x00\x00\x00\x01\x68", b"\x00\x00\x00\x01\x65",
     b"\x00\x00\x01\x67", b"\x00\x00\x01\x68",
@@ -95,7 +95,7 @@ def _hls_policy_tag() -> str:
     frag = str(get_setting("html5_fragmented_mp4") or "external").strip().lower()
     if frag not in ("external", "hls"):
         frag = "external"
-    return f"{int(large)}{int(moov)}:{frag}"
+    return f"v{_PLAN_VERSION}:{int(large)}{int(moov)}:{frag}"
 
 
 def _disk_cache_get(key: str, mtime: float, size: int) -> dict | None:
@@ -128,6 +128,30 @@ def _disk_cache_put(key: str, mtime: float, size: int, plan: dict) -> None:
     _schedule_disk_flush()
 
 
+def _mp4_has_box(path: Path, box_type: str, max_bytes: int = 64 * 1024 * 1024) -> bool:
+    """在文件前部扫描 ISO BMFF box（用于识别 fMP4 的 moof）。"""
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return False
+    limit = min(size, max_bytes)
+    pos = 0
+    with path.open("rb") as f:
+        while pos + 8 <= limit:
+            f.seek(pos)
+            hdr = f.read(8)
+            if len(hdr) < 8:
+                break
+            box_size = struct.unpack(">I", hdr[:4])[0]
+            bt = hdr[4:8].decode("latin1", "replace")
+            if bt == box_type:
+                return True
+            if box_size < 8:
+                break
+            pos += box_size
+    return False
+
+
 def analyze_mp4_structure(path: Path) -> dict:
     size = path.stat().st_size
     pos = 0
@@ -157,6 +181,8 @@ def analyze_mp4_structure(path: Path) -> dict:
         moov_pos = _find_moov_near_end(path, size)
 
     if mdat_count > 3:
+        kind = "fragmented"
+    elif _mp4_has_box(path, "moof"):
         kind = "fragmented"
     elif moov_pos is not None and moov_pos / size > 0.5:
         kind = "moov_end"
@@ -506,7 +532,7 @@ def _build_playback_plan(path: Path) -> dict:
         return {
             "mode": "external",
             "transcode": False,
-            "reason": "碎片化 MP4，浏览器无法直连；切片非常耗硬盘，请用 PotPlayer",
+            "reason": "碎片化 MP4，浏览器无法直连；可修复为标准 MP4 或用 PotPlayer",
             "codec": codec,
             "structure": structure,
         }

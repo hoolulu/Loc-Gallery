@@ -49,6 +49,21 @@ def _temp_path(source: Path, video_id: str) -> Path:
     return source.parent / f".locgallery-remux-{video_id[:8]}.tmp.mp4"
 
 
+def _replace_with_retry(src: Path, dst: Path, *, attempts: int = 60, delay_sec: float = 2.0) -> None:
+    """Windows 上若文件仍被播放/扫描占用，replace 可能长时间阻塞；重试并给出明确错误。"""
+    last_err: OSError | None = None
+    for attempt in range(attempts):
+        try:
+            os.replace(src, dst)
+            return
+        except OSError as exc:
+            last_err = exc
+            time.sleep(delay_sec)
+    raise RuntimeError(
+        f"无法替换文件（可能被网页播放或其它程序占用，请先关闭播放页）: {last_err}"
+    )
+
+
 def can_remux_video(library_id: str, video_id: str) -> tuple[bool, str]:
     item = get_by_id(library_id, video_id)
     if not item:
@@ -62,6 +77,12 @@ def can_remux_video(library_id: str, video_id: str) -> tuple[bool, str]:
     if kind != "fragmented":
         return False, "仅碎片化 MP4 需要重封装"
     if codec not in ("h264", "avc1"):
+        if codec in ("av1", "hevc", "h265", "vp9"):
+            return (
+                False,
+                f"{codec.upper()} 不能「修复」为 H.264：修复仅重排 MP4 容器（流复制）。"
+                "请用 PotPlayer；HTML5 模式下将自动转码播放。",
+            )
         return False, f"暂不支持 {codec.upper()} 重封装，请用 PotPlayer"
     if plan.get("transcode"):
         return False, "该视频需要转码，无法流复制重封装"
@@ -104,12 +125,20 @@ def _worker(job: RemuxJob) -> None:
 
         remux_to_file(source, temp, on_progress=on_progress)
         backup = _allocate_backup(source)
-        _set_job(job, message="正在替换原文件并备份…", progress_pct=99.5)
-        os.replace(source, backup)
+        size_gb = source.stat().st_size / (1024**3)
+        _set_job(
+            job,
+            message=(
+                f"正在替换原文件并备份（约 {size_gb:.1f}GB）…"
+                "若长时间无进展，请先关闭本页播放再重试"
+            ),
+            progress_pct=99.5,
+        )
+        _replace_with_retry(source, backup)
         try:
-            os.replace(temp, source)
+            _replace_with_retry(temp, source)
         except Exception:
-            os.replace(backup, source)
+            _replace_with_retry(backup, source)
             raise
         invalidate_playback_plan(source)
         refresh_cache(job.library_id)

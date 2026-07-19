@@ -38,7 +38,7 @@ POTPLAYER_CANDIDATES = [
     Path(r"D:\Program Files\DAUM\PotPlayer\PotPlayer64.exe"),
     Path(r"C:\Program Files (x86)\DAUM\PotPlayer\PotPlayerMini.exe"),
 ]
-PLAYER_MODE = "potplayer"
+PLAYER_MODE = "html5"
 
 
 def detect_potplayer_path() -> str:

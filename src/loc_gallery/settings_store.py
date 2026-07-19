@@ -108,6 +108,9 @@ def load_settings(library_id: str | None = None) -> dict:
         merged = _load_global()
         if library_id:
             merged.update(_load_library_overrides(library_id))
+        mode = (merged.get("player_mode") or "").strip().lower()
+        if mode == "smart":
+            merged["player_mode"] = "html5"
         return merged
 
 

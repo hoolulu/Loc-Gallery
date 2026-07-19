@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from loc_gallery.config import VIDEO_ROOT  # noqa: E402
+from avv_gallery.config import VIDEO_ROOT  # noqa: E402
 
 BASE = "http://127.0.0.1:3456"
 PLANS_FILE = ROOT / "data" / "cache" / "playback_plans.json"

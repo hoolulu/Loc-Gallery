@@ -192,6 +192,7 @@
     <button id="btn-sel-rename" class="ui-btn">重命名</button>
     <button id="btn-sel-move" class="ui-btn">移动</button>
     <button id="btn-sel-regen" class="ui-btn">生成缩略图</button>
+    <button id="btn-sel-remux" class="ui-btn">修复为标准 MP4</button>
     <button id="btn-sel-delete" class="ui-btn danger">删除到回收站</button>
     <button id="btn-sel-cancel" class="ui-btn">取消</button>
   </div>
@@ -288,11 +289,11 @@
               <span class="settings-field-label">播放方式</span>
               <div class="player-mode-inline">
                 <label class="player-mode-opt">
-                  <input type="radio" name="player-mode" value="html5" class="sr-only">
+                  <input type="radio" name="player-mode" value="html5" class="sr-only" checked>
                   <span>HTML5</span>
                 </label>
                 <label class="player-mode-opt">
-                  <input type="radio" name="player-mode" value="potplayer" class="sr-only" checked>
+                  <input type="radio" name="player-mode" value="potplayer" class="sr-only">
                   <span>PotPlayer</span>
                 </label>
               </div>
@@ -387,6 +388,7 @@
       </p>
       <div class="dialog-btns mt-6 flex flex-wrap justify-end gap-2">
         <button type="button" id="nonstandard-btn-remux" class="ui-btn ui-btn-primary rounded-lg px-4 py-2">修复为标准 MP4</button>
+        <button type="button" id="nonstandard-btn-web" class="ui-btn rounded-lg px-4 py-2 hidden">网页切片播放</button>
         <button type="button" id="nonstandard-btn-potplayer" class="ui-btn rounded-lg px-4 py-2">PotPlayer 播放</button>
         <button type="submit" class="ui-btn rounded-lg px-4 py-2" value="cancel">取消</button>
       </div>
@@ -406,6 +408,6 @@
   </dialog>
 
   <script src="/static/vendor/hls.min.js"></script>
-  <script src="/static/app.js?v=83"></script>
+  <script src="/static/app.js?v=88"></script>
 </body>
 </html>
