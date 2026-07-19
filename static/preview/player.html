@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Loc Gallery · Player Preview</title>
+  <link rel="stylesheet" href="../tailwind.css?v=1">
+  <link rel="stylesheet" href="../style.css?v=46">
+  <style>
+    .player-mock {
+      position: relative;
+      display: flex;
+      flex: 1 1 auto;
+      width: 100%;
+      height: 100%;
+      min-height: 12rem;
+      overflow: hidden;
+      background: #000;
+      border-radius: 0.25rem;
+    }
+    .player-mock-frame {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+    .player-mock-controls {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+      padding: 0.45rem 0.75rem;
+      background: linear-gradient(transparent, rgba(0,0,0,0.82));
+      color: #f4f4f5;
+      font: 12px/1.2 system-ui, sans-serif;
+    }
+    .player-mock-btn {
+      width: 1.5rem;
+      height: 1.5rem;
+      border: 0;
+      border-radius: 0.25rem;
+      background: transparent;
+      color: inherit;
+      font-size: 0.95rem;
+      cursor: default;
+    }
+    .player-mock-progress {
+      flex: 1;
+      height: 0.28rem;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.25);
+      overflow: hidden;
+    }
+    .player-mock-progress > span {
+      display: block;
+      width: 28%;
+      height: 100%;
+      background: #e50914;
+      border-radius: inherit;
+    }
+    .player-mock-time { opacity: 0.9; white-space: nowrap; }
+    .player-mock-icon { opacity: 0.85; font-size: 0.9rem; }
+  </style>
+</head>
+<body class="flex h-full flex-col overflow-hidden bg-surface text-zinc-100 antialiased">
+
+  <header class="z-50 shrink-0 border-b border-surface-border bg-surface-raised/95 backdrop-blur-sm">
+    <div class="flex flex-wrap items-center gap-3 px-5 py-3">
+      <h1 class="text-lg font-bold tracking-tight"><span class="text-accent">Loc</span> Gallery</h1>
+      <div class="ml-auto flex min-w-[280px] flex-1 items-center justify-end gap-2">
+        <input type="search" placeholder="搜索标题 / 文件名 / 分类..." class="w-full max-w-sm rounded-lg border border-surface-border bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none">
+        <button class="ui-btn shrink-0 rounded-lg border border-surface-border px-3 py-2 text-sm">批量</button>
+        <button class="ui-btn shrink-0 rounded-lg border border-surface-border px-3 py-2 text-sm">设置</button>
+        <button class="ui-btn shrink-0 rounded-lg border border-surface-border bg-zinc-800 px-3 py-2 text-sm">刷新</button>
+      </div>
+    </div>
+    <div class="progress-bar-wrap px-5 pb-3">
+      <div class="progress-info">
+        <div class="progress-info-left">
+          <span>全库 64/65 (98.5%) | 当前页 32/32 | 队列 0 | 生成中 0 | 未开始 1 · 仅按需生成当前浏览页面的缩略图</span>
+        </div>
+        <div class="progress-actions">
+          <button class="ui-btn sm rounded-md border border-surface-border px-2.5 py-1">暂停</button>
+        </div>
+      </div>
+      <div class="progress-track mt-2"><div class="progress-fill" style="width:99.9%"></div></div>
+    </div>
+  </header>
+
+  <div class="layout flex min-h-0 flex-1">
+    <aside id="sidebar" class="flex w-60 shrink-0 flex-col border-r border-surface-border bg-surface">
+      <div class="sidebar-head border-b border-surface-border">
+        <div class="sidebar-title">分类</div>
+        <select class="sidebar-sort"><option selected>自定义（拖拽排序）</option></select>
+      </div>
+      <div id="category-list" class="cat-nav">
+      <div class="cat-item cat-all" role="button" tabindex="0">
+        <span class="cat-left"><span class="cat-name">全部</span></span>
+        <span class="cat-count">700</span>
+      </div>
+      <div class="cat-item active starred" data-category="自然风光" role="button" tabindex="0">
+        <span class="cat-left">
+          <span class="cat-grip" title="按住拖拽排序">⋮⋮</span>
+          <span class="cat-star on" title="加星标">★</span>
+          <span class="cat-name" title="自然风光">自然风光</span>
+        </span>
+        <span class="cat-count">64</span>
+      </div>
+      <div class="cat-item" data-category="城市夜景" role="button" tabindex="0">
+        <span class="cat-left">
+          <span class="cat-grip" title="按住拖拽排序">⋮⋮</span>
+          <span class="cat-star" title="加星标">★</span>
+          <span class="cat-name" title="城市夜景">城市夜景</span>
+        </span>
+        <span class="cat-count">186</span>
+      </div>
+      <div class="cat-item" data-category="海岸晨曦" role="button" tabindex="0">
+        <span class="cat-left">
+          <span class="cat-grip" title="按住拖拽排序">⋮⋮</span>
+          <span class="cat-star" title="加星标">★</span>
+          <span class="cat-name" title="海岸晨曦">海岸晨曦</span>
+        </span>
+        <span class="cat-count">142</span>
+      </div>
+      <div class="cat-item" data-category="山林徒步" role="button" tabindex="0">
+        <span class="cat-left">
+          <span class="cat-grip" title="按住拖拽排序">⋮⋮</span>
+          <span class="cat-star" title="加星标">★</span>
+          <span class="cat-name" title="山林徒步">山林徒步</span>
+        </span>
+        <span class="cat-count">128</span>
+      </div>
+      <div class="cat-item starred" data-category="星空银河" role="button" tabindex="0">
+        <span class="cat-left">
+          <span class="cat-grip" title="按住拖拽排序">⋮⋮</span>
+          <span class="cat-star on" title="加星标">★</span>
+          <span class="cat-name" title="星空银河">星空银河</span>
+        </span>
+        <span class="cat-count">96</span>
+      </div>
+      <div class="cat-item" data-category="四季田野" role="button" tabindex="0">
+        <span class="cat-left">
+          <span class="cat-grip" title="按住拖拽排序">⋮⋮</span>
+          <span class="cat-star" title="加星标">★</span>
+          <span class="cat-name" title="四季田野">四季田野</span>
+        </span>
+        <span class="cat-count">84</span>
+      </div>
+      </div>
+      <div id="folder-panel" class="subdir-nav">
+<div class="subdir-title">子目录</div>
+      <button type="button" class="subdir-item">
+        <span class="subdir-name">山地航拍</span>
+        <span class="subdir-count">86</span>
+      </button>
+      <button type="button" class="subdir-item active">
+        <span class="subdir-name">湖畔晨雾</span>
+        <span class="subdir-count">72</span>
+      </button>
+      <button type="button" class="subdir-item">
+        <span class="subdir-name">云海日出</span>
+        <span class="subdir-count">58</span>
+      </button>
+      <button type="button" class="subdir-item">
+        <span class="subdir-name">林间小径</span>
+        <span class="subdir-count">32</span>
+      </button>
+      </div>
+    </aside>
+
+    <div id="content-wrap" class="flex min-h-0 min-w-0 flex-1">
+      <main class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <div id="player-view" class="player-view flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div class="player-view-header flex shrink-0 flex-wrap items-center gap-3 border-b border-surface-border px-5 py-3">
+            <button type="button" class="ui-btn rounded-lg border border-surface-border px-3 py-1.5 text-sm">← 返回列表</button>
+            <div class="min-w-0 flex-1">
+              <h2 class="truncate text-sm font-semibold text-zinc-100">阿尔卑斯晨雾</h2>
+              <p class="truncate text-xs text-zinc-500" title="D:\Videos\自然风光\湖畔晨雾\scenery_clip_01.mp4">D:\Videos\自然风光\湖畔晨雾\scenery_clip_01.mp4</p>
+              <p class="player-status text-xs text-amber-400/90">标准格式 · H264</p>
+            </div>
+            <div class="flex gap-2">
+              <button type="button" class="ui-btn sm rounded px-2 py-1 text-xs">上一个</button>
+              <button type="button" class="ui-btn sm rounded px-2 py-1 text-xs">下一个</button>
+              <button type="button" class="ui-btn sm rounded px-2 py-1 text-xs">PotPlayer</button>
+            </div>
+          </div>
+          <div class="flex min-h-0 flex-1 flex-col lg:flex-row">
+            <div id="player-stage" class="player-stage flex min-h-0 flex-1 p-2 sm:p-4">
+              <div class="player-mock" aria-label="模拟播放界面">
+                <img class="player-mock-frame" src="assets/hero.jpg" alt="阿尔卑斯晨雾">
+                <div class="player-mock-controls">
+                  <button type="button" class="player-mock-btn" aria-hidden="true">⏸</button>
+                  <div class="player-mock-progress" aria-hidden="true"><span></span></div>
+                  <span class="player-mock-time">0:42 / 3:18</span>
+                  <span class="player-mock-icon" aria-hidden="true">🔊</span>
+                  <span class="player-mock-icon" aria-hidden="true">⛶</span>
+                </div>
+              </div>
+            </div>
+            <div id="player-playlist" class="player-playlist w-full shrink-0 overflow-y-auto border-t border-surface-border p-2 lg:w-72 lg:border-l lg:border-t-0">
+          <button type="button" class="player-pl-item active">
+            <div class="player-pl-thumb"><img src="assets/thumb-01.jpg" alt=""></div>
+            <div class="player-pl-meta min-w-0">
+              <p class="truncate text-xs font-medium">阿尔卑斯晨雾</p>
+              <p class="truncate text-[10px] text-zinc-600">scenery_clip_01.mp4</p>
+            </div>
+          </button>
+          <button type="button" class="player-pl-item">
+            <div class="player-pl-thumb"><img src="assets/thumb-02.jpg" alt=""></div>
+            <div class="player-pl-meta min-w-0">
+              <p class="truncate text-xs font-medium">冰岛海岸线</p>
+              <p class="truncate text-[10px] text-zinc-600">scenery_clip_02.mp4</p>
+            </div>
+          </button>
+          <button type="button" class="player-pl-item">
+            <div class="player-pl-thumb"><img src="assets/thumb-03.jpg" alt=""></div>
+            <div class="player-pl-meta min-w-0">
+              <p class="truncate text-xs font-medium">京都初夏</p>
+              <p class="truncate text-[10px] text-zinc-600">scenery_clip_03.mp4</p>
+            </div>
+          </button>
+          <button type="button" class="player-pl-item">
+            <div class="player-pl-thumb"><img src="assets/thumb-04.jpg" alt=""></div>
+            <div class="player-pl-meta min-w-0">
+              <p class="truncate text-xs font-medium">挪威峡湾</p>
+              <p class="truncate text-[10px] text-zinc-600">scenery_clip_04.mp4</p>
+            </div>
+          </button>
+          <button type="button" class="player-pl-item">
+            <div class="player-pl-thumb"><img src="assets/thumb-05.jpg" alt=""></div>
+            <div class="player-pl-meta min-w-0">
+              <p class="truncate text-xs font-medium">黄山云海</p>
+              <p class="truncate text-[10px] text-zinc-600">scenery_clip_05.mp4</p>
+            </div>
+          </button>
+          <button type="button" class="player-pl-item">
+            <div class="player-pl-thumb"><img src="assets/thumb-06.jpg" alt=""></div>
+            <div class="player-pl-meta min-w-0">
+              <p class="truncate text-xs font-medium">撒哈拉暮色</p>
+              <p class="truncate text-[10px] text-zinc-600">scenery_clip_06.mp4</p>
+            </div>
+          </button>
+          <button type="button" class="player-pl-item">
+            <div class="player-pl-thumb"><img src="assets/thumb-07.jpg" alt=""></div>
+            <div class="player-pl-meta min-w-0">
+              <p class="truncate text-xs font-medium">新西兰湖泊</p>
+              <p class="truncate text-[10px] text-zinc-600">scenery_clip_07.mp4</p>
+            </div>
+          </button>
+          <button type="button" class="player-pl-item">
+            <div class="player-pl-thumb"><img src="assets/thumb-08.jpg" alt=""></div>
+            <div class="player-pl-meta min-w-0">
+              <p class="truncate text-xs font-medium">张家界峰林</p>
+              <p class="truncate text-[10px] text-zinc-600">scenery_clip_08.mp4</p>
+            </div>
+          </button>
+          <button type="button" class="player-pl-item">
+            <div class="player-pl-thumb"><img src="assets/thumb-09.jpg" alt=""></div>
+            <div class="player-pl-meta min-w-0">
+              <p class="truncate text-xs font-medium">桂林山水</p>
+              <p class="truncate text-[10px] text-zinc-600">scenery_clip_09.mp4</p>
+            </div>
+          </button>
+          <button type="button" class="player-pl-item">
+            <div class="player-pl-thumb"><img src="assets/thumb-10.jpg" alt=""></div>
+            <div class="player-pl-meta min-w-0">
+              <p class="truncate text-xs font-medium">青海湖画卷</p>
+              <p class="truncate text-[10px] text-zinc-600">scenery_clip_10.mp4</p>
+            </div>
+          </button>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+</body>
+</html>

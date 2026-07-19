@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Loc Gallery · Settings</title>
+  <link rel="stylesheet" href="../tailwind.css?v=1">
+  <link rel="stylesheet" href="../style.css?v=46">
+  <style>
+    body.preview .card-fav.on { opacity: 1; }
+    body.preview .card:hover .card-fav.on { opacity: 1; }
+  </style>
+</head>
+<body class="preview flex h-full flex-col overflow-hidden bg-surface text-zinc-100 antialiased">
+
+  <header class="z-50 shrink-0 border-b border-surface-border bg-surface-raised/95 backdrop-blur-sm">
+    <div class="flex flex-wrap items-center gap-3 px-5 py-3">
+      <h1 class="text-lg font-bold tracking-tight"><span class="text-accent">Loc</span> Gallery</h1>
+      <div class="ml-auto flex min-w-[280px] flex-1 items-center justify-end gap-2">
+        <input type="search" placeholder="搜索标题 / 文件名 / 分类..." autocomplete="off"
+          class="w-full max-w-sm rounded-lg border border-surface-border bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-accent/60 focus:ring-1 focus:ring-accent/30">
+        <button class="ui-btn shrink-0 rounded-lg border border-surface-border px-3 py-2 text-sm">批量</button>
+        <button class="ui-btn shrink-0 rounded-lg border border-surface-border px-3 py-2 text-sm ui-btn active">设置</button>
+        <button class="ui-btn shrink-0 rounded-lg border border-surface-border bg-zinc-800 px-3 py-2 text-sm">刷新</button>
+      </div>
+    </div>
+    <div class="progress-bar-wrap px-5 pb-3">
+      <div class="progress-info">
+        <div class="progress-info-left">
+          <span id="progress-text">全库 64/65 (98.5%) | 当前页 32/32 | 队列 0 | 生成中 0 | 未开始 1 · 仅按需生成当前浏览页面的缩略图</span>
+        </div>
+        <div class="progress-actions">
+          <button class="ui-btn sm rounded-md border border-surface-border px-2.5 py-1">暂停</button>
+        </div>
+      </div>
+      <div class="progress-track mt-2"><div id="progress-fill" class="progress-fill" style="width:99.9%"></div></div>
+    </div>
+  </header>
+
+  <div class="layout flex min-h-0 flex-1">
+    <aside id="sidebar" class="flex w-60 shrink-0 flex-col border-r border-surface-border bg-surface">
+      <div class="sidebar-head border-b border-surface-border">
+        <div class="sidebar-title">分类</div>
+        <select class="sidebar-sort" title="分类排序">
+          <option selected>自定义（拖拽排序）</option>
+          <option>名称 A-Z</option>
+          <option>数量多到少</option>
+        </select>
+      </div>
+      <div id="category-list" class="cat-nav">
+      <div class="cat-item cat-all" role="button" tabindex="0">
+        <span class="cat-left"><span class="cat-name">全部</span></span>
+        <span class="cat-count">700</span>
+      </div>
+      <div class="cat-item active starred" data-category="自然风光" role="button" tabindex="0">
+        <span class="cat-left">
+          <span class="cat-grip" title="按住拖拽排序">⋮⋮</span>
+          <span class="cat-star on" title="加星标">★</span>
+          <span class="cat-name" title="自然风光">自然风光</span>
+        </span>
+        <span class="cat-count">64</span>
+      </div>
+      <div class="cat-item" data-category="城市夜景" role="button" tabindex="0">
+        <span class="cat-left">
+          <span class="cat-grip" title="按住拖拽排序">⋮⋮</span>
+          <span class="cat-star" title="加星标">★</span>
+          <span class="cat-name" title="城市夜景">城市夜景</span>
+        </span>
+        <span class="cat-count">186</span>
+      </div>
+      <div class="cat-item" data-category="海岸晨曦" role="button" tabindex="0">
+        <span class="cat-left">
+          <span class="cat-grip" title="按住拖拽排序">⋮⋮</span>
+          <span class="cat-star" title="加星标">★</span>
+          <span class="cat-name" title="海岸晨曦">海岸晨曦</span>
+        </span>
+        <span class="cat-count">142</span>
+      </div>
+      <div class="cat-item" data-category="山林徒步" role="button" tabindex="0">
+        <span class="cat-left">
+          <span class="cat-grip" title="按住拖拽排序">⋮⋮</span>
+          <span class="cat-star" title="加星标">★</span>
+          <span class="cat-name" title="山林徒步">山林徒步</span>
+        </span>
+        <span class="cat-count">128</span>
+      </div>
+      <div class="cat-item starred" data-category="星空银河" role="button" tabindex="0">
+        <span class="cat-left">
+          <span class="cat-grip" title="按住拖拽排序">⋮⋮</span>
+          <span class="cat-star on" title="加星标">★</span>
+          <span class="cat-name" title="星空银河">星空银河</span>
+        </span>
+        <span class="cat-count">96</span>
+      </div>
+      <div class="cat-item" data-category="四季田野" role="button" tabindex="0">
+        <span class="cat-left">
+          <span class="cat-grip" title="按住拖拽排序">⋮⋮</span>
+          <span class="cat-star" title="加星标">★</span>
+          <span class="cat-name" title="四季田野">四季田野</span>
+        </span>
+        <span class="cat-count">84</span>
+      </div>
+      </div>
+      <div id="folder-panel" class="subdir-nav">
+<div class="subdir-title">子目录</div>
+      <button type="button" class="subdir-item">
+        <span class="subdir-name">山地航拍</span>
+        <span class="subdir-count">86</span>
+      </button>
+      <button type="button" class="subdir-item active">
+        <span class="subdir-name">湖畔晨雾</span>
+        <span class="subdir-count">72</span>
+      </button>
+      <button type="button" class="subdir-item">
+        <span class="subdir-name">云海日出</span>
+        <span class="subdir-count">58</span>
+      </button>
+      <button type="button" class="subdir-item">
+        <span class="subdir-name">林间小径</span>
+        <span class="subdir-count">32</span>
+      </button>
+      </div>
+    </aside>
+
+    <div id="content-wrap" class="flex min-h-0 min-w-0 flex-1">
+      <main class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <div id="gallery-toolbar" class="toolbar flex shrink-0 flex-wrap items-center justify-between gap-3 px-5 pt-4">
+          <div class="toolbar-left flex flex-wrap items-center gap-3">
+            <span id="breadcrumb" class="breadcrumb text-sm text-zinc-400">自然风光<span class="sep">/</span>湖畔晨雾</span>
+            <span id="status" class="status text-sm text-zinc-500">共 64 个 · 第 1 / 2 页</span>
+            <div class="batch-tools flex items-center gap-2 border-l border-surface-border pl-3">
+              <label class="batch-select-label flex cursor-pointer items-center gap-2 text-sm text-zinc-400">
+                <input type="checkbox" id="select-page-all" class="h-4 w-4 accent-red-600">
+                <span>全选本页</span>
+              </label>
+              <button type="button" id="btn-batch-clear" class="ui-btn sm rounded-md px-2 py-1 hidden">取消选择</button>
+            </div>
+            <select id="sort" class="rounded-lg border border-surface-border bg-zinc-950 px-2 py-1.5 text-xs text-zinc-300">
+              <option value="mtime_desc" selected>最新优先</option>
+              <option value="played_desc">最近播放</option>
+              <option value="title_asc">标题 A-Z</option>
+              <option value="size_desc">体积最大</option>
+            </select>
+          </div>
+          <div class="toolbar-right flex items-center gap-3">
+            <div class="view-mode-btns flex gap-1 border-r border-surface-border pr-3">
+              <button type="button" class="view-mode-btn ui-btn rounded-lg border border-surface-border px-2.5 py-1 text-xs" data-view="favorites"><span class="view-mode-icon" aria-hidden="true">♥</span>我的收藏</button>
+              <button type="button" class="view-mode-btn ui-btn rounded-lg border border-surface-border px-2.5 py-1 text-xs" data-view="history"><span class="view-mode-icon" aria-hidden="true">⏱</span>最近播放</button>
+            </div>
+            <div class="page-size-btns flex gap-1">
+              <button class="page-size ui-btn rounded-lg px-2.5 py-1 text-xs active">32</button>
+              <button class="page-size ui-btn rounded-lg border border-surface-border px-2.5 py-1 text-xs">64</button>
+              <button class="page-size ui-btn rounded-lg border border-surface-border px-2.5 py-1 text-xs">全部</button>
+            </div>
+            <div class="pagination flex items-center gap-2 text-sm">
+              <button class="ui-btn rounded-lg border border-surface-border px-2 py-1" disabled>◀</button>
+              <span class="text-zinc-500">第 1 / 2 页</span>
+              <button class="ui-btn rounded-lg border border-surface-border px-2 py-1">▶</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="gallery-view" class="min-h-0 flex-1 overflow-y-auto px-5 pb-20 pt-4">
+          <div id="grid" class="grid">
+        <div class="card playing" data-id="demo-1">
+          <div class="thumb-wrap" id="thumb-demo-1">
+            <img src="assets/thumb-01.jpg" alt="阿尔卑斯晨雾" loading="eager">
+          </div>
+          <button type="button" class="card-fav" aria-label="收藏">♥</button>
+          <input type="checkbox" class="card-check" aria-label="选择">
+          <div class="card-title">阿尔卑斯晨雾</div>
+        </div>
+        <div class="card" data-id="demo-2">
+          <div class="thumb-wrap" id="thumb-demo-2">
+            <img src="assets/thumb-02.jpg" alt="冰岛海岸线" loading="eager">
+          </div>
+          <button type="button" class="card-fav on" aria-label="收藏">♥</button>
+          <input type="checkbox" class="card-check" aria-label="选择">
+          <div class="card-title">冰岛海岸线</div>
+        </div>
+        <div class="card" data-id="demo-3">
+          <div class="thumb-wrap" id="thumb-demo-3">
+            <img src="assets/thumb-03.jpg" alt="京都初夏" loading="eager">
+          </div>
+          <button type="button" class="card-fav" aria-label="收藏">♥</button>
+          <input type="checkbox" class="card-check" aria-label="选择">
+          <div class="card-title">京都初夏</div>
+        </div>
+        <div class="card" data-id="demo-4">
+          <div class="thumb-wrap" id="thumb-demo-4">
+            <img src="assets/thumb-04.jpg" alt="挪威峡湾" loading="eager">
+          </div>
+          <button type="button" class="card-fav" aria-label="收藏">♥</button>
+          <input type="checkbox" class="card-check" aria-label="选择">
+          <div class="card-title">挪威峡湾</div>
+        </div>
+        <div class="card" data-id="demo-5">
+          <div class="thumb-wrap" id="thumb-demo-5">
+            <img src="assets/thumb-05.jpg" alt="黄山云海" loading="eager">
+          </div>
+          <button type="button" class="card-fav" aria-label="收藏">♥</button>
+          <input type="checkbox" class="card-check" aria-label="选择">
+          <div class="card-title">黄山云海</div>
+        </div>
+        <div class="card" data-id="demo-6">
+          <div class="thumb-wrap" id="thumb-demo-6">
+            <img src="assets/thumb-06.jpg" alt="撒哈拉暮色" loading="eager">
+          </div>
+          <button type="button" class="card-fav" aria-label="收藏">♥</button>
+          <input type="checkbox" class="card-check" aria-label="选择">
+          <div class="card-title">撒哈拉暮色</div>
+        </div>
+        <div class="card" data-id="demo-7">
+          <div class="thumb-wrap" id="thumb-demo-7">
+            <img src="assets/thumb-07.jpg" alt="新西兰湖泊" loading="eager">
+          </div>
+          <button type="button" class="card-fav on" aria-label="收藏">♥</button>
+          <input type="checkbox" class="card-check" aria-label="选择">
+          <div class="card-title">新西兰湖泊</div>
+        </div>
+        <div class="card" data-id="demo-8">
+          <div class="thumb-wrap" id="thumb-demo-8">
+            <img src="assets/thumb-08.jpg" alt="张家界峰林" loading="eager">
+          </div>
+          <button type="button" class="card-fav" aria-label="收藏">♥</button>
+          <input type="checkbox" class="card-check" aria-label="选择">
+          <div class="card-title">张家界峰林</div>
+        </div>
+        <div class="card" data-id="demo-9">
+          <div class="thumb-wrap" id="thumb-demo-9">
+            <img src="assets/thumb-09.jpg" alt="桂林山水" loading="eager">
+          </div>
+          <button type="button" class="card-fav" aria-label="收藏">♥</button>
+          <input type="checkbox" class="card-check" aria-label="选择">
+          <div class="card-title">桂林山水</div>
+        </div>
+        <div class="card" data-id="demo-10">
+          <div class="thumb-wrap" id="thumb-demo-10">
+            <img src="assets/thumb-10.jpg" alt="青海湖画卷" loading="eager">
+          </div>
+          <button type="button" class="card-fav" aria-label="收藏">♥</button>
+          <input type="checkbox" class="card-check" aria-label="选择">
+          <div class="card-title">青海湖画卷</div>
+        </div>
+        <div class="card" data-id="demo-11">
+          <div class="thumb-wrap" id="thumb-demo-11">
+            <img src="assets/thumb-11.jpg" alt="稻城秋色" loading="eager">
+          </div>
+          <button type="button" class="card-fav" aria-label="收藏">♥</button>
+          <input type="checkbox" class="card-check" aria-label="选择">
+          <div class="card-title">稻城秋色</div>
+        </div>
+        <div class="card" data-id="demo-12">
+          <div class="thumb-wrap" id="thumb-demo-12">
+            <img src="assets/thumb-12.jpg" alt="喀纳斯湖" loading="eager">
+          </div>
+          <button type="button" class="card-fav" aria-label="收藏">♥</button>
+          <input type="checkbox" class="card-check" aria-label="选择">
+          <div class="card-title">喀纳斯湖</div>
+        </div>
+        <div class="card" data-id="demo-13">
+          <div class="thumb-wrap" id="thumb-demo-13">
+            <img src="assets/thumb-13.jpg" alt="婺源村落" loading="eager">
+          </div>
+          <button type="button" class="card-fav" aria-label="收藏">♥</button>
+          <input type="checkbox" class="card-check" aria-label="选择">
+          <div class="card-title">婺源村落</div>
+        </div>
+        <div class="card" data-id="demo-14">
+          <div class="thumb-wrap" id="thumb-demo-14">
+            <img src="assets/thumb-14.jpg" alt="塞罕坝草原" loading="eager">
+          </div>
+          <button type="button" class="card-fav" aria-label="收藏">♥</button>
+          <input type="checkbox" class="card-check" aria-label="选择">
+          <div class="card-title">塞罕坝草原</div>
+        </div>
+        <div class="card" data-id="demo-15">
+          <div class="thumb-wrap" id="thumb-demo-15">
+            <img src="assets/thumb-15.jpg" alt="泸沽湖镜" loading="eager">
+          </div>
+          <button type="button" class="card-fav on" aria-label="收藏">♥</button>
+          <input type="checkbox" class="card-check" aria-label="选择">
+          <div class="card-title">泸沽湖镜</div>
+        </div>
+        <div class="card" data-id="demo-16">
+          <div class="thumb-wrap" id="thumb-demo-16">
+            <img src="assets/thumb-16.jpg" alt="亚丁三神山" loading="eager">
+          </div>
+          <button type="button" class="card-fav" aria-label="收藏">♥</button>
+          <input type="checkbox" class="card-check" aria-label="选择">
+          <div class="card-title">亚丁三神山</div>
+        </div>
+        <div class="card" data-id="demo-17">
+          <div class="thumb-wrap" id="thumb-demo-17">
+            <img src="assets/thumb-17.jpg" alt="梅里雪山" loading="eager">
+          </div>
+          <button type="button" class="card-fav" aria-label="收藏">♥</button>
+          <input type="checkbox" class="card-check" aria-label="选择">
+          <div class="card-title">梅里雪山</div>
+        </div>
+        <div class="card" data-id="demo-18">
+          <div class="thumb-wrap" id="thumb-demo-18">
+            <img src="assets/thumb-18.jpg" alt="纳木错晨曲" loading="eager">
+          </div>
+          <button type="button" class="card-fav" aria-label="收藏">♥</button>
+          <input type="checkbox" class="card-check" aria-label="选择">
+          <div class="card-title">纳木错晨曲</div>
+        </div>
+        <div class="card" data-id="demo-19">
+          <div class="thumb-wrap" id="thumb-demo-19">
+            <img src="assets/thumb-19.jpg" alt="祁连山草原" loading="eager">
+          </div>
+          <button type="button" class="card-fav" aria-label="收藏">♥</button>
+          <input type="checkbox" class="card-check" aria-label="选择">
+          <div class="card-title">祁连山草原</div>
+        </div>
+        <div class="card" data-id="demo-20">
+          <div class="thumb-wrap" id="thumb-demo-20">
+            <img src="assets/thumb-20.jpg" alt="西双版纳雨林" loading="eager">
+          </div>
+          <button type="button" class="card-fav" aria-label="收藏">♥</button>
+          <input type="checkbox" class="card-check" aria-label="选择">
+          <div class="card-title">西双版纳雨林</div>
+        </div>
+        <div class="card" data-id="demo-21">
+          <div class="thumb-wrap" id="thumb-demo-21">
+            <img src="assets/thumb-21.jpg" alt="霞浦滩涂" loading="eager">
+          </div>
+          <button type="button" class="card-fav" aria-label="收藏">♥</button>
+          <input type="checkbox" class="card-check" aria-label="选择">
+          <div class="card-title">霞浦滩涂</div>
+        </div>
+        <div class="card" data-id="demo-22">
+          <div class="thumb-wrap" id="thumb-demo-22">
+            <img src="assets/thumb-22.jpg" alt="元阳梯田" loading="eager">
+          </div>
+          <button type="button" class="card-fav" aria-label="收藏">♥</button>
+          <input type="checkbox" class="card-check" aria-label="选择">
+          <div class="card-title">元阳梯田</div>
+        </div>
+        <div class="card" data-id="demo-23">
+          <div class="thumb-wrap" id="thumb-demo-23">
+            <img src="assets/thumb-23.jpg" alt="茶卡盐湖" loading="eager">
+          </div>
+          <button type="button" class="card-fav" aria-label="收藏">♥</button>
+          <input type="checkbox" class="card-check" aria-label="选择">
+          <div class="card-title">茶卡盐湖</div>
+        </div>
+        <div class="card" data-id="demo-24">
+          <div class="thumb-wrap" id="thumb-demo-24">
+            <img src="assets/thumb-24.jpg" alt="梵净山金顶" loading="eager">
+          </div>
+          <button type="button" class="card-fav" aria-label="收藏">♥</button>
+          <input type="checkbox" class="card-check" aria-label="选择">
+          <div class="card-title">梵净山金顶</div>
+        </div>
+        <div class="card" data-id="demo-25">
+          <div class="thumb-wrap" id="thumb-demo-25">
+            <img src="assets/thumb-25.jpg" alt="大兴安岭秋色" loading="eager">
+          </div>
+          <button type="button" class="card-fav" aria-label="收藏">♥</button>
+          <input type="checkbox" class="card-check" aria-label="选择">
+          <div class="card-title">大兴安岭秋色</div>
+        </div>
+        <div class="card" data-id="demo-26">
+          <div class="thumb-wrap" id="thumb-demo-26">
+            <img src="assets/thumb-26.jpg" alt="泸沽湖晨雾" loading="eager">
+          </div>
+          <button type="button" class="card-fav" aria-label="收藏">♥</button>
+          <input type="checkbox" class="card-check" aria-label="选择">
+          <div class="card-title">泸沽湖晨雾</div>
+        </div>
+        <div class="card" data-id="demo-27">
+          <div class="thumb-wrap" id="thumb-demo-27">
+            <img src="assets/thumb-27.jpg" alt="普者黑荷塘" loading="eager">
+          </div>
+          <button type="button" class="card-fav" aria-label="收藏">♥</button>
+          <input type="checkbox" class="card-check" aria-label="选择">
+          <div class="card-title">普者黑荷塘</div>
+        </div>
+        <div class="card" data-id="demo-28">
+          <div class="thumb-wrap" id="thumb-demo-28">
+            <img src="assets/thumb-28.jpg" alt="扎尕那石城" loading="eager">
+          </div>
+          <button type="button" class="card-fav" aria-label="收藏">♥</button>
+          <input type="checkbox" class="card-check" aria-label="选择">
+          <div class="card-title">扎尕那石城</div>
+        </div>
+        <div class="card" data-id="demo-29">
+          <div class="thumb-wrap" id="thumb-demo-29">
+            <img src="assets/thumb-29.jpg" alt="可可西里" loading="eager">
+          </div>
+          <button type="button" class="card-fav" aria-label="收藏">♥</button>
+          <input type="checkbox" class="card-check" aria-label="选择">
+          <div class="card-title">可可西里</div>
+        </div>
+        <div class="card" data-id="demo-30">
+          <div class="thumb-wrap" id="thumb-demo-30">
+            <img src="assets/thumb-30.jpg" alt="若尔盖花湖" loading="eager">
+          </div>
+          <button type="button" class="card-fav" aria-label="收藏">♥</button>
+          <input type="checkbox" class="card-check" aria-label="选择">
+          <div class="card-title">若尔盖花湖</div>
+        </div>
+        <div class="card" data-id="demo-31">
+          <div class="thumb-wrap" id="thumb-demo-31">
+            <img src="assets/thumb-31.jpg" alt="巴音布鲁克" loading="eager">
+          </div>
+          <button type="button" class="card-fav" aria-label="收藏">♥</button>
+          <input type="checkbox" class="card-check" aria-label="选择">
+          <div class="card-title">巴音布鲁克</div>
+        </div>
+        <div class="card" data-id="demo-32">
+          <div class="thumb-wrap" id="thumb-demo-32">
+            <img src="assets/thumb-32.jpg" alt="天山天池" loading="eager">
+          </div>
+          <button type="button" class="card-fav" aria-label="收藏">♥</button>
+          <input type="checkbox" class="card-check" aria-label="选择">
+          <div class="card-title">天山天池</div>
+        </div>
+          </div>
+          <nav id="pagination-bottom" class="pagination-bar">
+            <button type="button" class="page-nav ui-btn" data-action="first" title="第一页" disabled>«</button>
+            <button type="button" class="page-nav ui-btn" data-action="prev" title="上一页" disabled>◀ 上一页</button>
+            <div id="page-numbers" class="page-numbers">
+            <button type="button" class="page-num ui-btn active">1</button>
+            <button type="button" class="page-num ui-btn">2</button>
+            </div>
+            <span id="page-info-bottom" class="page-info-text">第 1 / 2 页</span>
+            <button type="button" class="page-nav ui-btn" data-action="next" title="下一页">下一页 ▶</button>
+            <button type="button" class="page-nav ui-btn" data-action="last" title="最后一页">»</button>
+            <label class="page-jump">跳至
+              <input type="number" id="page-jump-input" min="1" value="1" class="dlg-input">
+              页
+            </label>
+          </nav>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <dialog id="settings-dialog" class="app-dialog" open>
+    <form id="settings-form" class="p-6">
+      <h2 class="text-lg font-semibold">设置</h2>
+      <div class="mt-5">
+        <span class="text-sm text-zinc-400">播放方式</span>
+        <div class="mt-2 grid grid-cols-2 gap-2 rounded-xl border border-surface-border bg-zinc-950 p-1">
+          <label class="cursor-pointer">
+            <input type="radio" name="player-mode" value="html5" class="peer sr-only">
+            <span class="flex items-center justify-center rounded-lg px-3 py-2.5 text-sm text-zinc-500 transition peer-checked:bg-accent peer-checked:text-white">网页 HTML5</span>
+          </label>
+          <label class="cursor-pointer">
+            <input type="radio" name="player-mode" value="potplayer" class="peer sr-only" checked>
+            <span class="flex items-center justify-center rounded-lg px-3 py-2.5 text-sm text-zinc-500 transition peer-checked:bg-accent peer-checked:text-white">PotPlayer</span>
+          </label>
+        </div>
+        <p class="hint mt-2">HTML5 在页面内播放；碎片化视频将自动边切边播。PotPlayer 调用本地播放器。</p>
+      </div>
+      <label class="mt-4 block text-sm text-zinc-400">截图位置（仅影响新生成的缩略图）
+        <input type="number" value="0.6" min="0.05" max="0.95" step="0.05" class="dlg-input mt-1.5 w-full">
+      </label>
+      <label class="mt-4 block text-sm text-zinc-400">随机截图范围（用于「随机生成」）
+        <div class="range-inputs mt-1.5 flex items-center gap-2">
+          <input type="number" value="0.5" min="0.05" max="0.95" step="0.05" class="dlg-input w-full">
+          <span class="range-sep text-zinc-600">~</span>
+          <input type="number" value="0.8" min="0.05" max="0.95" step="0.05" class="dlg-input w-full">
+        </div>
+      </label>
+      <label class="mt-4 block text-sm text-zinc-400">并发线程数
+        <input type="number" value="3" min="1" max="8" step="1" class="dlg-input mt-1.5 w-full">
+      </label>
+      <label class="mt-4 block text-sm text-zinc-400">空闲时扫描全库
+        <select class="dlg-input mt-1.5 w-full">
+          <option value="true">是</option>
+          <option value="false" selected>否（仅按需生成）</option>
+        </select>
+      </label>
+      <label class="mt-4 block text-sm text-zinc-400">默认每页数量
+        <select class="dlg-input mt-1.5 w-full">
+          <option value="32" selected>32</option>
+          <option value="64">64</option>
+          <option value="0">全部</option>
+        </select>
+      </label>
+      <label class="mt-4 block text-sm text-zinc-400">PotPlayer 路径
+        <input type="text" value="C:\Program Files\DAUM\PotPlayer\PotPlayerMini64.exe" class="dlg-input mt-1.5 w-full text-xs">
+      </label>
+      <label class="mt-4 block text-sm text-zinc-400">最近播放保留天数
+        <input type="number" value="180" min="1" max="3650" step="1" class="dlg-input mt-1.5 w-full">
+      </label>
+      <button type="button" class="ui-btn mt-3 w-full rounded-lg border border-surface-border px-4 py-2 text-sm">清空最近播放记录</button>
+      <p class="hint mt-4">修改截图比例不会改动已有缩略图；并发数需重启服务后生效</p>
+      <div class="dialog-btns mt-6 flex justify-end gap-2">
+        <button type="button" class="ui-btn rounded-lg px-4 py-2">取消</button>
+        <button type="button" class="ui-btn ui-btn-primary rounded-lg px-4 py-2">保存</button>
+      </div>
+    </form>
+  </dialog>
+</body>
+</html>
