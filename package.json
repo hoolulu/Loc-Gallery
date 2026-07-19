@@ -1,0 +1,10 @@
+{
+  "name": "loc-gallery",
+  "private": true,
+  "scripts": {
+    "build:css": "tailwindcss -i ./static/tw-input.css -o ./static/tailwind.css --minify"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.17"
+  }
+}

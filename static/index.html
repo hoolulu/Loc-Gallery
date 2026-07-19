@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Loc Gallery</title>
+  <link rel="stylesheet" href="/static/tailwind.css?v=1">
+  <link rel="stylesheet" href="/static/style.css?v=46">
+</head>
+<body class="flex h-full flex-col overflow-hidden bg-surface text-zinc-100 antialiased">
+
+  <header class="z-50 shrink-0 border-b border-surface-border bg-surface-raised/95 backdrop-blur-sm">
+    <div class="flex flex-wrap items-center gap-3 px-5 py-3">
+      <h1 class="text-lg font-bold tracking-tight"><span class="text-accent">Loc</span> Gallery</h1>
+      <div class="ml-auto flex min-w-[280px] flex-1 items-center justify-end gap-2">
+        <input type="search" id="search" placeholder="搜索标题 / 文件名 / 分类..." autocomplete="off"
+          class="w-full max-w-sm rounded-lg border border-surface-border bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-accent/60 focus:ring-1 focus:ring-accent/30">
+        <button id="btn-manage" title="批量选择与管理"
+          class="ui-btn shrink-0 rounded-lg border border-surface-border px-3 py-2 text-sm">批量</button>
+        <button id="btn-settings" title="设置"
+          class="ui-btn shrink-0 rounded-lg border border-surface-border px-3 py-2 text-sm">设置</button>
+        <button id="btn-rescan" title="重新扫描"
+          class="ui-btn shrink-0 rounded-lg border border-surface-border bg-zinc-800 px-3 py-2 text-sm">刷新</button>
+      </div>
+    </div>
+    <div class="progress-bar-wrap px-5 pb-3">
+      <div class="progress-info">
+        <div class="progress-info-left">
+          <span id="progress-text">缩略图: 加载中...</span>
+          <span id="idle-scan-badge" class="idle-scan-badge hidden" title="正在后台补全全库缩略图">后台补全</span>
+        </div>
+        <div class="progress-actions">
+          <button id="btn-pause" class="ui-btn sm rounded-md border border-surface-border px-2.5 py-1">暂停</button>
+          <button id="btn-resume" class="ui-btn sm hidden rounded-md border border-surface-border px-2.5 py-1">继续</button>
+        </div>
+      </div>
+      <div class="progress-track mt-2"><div id="progress-fill" class="progress-fill"></div></div>
+      <div id="thumb-failed-bar" class="thumb-failed-bar hidden mt-2">
+        <div class="thumb-failed-inner">
+          <span class="thumb-failed-label">缩略图失败</span>
+          <span id="thumb-failed-summary" class="thumb-failed-summary"></span>
+          <button type="button" id="btn-show-failed-list" class="ui-btn sm">查看详情</button>
+          <button type="button" id="btn-retry-all-failed" class="ui-btn sm">全部重试</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="layout flex min-h-0 flex-1">
+    <aside id="sidebar" class="flex w-60 shrink-0 flex-col border-r border-surface-border bg-surface">
+      <div class="sidebar-head border-b border-surface-border">
+        <div class="sidebar-title">分类</div>
+        <select id="category-sort" class="sidebar-sort" title="分类排序">
+          <option value="custom">自定义（拖拽排序）</option>
+          <option value="name_asc">名称 A-Z</option>
+          <option value="name_desc">名称 Z-A</option>
+          <option value="count_desc">数量多到少</option>
+          <option value="count_asc">数量少到多</option>
+        </select>
+      </div>
+      <div id="category-list" class="cat-nav"></div>
+      <div id="folder-panel" class="subdir-nav hidden"></div>
+    </aside>
+
+    <div id="content-wrap" class="flex min-h-0 min-w-0 flex-1">
+      <main class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <div id="gallery-toolbar" class="toolbar flex shrink-0 flex-wrap items-center justify-between gap-3 px-5 pt-4">
+          <div class="toolbar-left flex flex-wrap items-center gap-3">
+            <span id="breadcrumb" class="breadcrumb hidden text-sm text-zinc-400"></span>
+            <span id="status" class="status text-sm text-zinc-500"></span>
+            <div class="batch-tools flex items-center gap-2 border-l border-surface-border pl-3">
+              <label class="batch-select-label flex cursor-pointer items-center gap-2 text-sm text-zinc-400">
+                <input type="checkbox" id="select-page-all" class="h-4 w-4 accent-red-600">
+                <span>全选本页</span>
+              </label>
+              <button type="button" id="btn-batch-clear" class="ui-btn sm hidden rounded-md px-2 py-1">取消选择</button>
+            </div>
+            <select id="sort" class="rounded-lg border border-surface-border bg-zinc-950 px-2 py-1.5 text-xs text-zinc-300">
+              <option value="mtime_desc">最新优先</option>
+              <option value="mtime_asc">最旧优先</option>
+              <option value="title_asc">标题 A-Z</option>
+              <option value="title_desc">标题 Z-A</option>
+              <option value="size_desc">体积最大</option>
+              <option value="size_asc">体积最小</option>
+              <option value="category_asc">分类 A-Z</option>
+            </select>
+          </div>
+          <div class="toolbar-right flex items-center gap-3">
+            <div class="view-mode-btns flex gap-1 border-r border-surface-border pr-3">
+              <button type="button" id="btn-view-favorites" class="view-mode-btn ui-btn rounded-lg border border-surface-border px-2.5 py-1 text-xs" data-view="favorites"><span class="view-mode-icon" aria-hidden="true">♥</span>我的收藏</button>
+              <button type="button" id="btn-view-history" class="view-mode-btn ui-btn rounded-lg border border-surface-border px-2.5 py-1 text-xs" data-view="history"><span class="view-mode-icon" aria-hidden="true">⏱</span>最近播放</button>
+            </div>
+            <div class="page-size-btns flex gap-1">
+              <button class="page-size ui-btn rounded-lg px-2.5 py-1 text-xs active" data-size="32">32</button>
+              <button class="page-size ui-btn rounded-lg border border-surface-border px-2.5 py-1 text-xs" data-size="64">64</button>
+              <button class="page-size ui-btn rounded-lg border border-surface-border px-2.5 py-1 text-xs" data-size="0">全部</button>
+            </div>
+            <div class="pagination flex items-center gap-2 text-sm">
+              <button id="btn-prev" class="ui-btn rounded-lg border border-surface-border px-2 py-1" disabled>◀</button>
+              <span id="page-info" class="text-zinc-500">第 1 页</span>
+              <button id="btn-next" class="ui-btn rounded-lg border border-surface-border px-2 py-1" disabled>▶</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="gallery-view" class="min-h-0 flex-1 overflow-y-auto px-5 pb-20 pt-4">
+          <div id="grid" class="grid"></div>
+          <div id="empty" class="empty hidden">暂无视频</div>
+          <nav id="pagination-bottom" class="pagination-bar hidden">
+            <button class="page-nav ui-btn" data-action="first" title="第一页">«</button>
+            <button class="page-nav ui-btn" data-action="prev" title="上一页">◀ 上一页</button>
+            <div id="page-numbers" class="page-numbers"></div>
+            <span id="page-info-bottom" class="page-info-text">第 1 / 1 页</span>
+            <button class="page-nav ui-btn" data-action="next" title="下一页">下一页 ▶</button>
+            <button class="page-nav ui-btn" data-action="last" title="最后一页">»</button>
+            <label class="page-jump">跳至
+              <input type="number" id="page-jump-input" min="1" value="1" class="dlg-input">
+              页
+            </label>
+          </nav>
+        </div>
+
+        <div id="player-view" class="player-view hidden min-h-0 flex-1 flex-col overflow-hidden">
+          <div class="player-view-header flex shrink-0 flex-wrap items-center gap-3 border-b border-surface-border px-5 py-3">
+            <button type="button" id="btn-player-back" class="ui-btn rounded-lg border border-surface-border px-3 py-1.5 text-sm">← 返回列表</button>
+            <div class="min-w-0 flex-1">
+              <h2 id="player-title" class="truncate text-sm font-semibold text-zinc-100"></h2>
+              <p id="player-path" class="truncate text-xs text-zinc-500" title=""></p>
+              <p id="player-status" class="player-status hidden text-xs text-amber-400/90"></p>
+            </div>
+            <div class="flex gap-2">
+              <button type="button" id="btn-player-prev" class="ui-btn sm rounded px-2 py-1 text-xs">上一个</button>
+              <button type="button" id="btn-player-next" class="ui-btn sm rounded px-2 py-1 text-xs">下一个</button>
+              <button type="button" id="btn-player-potplayer" class="ui-btn sm rounded px-2 py-1 text-xs">PotPlayer</button>
+            </div>
+          </div>
+          <div class="flex min-h-0 flex-1 flex-col lg:flex-row">
+            <div id="player-stage" class="player-stage flex min-h-0 flex-1 p-2 sm:p-4"></div>
+            <div id="player-playlist" class="player-playlist w-full shrink-0 overflow-y-auto border-t border-surface-border p-2 lg:w-72 lg:border-l lg:border-t-0"></div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div id="play-overlay" class="play-overlay hidden" role="dialog" aria-modal="true" aria-live="polite">
+    <div class="play-overlay-card">
+      <button type="button" id="play-overlay-close" class="play-overlay-close" title="取消加载" aria-label="取消">×</button>
+      <p id="play-overlay-format" class="play-overlay-format hidden"></p>
+      <p id="play-overlay-video-title" class="play-overlay-video-title"></p>
+      <div class="play-overlay-spinner" aria-hidden="true"></div>
+      <p id="play-overlay-title" class="play-overlay-title">准备播放</p>
+      <p id="play-overlay-detail" class="play-overlay-detail"></p>
+      <div class="play-overlay-track"><div id="play-overlay-fill" class="play-overlay-fill"></div></div>
+      <p id="play-overlay-elapsed" class="play-overlay-elapsed"></p>
+      <div class="play-overlay-actions">
+        <button type="button" id="play-overlay-potplayer" class="ui-btn sm play-overlay-btn">PotPlayer 打开</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="video-engine-host" aria-hidden="true">
+    <video id="html5-player" class="player-video" controls playsinline preload="auto"></video>
+  </div>
+
+  <div id="selection-bar" class="selection-bar hidden">
+    <span id="selection-count">已选 0 个</span>
+    <button id="btn-sel-fav-add" class="ui-btn">加入收藏</button>
+    <button id="btn-sel-fav-remove" class="ui-btn">取消收藏</button>
+    <button id="btn-sel-play" class="ui-btn">播放</button>
+    <button id="btn-sel-rename" class="ui-btn">重命名</button>
+    <button id="btn-sel-move" class="ui-btn">移动</button>
+    <button id="btn-sel-regen" class="ui-btn">生成缩略图</button>
+    <button id="btn-sel-delete" class="ui-btn danger">删除到回收站</button>
+    <button id="btn-sel-cancel" class="ui-btn">取消</button>
+  </div>
+
+  <div id="path-tip" class="path-tip hidden" role="tooltip"></div>
+
+  <div id="ctx-menu" class="ctx-menu hidden">
+    <button data-action="play">播放</button>
+    <button data-action="folder">打开文件夹</button>
+    <button data-action="regen-random">生成缩略图</button>
+    <button data-action="copy">复制路径</button>
+    <button data-action="fav-toggle">加入收藏</button>
+    <div class="sep"></div>
+    <button data-action="rename">重命名文件</button>
+    <button data-action="move">移动到分类</button>
+    <button data-action="delete" class="danger">删除到回收站</button>
+  </div>
+
+  <dialog id="rename-dialog" class="app-dialog">
+    <form method="dialog" class="p-6">
+      <h2 class="text-lg font-semibold">重命名文件</h2>
+      <p class="hint mt-2">将修改磁盘上的原文件名（扩展名保持不变），标题会随之更新。</p>
+      <label class="mt-4 block text-sm text-zinc-400">新文件名（不含扩展名）
+        <input type="text" id="rename-input" required class="dlg-input mt-1.5 w-full">
+      </label>
+      <p id="rename-ext-hint" class="hint"></p>
+      <div class="dialog-btns mt-6 flex justify-end gap-2">
+        <button type="submit" value="cancel" class="ui-btn rounded-lg px-4 py-2">取消</button>
+        <button type="submit" value="save" class="ui-btn ui-btn-primary rounded-lg px-4 py-2">确定</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="move-dialog" class="app-dialog">
+    <form method="dialog" class="p-6">
+      <h2 class="text-lg font-semibold">移动到分类</h2>
+      <p class="hint mt-2">将文件移动到视频库下的目标分类文件夹。</p>
+      <label class="mt-4 block text-sm text-zinc-400">目标分类
+        <select id="move-category" class="dlg-input mt-1.5 w-full"></select>
+      </label>
+      <div class="dialog-btns mt-6 flex justify-end gap-2">
+        <button type="submit" value="cancel" class="ui-btn rounded-lg px-4 py-2">取消</button>
+        <button type="submit" value="save" class="ui-btn ui-btn-primary rounded-lg px-4 py-2">移动</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="settings-dialog" class="app-dialog">
+    <form id="settings-form" class="p-6">
+      <h2 class="text-lg font-semibold">设置</h2>
+
+      <div class="mt-5">
+        <span class="text-sm text-zinc-400">播放方式</span>
+        <div class="mt-2 grid grid-cols-2 gap-2 rounded-xl border border-surface-border bg-zinc-950 p-1">
+          <label class="cursor-pointer">
+            <input type="radio" name="player-mode" value="html5" class="peer sr-only">
+            <span class="flex items-center justify-center rounded-lg px-3 py-2.5 text-sm text-zinc-500 transition peer-checked:bg-accent peer-checked:text-white">网页 HTML5</span>
+          </label>
+          <label class="cursor-pointer">
+            <input type="radio" name="player-mode" value="potplayer" class="peer sr-only" checked>
+            <span class="flex items-center justify-center rounded-lg px-3 py-2.5 text-sm text-zinc-500 transition peer-checked:bg-accent peer-checked:text-white">PotPlayer</span>
+          </label>
+        </div>
+        <p class="hint mt-2">HTML5 在页面内播放；碎片化视频将自动边切边播。PotPlayer 调用本地播放器。</p>
+      </div>
+
+      <label class="mt-4 block text-sm text-zinc-400">截图位置（仅影响新生成的缩略图）
+        <input type="number" id="set-position" min="0.05" max="0.95" step="0.05" value="0.6" class="dlg-input mt-1.5 w-full">
+      </label>
+      <label class="mt-4 block text-sm text-zinc-400">随机截图范围（用于「随机生成」）
+        <div class="range-inputs mt-1.5 flex items-center gap-2">
+          <input type="number" id="set-random-min" min="0.05" max="0.95" step="0.05" value="0.5" class="dlg-input w-full">
+          <span class="range-sep text-zinc-600">~</span>
+          <input type="number" id="set-random-max" min="0.05" max="0.95" step="0.05" value="0.8" class="dlg-input w-full">
+        </div>
+      </label>
+      <label class="mt-4 block text-sm text-zinc-400">并发线程数
+        <input type="number" id="set-workers" min="1" max="8" step="1" class="dlg-input mt-1.5 w-full">
+      </label>
+      <label class="mt-4 block text-sm text-zinc-400">空闲时扫描全库
+        <select id="set-idle-scan" class="dlg-input mt-1.5 w-full">
+          <option value="true">是</option>
+          <option value="false">否（仅按需生成）</option>
+        </select>
+      </label>
+      <label class="mt-4 block text-sm text-zinc-400">默认每页数量
+        <select id="set-page-size" class="dlg-input mt-1.5 w-full">
+          <option value="32">32</option>
+          <option value="64">64</option>
+          <option value="0">全部</option>
+        </select>
+      </label>
+      <div id="potplayer-path-wrap">
+        <label class="mt-4 block text-sm text-zinc-400">PotPlayer 路径
+          <input type="text" id="set-potplayer" class="dlg-input mt-1.5 w-full text-xs">
+        </label>
+      </div>
+      <label class="mt-4 block text-sm text-zinc-400">最近播放保留天数
+        <input type="number" id="set-history-days" min="1" max="3650" step="1" value="180" class="dlg-input mt-1.5 w-full">
+      </label>
+      <button type="button" id="btn-clear-history" class="ui-btn mt-3 w-full rounded-lg border border-surface-border px-4 py-2 text-sm">清空最近播放记录</button>
+      <p class="hint mt-4">修改截图比例不会改动已有缩略图；并发数需重启服务后生效</p>
+      <div class="dialog-btns mt-6 flex justify-end gap-2">
+        <button type="button" id="settings-cancel" class="ui-btn rounded-lg px-4 py-2">取消</button>
+        <button type="button" id="settings-save" class="ui-btn ui-btn-primary rounded-lg px-4 py-2">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="failed-dialog" class="app-dialog app-dialog-wide">
+    <div class="p-6">
+      <h2 class="text-lg font-semibold">缩略图生成失败</h2>
+      <p class="hint mt-2">失败项不会自动重试。可定位到视频或手动重试。</p>
+      <div id="failed-list" class="failed-list mt-4 max-h-80 overflow-y-auto"></div>
+      <div class="dialog-btns mt-6 flex justify-end gap-2">
+        <button type="button" id="failed-dialog-retry-all" class="ui-btn rounded-lg px-4 py-2">全部重试</button>
+        <button type="button" id="failed-dialog-close" class="ui-btn ui-btn-primary rounded-lg px-4 py-2">关闭</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="/static/vendor/hls.min.js"></script>
+  <script src="/static/app.js?v=52"></script>
+</body>
+</html>

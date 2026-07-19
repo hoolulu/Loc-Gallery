@@ -1,0 +1,11 @@
+{
+  "thumb_position": 0.6,
+  "thumb_random_min": 0.5,
+  "thumb_random_max": 0.8,
+  "thumb_workers": 3,
+  "thumb_idle_scan": false,
+  "default_page_size": 32,
+  "potplayer_path": "",
+  "player_mode": "html5",
+  "history_retention_days": 180
+}

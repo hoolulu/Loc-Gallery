@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Loc Gallery · UI Demo</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    dialog::backdrop { background: rgba(0,0,0,.65); }
+    dialog { margin: auto; border: none; padding: 0; max-width: calc(100vw - 2rem); }
+    .panel { display: none; }
+    .panel.active { display: flex; }
+    .tab-btn.active { font-weight: 600; }
+    #panel-slate.active { color: #18181b; }
+    .thumb-card:hover .thumb-overlay { opacity: 1; }
+    video::-webkit-media-controls-panel { background: linear-gradient(transparent, rgba(0,0,0,.8)); }
+  </style>
+</head>
+<body class="h-full overflow-hidden bg-zinc-950 text-zinc-100 antialiased">
+
+  <!-- 顶部：风格切换 + 弹窗预览 -->
+  <div class="fixed inset-x-0 top-0 z-50 border-b border-zinc-800 bg-zinc-950/95 backdrop-blur-md">
+    <div class="flex flex-wrap items-center gap-2 px-4 py-2.5">
+      <span class="mr-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">UI Demo</span>
+      <nav class="flex flex-wrap gap-1" id="theme-tabs">
+        <button data-panel="crimson" class="tab-btn rounded-lg px-3 py-1.5 text-sm text-zinc-400 transition hover:bg-zinc-800 hover:text-white">Crimson Stream</button>
+        <button data-panel="midnight" class="tab-btn rounded-lg px-3 py-1.5 text-sm text-zinc-400 transition hover:bg-zinc-800 hover:text-white">Midnight Cinema</button>
+        <button data-panel="slate" class="tab-btn rounded-lg px-3 py-1.5 text-sm text-zinc-400 transition hover:bg-zinc-800 hover:text-white">Slate Minimal</button>
+        <button data-panel="player" class="tab-btn rounded-lg px-3 py-1.5 text-sm text-zinc-400 transition hover:bg-zinc-800 hover:text-white">HTML5 播放器</button>
+      </nav>
+      <div class="ml-auto flex gap-2">
+        <button id="btn-open-regen" class="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs hover:bg-zinc-800">预览 · 缩略图弹窗</button>
+        <button id="btn-open-settings" class="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs hover:bg-zinc-800">预览 · 设置弹窗</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="flex h-full flex-col pt-[52px]">
+
+    <!-- ===== CRIMSON ===== -->
+    <div id="panel-crimson" class="panel active h-full min-h-0 flex-col bg-[#141414] text-zinc-100">
+      <header class="shrink-0 border-b border-[#333] bg-[#1f1f1f]/90">
+        <div class="flex items-center gap-4 px-5 py-3">
+          <h1 class="text-lg font-bold"><span class="text-[#e50914]">AVV</span> Gallery</h1>
+          <input type="search" placeholder="搜索..." class="ml-auto w-72 rounded-lg border border-[#333] bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-red-600/60">
+          <button class="rounded-lg border border-[#333] px-3 py-2 text-sm hover:bg-zinc-800" data-open-settings>设置</button>
+        </div>
+        <div class="px-5 pb-3">
+          <p class="text-xs text-zinc-500">全库 311/1560 (19.9%) | 当前页 32/32 | 队列 7 | 生成中 4 | 未开始 1240 · 后台持续补全</p>
+          <div class="mt-2 h-1 rounded-full bg-zinc-800"><div class="h-full w-[19.9%] rounded-full bg-[#e50914]"></div></div>
+        </div>
+      </header>
+      <div class="flex min-h-0 flex-1">
+        <aside class="w-52 shrink-0 border-r border-[#333] p-2 text-sm">
+          <button class="mb-1 flex w-full justify-between rounded-lg bg-red-600/15 px-3 py-2 text-red-400">全部 <span class="text-zinc-600">1560</span></button>
+          <button class="mb-1 flex w-full justify-between rounded-lg px-3 py-2 text-zinc-500 hover:bg-zinc-800">★ 精选 <span>42</span></button>
+          <button class="flex w-full justify-between rounded-lg px-3 py-2 text-zinc-500 hover:bg-zinc-800">分类 A <span>128</span></button>
+        </aside>
+        <main class="flex-1 overflow-y-auto p-5">
+          <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5" id="grid-crimson"></div>
+        </main>
+      </div>
+      <div class="pointer-events-none fixed bottom-6 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-2xl border border-[#333] bg-zinc-900/95 px-5 py-3 shadow-2xl">
+        <span class="text-sm text-zinc-400">已选 3 个</span>
+        <span class="rounded-lg bg-zinc-800 px-3 py-1.5 text-sm">播放</span>
+        <span class="rounded-lg bg-red-900/50 px-3 py-1.5 text-sm text-red-300">删除</span>
+      </div>
+    </div>
+
+    <!-- ===== MIDNIGHT ===== -->
+    <div id="panel-midnight" class="panel h-full min-h-0 flex-col text-zinc-100" style="background:radial-gradient(ellipse at top,#1e1b4b 0%,#0a0a0f 50%,#050508 100%)">
+      <header class="shrink-0 border-b border-indigo-500/20 bg-indigo-950/30 backdrop-blur-xl">
+        <div class="flex items-center gap-4 px-5 py-3">
+          <h1 class="bg-gradient-to-r from-indigo-200 to-violet-300 bg-clip-text text-lg font-bold text-transparent">Midnight Cinema</h1>
+          <input type="search" placeholder="搜索..." class="ml-auto w-72 rounded-full border border-indigo-500/30 bg-black/40 px-4 py-2 text-sm outline-none">
+          <button class="rounded-full border border-indigo-500/30 px-4 py-2 text-sm" data-open-settings>设置</button>
+        </div>
+        <div class="px-5 pb-3">
+          <p class="text-xs text-indigo-200/50">全库 311/1560 (19.9%) | 当前页 32/32 | 队列 7 | 生成中 4</p>
+          <div class="mt-2 h-1 rounded-full bg-indigo-950"><div class="h-full w-[19.9%] rounded-full bg-gradient-to-r from-indigo-500 to-violet-400"></div></div>
+        </div>
+      </header>
+      <div class="flex min-h-0 flex-1">
+        <aside class="w-48 shrink-0 border-r border-indigo-500/15 p-3 text-sm">
+          <button class="mb-1 w-full rounded-xl bg-indigo-500/20 px-3 py-2 text-left text-indigo-100 ring-1 ring-indigo-400/30">全部 · 1560</button>
+          <button class="w-full rounded-xl px-3 py-2 text-left text-zinc-500 hover:bg-white/5">剧情 · 128</button>
+        </aside>
+        <main class="flex-1 overflow-y-auto p-5">
+          <div class="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5" id="grid-midnight"></div>
+        </main>
+      </div>
+    </div>
+
+    <!-- ===== SLATE ===== -->
+    <div id="panel-slate" class="panel h-full min-h-0 flex-col bg-zinc-50 text-zinc-900">
+      <header class="shrink-0 border-b border-zinc-200 bg-white">
+        <div class="flex items-center gap-4 px-6 py-4">
+          <h1 class="text-xl font-semibold text-zinc-800">Loc Gallery</h1>
+          <input type="search" placeholder="搜索..." class="ml-auto w-80 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-sm shadow-sm">
+          <button class="rounded-xl border border-zinc-200 px-4 py-2.5 text-sm shadow-sm" data-open-settings>设置</button>
+        </div>
+        <div class="border-t border-zinc-100 px-6 py-2.5">
+          <p class="text-xs text-zinc-500">全库 311/1560 (19.9%) | 当前页 32/32</p>
+          <div class="mt-2 h-1.5 rounded-full bg-zinc-200"><div class="h-full w-[19.9%] rounded-full bg-zinc-800"></div></div>
+        </div>
+      </header>
+      <div class="flex min-h-0 flex-1">
+        <aside class="w-52 shrink-0 border-r border-zinc-200 bg-white p-4 text-sm">
+          <button class="mb-1 w-full rounded-lg bg-zinc-900 px-3 py-2 text-left text-white">全部 1560</button>
+          <button class="w-full rounded-lg px-3 py-2 text-left text-zinc-600 hover:bg-zinc-100">精选 42</button>
+        </aside>
+        <main class="flex-1 overflow-y-auto p-6">
+          <div class="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5" id="grid-slate"></div>
+        </main>
+      </div>
+    </div>
+
+    <!-- ===== PLAYER ===== -->
+    <div id="panel-player" class="panel h-full min-h-0 flex-col bg-black text-zinc-100">
+      <header class="flex shrink-0 items-center gap-4 border-b border-white/10 bg-zinc-950 px-5 py-3">
+        <h1 class="truncate text-sm font-medium text-zinc-300">示例视频 · HTML5 播放页</h1>
+        <div class="ml-auto flex gap-2 text-xs">
+          <button class="rounded-lg border border-white/10 px-3 py-1.5 hover:bg-white/5">上一集</button>
+          <button class="rounded-lg border border-white/10 px-3 py-1.5 hover:bg-white/5">下一集</button>
+          <button class="rounded-lg border border-white/10 px-3 py-1.5 hover:bg-white/5">PotPlayer</button>
+        </div>
+      </header>
+      <div class="flex min-h-0 flex-1">
+        <div class="flex min-w-0 flex-1 flex-col">
+          <div class="flex flex-1 items-center justify-center bg-black p-4">
+            <video class="max-h-full max-w-full rounded-lg" controls poster="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1280' height='720'%3E%3Crect fill='%23111' width='100%25' height='100%25'/%3E%3Ctext x='50%25' y='50%25' fill='%23444' font-size='20' text-anchor='middle' dy='.3em'%3EHTML5 Player%3C/text%3E%3C/svg%3E">
+              <source src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4" type="video/mp4">
+            </video>
+          </div>
+          <div class="shrink-0 border-t border-white/10 bg-zinc-950/90 px-6 py-4">
+            <h2 class="font-semibold">Big Buck Bunny（演示）</h2>
+            <p class="mt-1 text-xs text-zinc-500">D:\Videos\分类A\示例.mp4 · 1920×1080 · 1.2 GB</p>
+            <span class="mt-2 inline-block rounded-md bg-emerald-500/20 px-2 py-0.5 text-xs text-emerald-400">HTML5 播放</span>
+          </div>
+        </div>
+        <aside class="w-64 shrink-0 border-l border-white/10 bg-zinc-950 p-2 text-sm" id="playlist"></aside>
+      </div>
+    </div>
+  </div>
+
+  <!-- 缩略图弹窗（随机按钮居中） -->
+  <dialog id="dlg-regen" class="w-full max-w-md rounded-2xl border border-zinc-700 bg-zinc-900 p-6 text-zinc-100 shadow-2xl">
+    <h2 class="text-lg font-semibold">重新生成缩略图</h2>
+    <p class="mt-2 text-sm text-zinc-500">仅重新生成所选视频，不影响其他已有缩略图。</p>
+    <label class="mt-5 block text-sm text-zinc-400">
+      截图位置（视频时长比例）
+      <input type="number" value="0.6" step="0.05" class="dlg-input mt-1.5 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 outline-none">
+    </label>
+    <p class="mt-3 text-xs text-zinc-600">随机生成将在 0.5 ~ 0.8 范围内选取截图位置</p>
+    <div class="mt-6 flex items-center justify-center gap-3">
+      <button type="button" data-close-regen class="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800">取消</button>
+      <button type="button" class="dlg-accent rounded-lg px-5 py-2.5 text-sm font-semibold text-white shadow-lg">随机生成</button>
+      <button type="button" class="rounded-lg border border-zinc-600 bg-zinc-800 px-4 py-2 text-sm hover:bg-zinc-700">按位置生成</button>
+    </div>
+  </dialog>
+
+  <!-- 设置弹窗 -->
+  <dialog id="dlg-settings" class="w-full max-w-lg rounded-2xl border border-zinc-700 bg-zinc-900 p-6 text-zinc-100 shadow-2xl">
+    <h2 class="text-lg font-semibold">设置</h2>
+    <div class="mt-5 space-y-4 text-sm">
+      <div>
+        <span class="text-zinc-400">播放方式</span>
+        <div class="mt-2 grid grid-cols-2 gap-2 rounded-xl border border-zinc-700 bg-zinc-950 p-1">
+          <label class="cursor-pointer">
+            <input type="radio" name="player" value="html5" class="peer sr-only" checked>
+            <span class="dlg-player-opt flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-zinc-500 transition peer-checked:text-white">网页 HTML5</span>
+          </label>
+          <label class="cursor-pointer">
+            <input type="radio" name="player" value="potplayer" class="peer sr-only">
+            <span class="dlg-player-opt flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-zinc-500 transition peer-checked:text-white">PotPlayer</span>
+          </label>
+        </div>
+        <p class="mt-2 text-xs text-zinc-600">HTML5 在浏览器内播放；PotPlayer 调用本地播放器。</p>
+      </div>
+      <label class="block text-zinc-400">截图位置 <input type="number" value="0.6" class="dlg-input mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2"></label>
+      <label class="block text-zinc-400">随机范围
+        <div class="mt-1 flex gap-2"><input type="number" value="0.5" class="dlg-input w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2"><span class="self-center text-zinc-600">~</span><input type="number" value="0.8" class="dlg-input w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2"></div>
+      </label>
+      <label class="block text-zinc-400">空闲扫描全库
+        <select class="dlg-input mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2"><option>是</option><option>否</option></select>
+      </label>
+      <div id="potplayer-path" class="hidden">
+        <label class="block text-zinc-400">PotPlayer 路径
+          <input type="text" value="C:\Program Files\...\PotPlayerMini64.exe" class="dlg-input mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-xs">
+        </label>
+      </div>
+    </div>
+    <div class="mt-6 flex justify-end gap-2">
+      <button type="button" data-close-settings class="rounded-lg px-4 py-2 text-sm text-zinc-500">取消</button>
+      <button type="button" class="dlg-accent rounded-lg px-4 py-2 text-sm text-white">保存</button>
+    </div>
+  </dialog>
+
+  <script>
+    const THEMES = {
+      crimson: { accent: '#e50914', accentBg: 'bg-[#e50914]', peerChecked: 'peer-checked:bg-[#e50914]' },
+      midnight: { accent: '#818cf8', accentBg: 'bg-indigo-500', peerChecked: 'peer-checked:bg-indigo-500' },
+      slate: { accent: '#18181b', accentBg: 'bg-zinc-900', peerChecked: 'peer-checked:bg-zinc-900' },
+      player: { accent: '#e50914', accentBg: 'bg-[#e50914]', peerChecked: 'peer-checked:bg-[#e50914]' },
+    };
+
+    let currentTheme = 'crimson';
+
+    function renderGrids() {
+      const crimson = document.getElementById('grid-crimson');
+      crimson.innerHTML = Array.from({ length: 10 }, (_, i) => `
+        <article class="thumb-card overflow-hidden rounded-xl border border-[#333] bg-[#1f1f1f] transition hover:-translate-y-0.5 hover:shadow-xl">
+          <div class="relative aspect-video bg-gradient-to-br from-zinc-800 to-zinc-900">
+            <div class="thumb-overlay absolute inset-0 bg-black/40 opacity-0 transition"></div>
+          </div>
+          <p class="truncate px-2 py-2 text-center text-xs">示例视频 ${i + 1}</p>
+        </article>`).join('');
+
+      const midnight = document.getElementById('grid-midnight');
+      midnight.innerHTML = Array.from({ length: 8 }, (_, i) => `
+        <article class="group cursor-pointer">
+          <div class="aspect-video overflow-hidden rounded-2xl bg-gradient-to-br from-indigo-900/80 to-black ring-1 ring-indigo-500/20 group-hover:ring-indigo-400/50"></div>
+          <p class="mt-2 truncate text-center text-xs text-indigo-100/80">影院示例 ${i + 1}</p>
+        </article>`).join('');
+
+      const slate = document.getElementById('grid-slate');
+      slate.innerHTML = Array.from({ length: 10 }, (_, i) => `
+        <article class="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm hover:shadow-md">
+          <div class="aspect-video bg-gradient-to-br from-zinc-100 to-zinc-200"></div>
+          <p class="truncate px-3 py-3 text-center text-xs font-medium text-zinc-700">示例 ${i + 1}</p>
+        </article>`).join('');
+
+      const playlist = document.getElementById('playlist');
+      playlist.innerHTML = '<p class="mb-2 px-2 text-xs text-zinc-500">播放列表</p>' +
+        ['Big Buck Bunny', '示例 02', '示例 03', '示例 04', '示例 05'].map((t, i) => `
+          <button class="mb-1 flex w-full gap-2 rounded-lg p-2 text-left ${i === 0 ? 'bg-red-600/20 ring-1 ring-red-500/40' : 'hover:bg-white/5'}">
+            <div class="h-10 w-16 shrink-0 rounded bg-zinc-800"></div>
+            <div class="min-w-0"><p class="truncate text-xs ${i === 0 ? 'text-red-300' : 'text-zinc-400'}">${t}</p></div>
+          </button>`).join('');
+    }
+
+    function applyDialogTheme(theme) {
+      const t = THEMES[theme] || THEMES.crimson;
+      const regen = document.getElementById('dlg-regen');
+      const settings = document.getElementById('dlg-settings');
+      const isLight = theme === 'slate';
+
+      [regen, settings].forEach(dlg => {
+        dlg.classList.toggle('bg-white', isLight);
+        dlg.classList.toggle('text-zinc-900', isLight);
+        dlg.classList.toggle('border-zinc-200', isLight);
+        dlg.classList.toggle('bg-zinc-900', !isLight);
+        dlg.classList.toggle('text-zinc-100', !isLight);
+        dlg.classList.toggle('border-zinc-700', !isLight);
+      });
+
+      document.querySelectorAll('.dlg-input').forEach(el => {
+        el.classList.toggle('border-zinc-200', isLight);
+        el.classList.toggle('bg-zinc-50', isLight);
+        el.classList.toggle('border-zinc-700', !isLight);
+        el.classList.toggle('bg-zinc-950', !isLight);
+      });
+
+      document.querySelectorAll('.dlg-accent').forEach(el => {
+        el.className = `dlg-accent rounded-lg px-4 py-2 text-sm text-white ${t.accentBg}`;
+        if (el.textContent.includes('随机')) el.className += ' px-5 py-2.5 font-semibold shadow-lg';
+      });
+
+      document.querySelectorAll('.dlg-player-opt').forEach(el => {
+        el.className = `dlg-player-opt flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-zinc-500 transition peer-checked:text-white ${t.peerChecked}`;
+      });
+    }
+
+    function switchPanel(name) {
+      currentTheme = name;
+      document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+      document.getElementById('panel-' + name)?.classList.add('active');
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        const on = btn.dataset.panel === name;
+        btn.classList.toggle('active', on);
+        btn.classList.toggle('text-white', on);
+        btn.classList.toggle('bg-zinc-800', on);
+        const colors = { crimson: 'ring-red-600', midnight: 'ring-indigo-500', slate: 'ring-zinc-400', player: 'ring-emerald-500' };
+        btn.classList.toggle('ring-1', on);
+        btn.classList.toggle(colors[name] || '', on);
+      });
+      applyDialogTheme(name === 'player' ? 'crimson' : name);
+      history.replaceState(null, '', '#' + name);
+    }
+
+    document.getElementById('theme-tabs').addEventListener('click', e => {
+      const btn = e.target.closest('[data-panel]');
+      if (btn) switchPanel(btn.dataset.panel);
+    });
+
+    document.getElementById('btn-open-regen').addEventListener('click', () => {
+      applyDialogTheme(currentTheme === 'player' ? 'crimson' : currentTheme);
+      document.getElementById('dlg-regen').showModal();
+    });
+    document.getElementById('btn-open-settings').addEventListener('click', () => {
+      applyDialogTheme(currentTheme === 'player' ? 'crimson' : currentTheme);
+      document.getElementById('dlg-settings').showModal();
+    });
+    document.querySelectorAll('[data-open-settings]').forEach(b => b.addEventListener('click', () => {
+      applyDialogTheme(currentTheme === 'slate' ? 'slate' : currentTheme === 'midnight' ? 'midnight' : 'crimson');
+      document.getElementById('dlg-settings').showModal();
+    }));
+    document.querySelector('[data-close-regen]').addEventListener('click', () => document.getElementById('dlg-regen').close());
+    document.querySelector('[data-close-settings]').addEventListener('click', () => document.getElementById('dlg-settings').close());
+
+    document.querySelectorAll('input[name="player"]').forEach(r => {
+      r.addEventListener('change', () => {
+        document.getElementById('potplayer-path').classList.toggle('hidden', !document.querySelector('input[name="player"][value="potplayer"]').checked);
+      });
+    });
+
+    const hash = location.hash.replace('#', '');
+    renderGrids();
+    switchPanel(['crimson', 'midnight', 'slate', 'player'].includes(hash) ? hash : 'crimson');
+  </script>
+</body>
+</html>
