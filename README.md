@@ -2,7 +2,7 @@
 
 **本地视频画廊 Web 服务 — 双击启动，浏览器里浏览、搜索、播放你的整个视频库**
 
-> **当前版本：2.0** · 支持多视频库、播放列表排序连播、全局设置与紧凑设置面板
+> **当前版本：2.1.0** · 续播记忆、HLS 切片优化、暂停时挂起转码进程
 
 扫描本机视频目录，自动生成缩略图网格，支持分类筛选、收藏、播放记录、内嵌 HLS 播放与外部播放器。专为 Windows 本地大库设计：新视频拷入即索引，下载中的文件不误报失败，外部删除自动同步收藏与历史。
 
@@ -18,8 +18,8 @@
 <tr><td style="white-space: nowrap;"><b>📂 本地视频库</b></td><td>递归扫描各库根目录，按一级子目录作为「分类」展示</td></tr>
 <tr><td style="white-space: nowrap;"><b>🖼 智能缩略图</b></td><td>按需生成当前页；下载/写入中的文件等待稳定后再处理，不误报失败</td></tr>
 <tr><td style="white-space: nowrap;"><b>📺 剧集连播</b></td><td>播放列表支持文件名自然排序；HTML5 模式按列表顺序自动播下一集</td></tr>
-<tr><td style="white-space: nowrap;"><b>▶ 可靠播放</b></td><td>HTML5 直传 / HLS copy / HLS 转码；PotPlayer 路径自动探测；伪装 MPEG-TS、大文件、AV1/HEVC</td></tr>
-<tr><td style="white-space: nowrap;"><b>♥ 收藏 & 历史</b></td><td>卡片收藏、最近播放、播放次数；外部删文件后列表自动清理</td></tr>
+<tr><td style="white-space: nowrap;"><b>▶ 可靠播放</b></td><td>HTML5 直传 / HLS copy / HLS 转码；续播记忆；暂停时挂起切片进程；PotPlayer 自动探测</td></tr>
+<tr><td style="white-space: nowrap;"><b>♥ 收藏 & 历史</b></td><td>卡片收藏、最近播放、播放次数与<strong>续播进度</strong>；外部删文件后列表自动清理</td></tr>
 <tr><td style="white-space: nowrap;"><b>🔄 实时同步</b></td><td>文件监听 + SSE 推送；新视频自动索引、排队缩略图与播放策略探测</td></tr>
 </table>
 
@@ -288,6 +288,8 @@ scripts\build-css.bat
 
 - HTML5 模式下，右侧**播放列表**可按文件名（自然排序）、标题、时间、大小等排序
 - 播完当前视频后**自动播放列表中下一项**；顶栏「上一个 / 下一个」亦按列表顺序
+- **续播**：退出或切换视频时自动保存进度；再次打开从上次位置继续（距结尾不足 45 秒视为看完，从头播）
+- **HLS 切片**：每段 30 秒，减少磁盘碎片；播放器暂停时挂起 ffmpeg（不杀进程），继续播放时恢复切片
 - 追剧建议：筛选到目标文件夹后，每页选「全部」，列表排序选「文件名 A→Z（自然）」
 
 ### 日常浏览
@@ -411,7 +413,11 @@ python -m pytest tests\test_multi_library.py
 
 **7. HLS 缓存占多少磁盘？**
 
-默认上限 5 GB，LRU 淘汰，目录为各库下的 `data/libraries/{id}/cache/hls/`。
+默认上限 5GB（LRU 淘汰）。2.1.0 起每段 **30 秒**（旧版 6 秒），同样时长影片产生的 `.ts` 文件更少。已有 6 秒缓存会在升级后自动作废并重新切片。
+
+**8. 续播进度存在哪？**
+
+`data/libraries/{library_id}/play_history.json` 的 `position_sec` 字段；HTML5 直连与 HLS 均支持。HLS 边切边播时，若目标位置尚未切片完成，可能需要等待缓冲。
 
 ## 十四、日志与排错
 

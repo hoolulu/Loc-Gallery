@@ -65,6 +65,7 @@ from loc_gallery.history_store import (
     prune_missing as prune_history,
     record_play,
     remove_history,
+    save_position,
 )
 from loc_gallery import hls_manager
 from loc_gallery.media_probe import get_playback_plan, schedule_probe_for_ids
@@ -165,6 +166,12 @@ class SettingsUpdate(BaseModel):
 
 class FavoriteToggleRequest(BaseModel):
     id: str
+
+
+class HistoryPositionRequest(BaseModel):
+    id: str
+    position_sec: float
+    duration_sec: float | None = None
 
 
 class FavoriteBatchRequest(BaseModel):
@@ -341,6 +348,8 @@ def _video_to_dict(library_id: str, v) -> dict:
         "favoritedAt": fav_at,
         "playedAt": hist.get("played_at") if hist else None,
         "playCount": hist.get("play_count") if hist else None,
+        "playPosition": hist.get("position_sec") if hist else None,
+        "playDuration": hist.get("duration_sec") if hist else None,
     }
 
 
@@ -635,6 +644,26 @@ async def api_history_record(req: FavoriteToggleRequest, library_id: str = Depen
     return {"ok": True, "id": req.id, **entry}
 
 
+@app.post("/api/history/position")
+async def api_history_position(req: HistoryPositionRequest, library_id: str = Depends(resolve_library_id)):
+    if not req.id or not get_by_id(library_id, req.id):
+        raise HTTPException(404, "视频不存在")
+    if req.position_sec < 0:
+        raise HTTPException(400, "position_sec 无效")
+    entry = save_position(
+        library_id,
+        req.id,
+        req.position_sec,
+        duration_sec=req.duration_sec,
+    )
+    return {
+        "ok": True,
+        "id": req.id,
+        "position_sec": entry.get("position_sec"),
+        "duration_sec": entry.get("duration_sec"),
+    }
+
+
 @app.post("/api/history/clear")
 async def api_history_clear(library_id: str = Depends(resolve_library_id)):
     removed = clear_history(library_id)
@@ -732,6 +761,18 @@ async def api_play_status(video_id: str, library_id: str = Depends(resolve_libra
 async def api_play_stop(library_id: str = Depends(resolve_library_id)):
     had = hls_manager.stop_playback(force=True)
     return {"ok": True, "was_active": had}
+
+
+@app.post("/api/play/pause")
+async def api_play_pause(library_id: str = Depends(resolve_library_id)):
+    paused = hls_manager.pause_playback_slicing()
+    return {"ok": True, "paused": paused}
+
+
+@app.post("/api/play/resume")
+async def api_play_resume(library_id: str = Depends(resolve_library_id)):
+    resumed = hls_manager.resume_playback_slicing()
+    return {"ok": True, "resumed": resumed}
 
 
 @app.get("/api/hls/{video_id}/{filename}")

@@ -12,7 +12,7 @@ from pathlib import Path
 
 from loc_gallery.config import HLS_CACHE_MAX_BYTES, hls_cache_dir, service_environ
 from loc_gallery.library_context import current_library_id
-from loc_gallery.process_util import hidden_subprocess_kwargs
+from loc_gallery.process_util import hidden_subprocess_kwargs, resume_process, suspend_process
 from loc_gallery.thumb_manager import ffmpeg_path
 
 _lock = threading.RLock()
@@ -21,8 +21,11 @@ _process: subprocess.Popen | None = None
 _process_pid: int | None = None
 _started_at = 0.0
 _error: str | None = None
+_slice_paused = False
 
-HLS_SEGMENT_SECONDS = 6
+HLS_SEGMENT_SECONDS = 30
+# 本地单用户播放：保留 independent_segments 便于 seek；去掉 temp_file 避免每段双写
+HLS_FLAGS = "independent_segments"
 MIN_SEGMENTS_TO_PLAY = 1
 _LRU_FILE = "_lru.json"
 _COMPLETE_MARK = ".complete"
@@ -177,6 +180,7 @@ def _write_meta(
         "transcode": transcode,
         "input_format": input_format,
         "input_offset": input_offset,
+        "segment_seconds": HLS_SEGMENT_SECONDS,
         "source_mtime": st.st_mtime,
         "source_size": st.st_size,
         "created_at": time.time(),
@@ -200,6 +204,8 @@ def _cache_meta_valid(
     if (meta.get("input_format") or None) != (input_format or None):
         return False
     if int(meta.get("input_offset") or 0) != int(input_offset or 0):
+        return False
+    if int(meta.get("segment_seconds") or 0) != HLS_SEGMENT_SECONDS:
         return False
     try:
         st = source.stat()
@@ -299,9 +305,48 @@ def _watch_process(proc: subprocess.Popen, video_id: str, work: Path) -> None:
         _error = f"ffmpeg 退出码 {proc.returncode}"
 
 
+def _active_pid() -> int | None:
+    if _process_pid and _process_pid > 0:
+        return _process_pid
+    if _process is not None and _process.pid and _process.pid > 0:
+        return _process.pid
+    return None
+
+
+def pause_playback_slicing() -> bool:
+    """挂起 ffmpeg 切片进程（保留缓存与进度，不杀进程）。"""
+    global _slice_paused
+    with _lock:
+        if _process is None or _process.poll() is not None:
+            return False
+        if _slice_paused:
+            return True
+        pid = _active_pid()
+        if not pid or not suspend_process(pid):
+            return False
+        _slice_paused = True
+        return True
+
+
+def resume_playback_slicing() -> bool:
+    """恢复已挂起的 ffmpeg 切片进程。"""
+    global _slice_paused
+    with _lock:
+        if _process is None or _process.poll() is not None:
+            _slice_paused = False
+            return False
+        if not _slice_paused:
+            return True
+        pid = _active_pid()
+        if not pid or not resume_process(pid):
+            return False
+        _slice_paused = False
+        return True
+
+
 def stop_playback(video_id: str | None = None, *, force: bool = False) -> bool:
     """停止当前 ffmpeg 切片进程，保留已缓存的 HLS 文件。返回是否曾有活跃进程。"""
-    global _current_id, _error, _started_at
+    global _current_id, _error, _started_at, _slice_paused
     with _lock:
         was_active = _current_id is not None or (
             _process is not None and _process.poll() is None
@@ -312,6 +357,7 @@ def stop_playback(video_id: str | None = None, *, force: bool = False) -> bool:
         _current_id = None
         _error = None
         _started_at = 0.0
+        _slice_paused = False
         return was_active
 
 
@@ -327,6 +373,7 @@ def _status_dict(
     segments: int,
     processing: bool,
     cached: bool = False,
+    slice_paused: bool = False,
 ) -> dict:
     elapsed = round(time.time() - _started_at, 1) if _started_at else 0
     return {
@@ -335,6 +382,7 @@ def _status_dict(
         "ready": ready,
         "segments": segments,
         "processing": processing,
+        "slice_paused": slice_paused,
         "elapsed_sec": elapsed,
         "error": _error,
         "cached": cached,
@@ -349,6 +397,7 @@ def get_status(video_id: str) -> dict:
         segments = _count_segments(work) if work.exists() else 0
         proc_alive = active and _process is not None and _process.poll() is None
         ready = _cache_playable(work)
+        paused = bool(proc_alive and _slice_paused)
 
         if not active:
             if ready and _cache_complete(work):
@@ -371,6 +420,8 @@ def get_status(video_id: str) -> dict:
 
         if _error:
             state = "error"
+        elif paused:
+            state = "paused"
         elif ready and proc_alive:
             state = "playing"
         elif ready:
@@ -386,6 +437,7 @@ def get_status(video_id: str) -> dict:
             segments=segments,
             processing=proc_alive,
             cached=_cache_complete(work),
+            slice_paused=paused,
         )
 
 
@@ -398,7 +450,7 @@ def _start_ffmpeg(
     input_format: str | None = None,
     input_offset: int = 0,
 ) -> dict:
-    global _current_id, _process, _process_pid, _started_at, _error
+    global _current_id, _process, _process_pid, _started_at, _error, _slice_paused
 
     playlist = work / "playlist.m3u8"
     segment_pattern = str(work / "seg%05d.ts")
@@ -420,7 +472,7 @@ def _start_ffmpeg(
             "-hls_time", str(HLS_SEGMENT_SECONDS),
             "-hls_list_size", "0",
             "-hls_playlist_type", "event",
-            "-hls_flags", "independent_segments+temp_file",
+            "-hls_flags", HLS_FLAGS,
             "-hls_segment_filename", segment_pattern,
             str(playlist),
         ]
@@ -445,7 +497,7 @@ def _start_ffmpeg(
             "-hls_time", str(HLS_SEGMENT_SECONDS),
             "-hls_list_size", "0",
             "-hls_playlist_type", "event",
-            "-hls_flags", "independent_segments+temp_file",
+            "-hls_flags", HLS_FLAGS,
             "-hls_segment_filename", segment_pattern,
             str(playlist),
         ]
@@ -464,7 +516,7 @@ def _start_ffmpeg(
             "-hls_time", str(HLS_SEGMENT_SECONDS),
             "-hls_list_size", "0",
             "-hls_playlist_type", "event",
-            "-hls_flags", "independent_segments+temp_file",
+            "-hls_flags", HLS_FLAGS,
             "-hls_segment_filename", segment_pattern,
             str(playlist),
         ]
@@ -495,6 +547,7 @@ def _start_ffmpeg(
     _current_id = video_id
     _started_at = time.time()
     _error = None
+    _slice_paused = False
     threading.Thread(
         target=_watch_process,
         args=(proc, video_id, work),

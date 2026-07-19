@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.1.0] - 2026-07-20
+
+### 新增
+
+- **HTML5 续播**：播放进度写入 `play_history.json`（`position_sec`），下次打开同一视频从上次位置继续（直连与 HLS；HLS 通过 hls.js `startPosition`）
+- **暂停播放时挂起 ffmpeg 切片**（Windows 进程挂起），继续播放时恢复；切换视频、返回列表、关闭页面仍停止切片进程
+- API：`POST /api/history/position` 保存进度；`POST /api/play/pause` / `POST /api/play/resume` 控制切片进程挂起/恢复
+
+### 改进
+
+- HLS 片段时长 **6 秒 → 30 秒**，显著减少小文件数量与机械硬盘 I/O
+- 去掉 HLS `temp_file` 标志，避免每段双写
+- 切片缓存元数据增加 `segment_seconds`，调整片段参数后旧缓存自动失效并重新切片
+
+### 修复
+
+- 移除强制将播放头归零的逻辑，修复「记忆播放位置」无效的问题
+
 ## [2.0.2] - 2026-07-20
 
 ### 新增

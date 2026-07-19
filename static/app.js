@@ -1610,11 +1610,36 @@
 
   /** 立即停止服务端 HLS 切片/转码进程（保留磁盘缓存） */
   async function stopActiveSlice() {
+    unbindSlicePauseResume(getPlaybackVideo());
     destroyHlsPlayer();
     state.activeSliceVideoId = null;
     try {
       await api("/api/play/stop", { method: "POST" });
     } catch (_) { /* ignore */ }
+  }
+
+  function unbindSlicePauseResume(video) {
+    if (!video?._slicePauseHandlers) return;
+    const { onPause, onPlay } = video._slicePauseHandlers;
+    video.removeEventListener("pause", onPause);
+    video.removeEventListener("play", onPlay);
+    delete video._slicePauseHandlers;
+  }
+
+  function bindSlicePauseResume(video, id) {
+    unbindSlicePauseResume(video);
+    if (!video || !id || !state.activeSliceVideoId) return;
+    const onPause = () => {
+      if (state.activeSliceVideoId !== id) return;
+      void api("/api/play/pause", { method: "POST" }).catch(() => {});
+    };
+    const onPlay = () => {
+      if (state.activeSliceVideoId !== id) return;
+      void api("/api/play/resume", { method: "POST" }).catch(() => {});
+    };
+    video.addEventListener("pause", onPause);
+    video.addEventListener("play", onPlay);
+    video._slicePauseHandlers = { onPause, onPlay };
   }
 
   function setPlayerStatus(text) {
@@ -1726,11 +1751,119 @@
     hidePlayOverlay();
   }
 
-  function seekVideoToStart(video) {
-    if (!video) return;
+  const RESUME_MIN_SEC = 15;
+  const RESUME_END_MARGIN_SEC = 45;
+  let playbackSaveTimer = null;
+
+  function formatPlaybackTime(sec) {
+    if (!Number.isFinite(sec) || sec < 0) return "0:00";
+    const s = Math.floor(sec);
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const r = s % 60;
+    if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
+    return `${m}:${String(r).padStart(2, "0")}`;
+  }
+
+  function getSavedPlaybackPosition(item) {
+    if (!item) return null;
+    const pos = Number(item.playPosition);
+    const dur = Number(item.playDuration);
+    return normalizeResumePosition(pos, dur > 0 ? dur : null);
+  }
+
+  function normalizeResumePosition(pos, durationSec) {
+    if (!Number.isFinite(pos) || pos < RESUME_MIN_SEC) return null;
+    if (durationSec != null && durationSec > 0 && pos >= durationSec - RESUME_END_MARGIN_SEC) {
+      return null;
+    }
+    return pos;
+  }
+
+  function applyLocalPlaybackPosition(item, positionSec, durationSec) {
+    if (!item) return;
+    if (positionSec != null && positionSec > 0) item.playPosition = positionSec;
+    else item.playPosition = null;
+    if (durationSec != null && durationSec > 0) item.playDuration = durationSec;
+  }
+
+  async function savePlaybackPosition(id, positionSec, durationSec) {
+    const pos = Number(positionSec);
+    if (!id || !Number.isFinite(pos) || pos < 1) return;
+    const dur = durationSec != null && Number.isFinite(durationSec) ? durationSec : null;
+    const keep = normalizeResumePosition(pos, dur);
+    const savePos = keep != null ? pos : 0;
+    applyLocalPlaybackPosition(getItemById(id), savePos > 0 ? savePos : null, dur);
     try {
-      if (video.currentTime > 0.05) video.currentTime = 0;
+      await api("/api/history/position", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id,
+          position_sec: savePos,
+          duration_sec: dur,
+        }),
+      });
     } catch (_) { /* ignore */ }
+  }
+
+  function scheduleSavePlaybackPosition(id, video) {
+    if (!id || !video || !Number.isFinite(video.currentTime)) return;
+    clearTimeout(playbackSaveTimer);
+    playbackSaveTimer = setTimeout(() => {
+      const dur = Number.isFinite(video.duration) ? video.duration : null;
+      void savePlaybackPosition(id, video.currentTime, dur);
+    }, 2500);
+  }
+
+  function unbindPlaybackProgressSaver() {
+    clearTimeout(playbackSaveTimer);
+    playbackSaveTimer = null;
+    const video = getPlaybackVideo();
+    if (!video?._playbackHandlers) return;
+    const { onTimeupdate, onPause, onEnded } = video._playbackHandlers;
+    video.removeEventListener("timeupdate", onTimeupdate);
+    video.removeEventListener("pause", onPause);
+    video.removeEventListener("ended", onEnded);
+    delete video._playbackHandlers;
+  }
+
+  function bindPlaybackProgressSaver(video, id) {
+    unbindPlaybackProgressSaver();
+    if (!video || !id) return;
+    const onTimeupdate = () => scheduleSavePlaybackPosition(id, video);
+    const onPause = () => {
+      if (Number.isFinite(video.currentTime) && video.currentTime >= 1) {
+        const dur = Number.isFinite(video.duration) ? video.duration : null;
+        void savePlaybackPosition(id, video.currentTime, dur);
+      }
+    };
+    const onEnded = () => {
+      const dur = Number.isFinite(video.duration) ? video.duration : null;
+      void savePlaybackPosition(id, dur || video.currentTime, dur);
+    };
+    video.addEventListener("timeupdate", onTimeupdate);
+    video.addEventListener("pause", onPause);
+    video.addEventListener("ended", onEnded);
+    video._playbackHandlers = { onTimeupdate, onPause, onEnded };
+  }
+
+  function resolveResumeStart(item, video) {
+    const saved = getSavedPlaybackPosition(item);
+    if (saved == null) return 0;
+    const vd = Number.isFinite(video?.duration) ? video.duration : 0;
+    if (vd > 0 && saved >= vd - 1) return 0;
+    return saved;
+  }
+
+  function applyPlaybackResume(video, item) {
+    if (!video) return null;
+    const target = resolveResumeStart(item, video);
+    if (target <= 0) return null;
+    try {
+      video.currentTime = target;
+    } catch (_) { /* ignore */ }
+    return target;
   }
 
   function getPlaybackVideo() {
@@ -1848,6 +1981,10 @@
     video?.classList.add("is-playing");
     pendingPlayId = null;
     recordPlayHistory(item.id);
+    if (video) bindPlaybackProgressSaver(video, item.id);
+    if (video && state.activeSliceVideoId === item.id) {
+      bindSlicePauseResume(video, item.id);
+    }
   }
 
   function videoHasPicture(video) {
@@ -1964,9 +2101,10 @@
     });
     if (session !== state.playSession) return;
     updatePlayOverlay("即将播放", "正在启动播放器…", { progress: 95 });
-    seekVideoToStart(video);
+    const resumed = applyPlaybackResume(video, item);
+    if (resumed != null) setPlayerStatus(`从 ${formatPlaybackTime(resumed)} 继续播放`);
     await video.play().catch(() => {});
-    seekVideoToStart(video);
+    applyPlaybackResume(video, item);
     await waitPlaying(video, session);
     if (session !== state.playSession) return;
     hidePlayOverlay();
@@ -1980,6 +2118,7 @@
     if (!video) return;
     const libQ = state.libraryId ? `?library_id=${encodeURIComponent(state.libraryId)}` : "";
     const url = `/api/hls/${id}/playlist.m3u8${libQ}`;
+    const resumeAt = getSavedPlaybackPosition(item) || 0;
     resetVideoDisplay(video);
     video.removeAttribute("src");
     video.load();
@@ -1991,11 +2130,11 @@
     if (window.Hls && Hls.isSupported()) {
       await new Promise((resolve, reject) => {
         let timer = setTimeout(() => reject(new Error("HLS 清单加载超时，请重试或改用 PotPlayer")), 45000);
-        hlsInstance = new Hls({ enableWorker: true, startPosition: 0 });
+        hlsInstance = new Hls({ enableWorker: true, startPosition: resumeAt });
         hlsInstance.loadSource(url);
         hlsInstance.attachMedia(video);
         hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
-          seekVideoToStart(video);
+          applyPlaybackResume(video, item);
           clearTimeout(timer);
           resolve();
         });
@@ -2010,9 +2149,10 @@
       });
       if (session !== state.playSession) return;
       updatePlayOverlay("即将播放", "正在启动播放器…", { progress: 95 });
-      seekVideoToStart(video);
+      const resumed = applyPlaybackResume(video, item);
+      if (resumed != null) setPlayerStatus(`从 ${formatPlaybackTime(resumed)} 继续播放`);
       await video.play().catch(() => {});
-      seekVideoToStart(video);
+      applyPlaybackResume(video, item);
       await waitPlaying(video, session);
       if (session !== state.playSession) return;
       hidePlayOverlay();
@@ -2023,9 +2163,10 @@
       video.src = url;
       await waitCanPlay(video, session, transcode ? 180000 : 120000);
       if (session !== state.playSession) return;
-      seekVideoToStart(video);
+      const resumed = applyPlaybackResume(video, item);
+      if (resumed != null) setPlayerStatus(`从 ${formatPlaybackTime(resumed)} 继续播放`);
       await video.play().catch(() => {});
-      seekVideoToStart(video);
+      applyPlaybackResume(video, item);
       await waitPlaying(video, session);
       if (session !== state.playSession) return;
       hidePlayOverlay();
@@ -2064,6 +2205,17 @@
   }
 
   async function playVideoHtml5(id, item) {
+    const prevId = state.playingId;
+    const prevVideo = getPlaybackVideo();
+    if (prevId && prevId !== id && prevVideo && Number.isFinite(prevVideo.currentTime) && prevVideo.currentTime >= 1) {
+      await savePlaybackPosition(
+        prevId,
+        prevVideo.currentTime,
+        Number.isFinite(prevVideo.duration) ? prevVideo.duration : null,
+      );
+    }
+    unbindPlaybackProgressSaver();
+
     const session = ++state.playSession;
     pendingPlayId = id;
     state.playingId = id;
@@ -2160,10 +2312,18 @@
   function hideHtml5Player() {
     state.playSession += 1;
     hidePlayOverlay();
+    const video = getPlaybackVideo();
+    if (video && state.playingId && Number.isFinite(video.currentTime) && video.currentTime >= 1) {
+      void savePlaybackPosition(
+        state.playingId,
+        video.currentTime,
+        Number.isFinite(video.duration) ? video.duration : null,
+      );
+    }
+    unbindPlaybackProgressSaver();
     stopActiveSlice();
     state.playerViewOpen = false;
     hidePlayerPreparing();
-    const video = getPlaybackVideo();
     resetVideoDisplay(video);
     parkVideoEngine();
     $("#player-view")?.classList.add("hidden");

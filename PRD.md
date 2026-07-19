@@ -2,8 +2,8 @@
 
 | 字段 | 内容 |
 |------|------|
-| 版本 | 2.0.0 |
-| 日期 | 2026-07-19 |
+| 版本 | 2.1.0 |
+| 日期 | 2026-07-20 |
 | 状态 | 已发布 |
 | 服务地址 | `http://127.0.0.1:3456`（本地） |
 
@@ -53,6 +53,7 @@
 | US-10 | 一键重启服务 | `restart.py` 先停后起并打开浏览器 |
 | US-11 | 管理多个本地视频库 | 注册/切换/编辑库路径；数据按库隔离 |
 | US-12 | 追剧时按文件名顺序连播 | 播放列表排序 + HTML5 播完自动下一集 |
+| US-13 | 下次打开从上次位置继续看 | HTML5 续播进度持久化 |
 
 ---
 
@@ -192,7 +193,12 @@
 | PNG 头 + MPEG-TS 负载 | `hls` copy，`input_format=mpegts` |
 | 纯图片 / 无法解析 | `unsupported` |
 
-**FR-17 HLS 缓存** — 切片存放 `data/cache/hls/`，LRU 淘汰，默认上限 5GB
+**FR-17 HLS 缓存** — 切片存放 `data/libraries/{id}/cache/hls/`，LRU 淘汰，默认上限 5GB；片段时长 **30 秒**（`HLS_SEGMENT_SECONDS`）
+
+**FR-17a HLS 切片进程控制**
+
+- 播放器**暂停**时挂起 ffmpeg 进程（不终止），**继续播放**时恢复
+- 切换视频、返回列表、调用 `/api/play/stop` 时终止进程并保留已生成缓存
 
 **FR-18 播放器 UI** — 全屏播放页、右侧播放列表、探测/切片状态提示、外部播放与打开文件夹
 
@@ -206,6 +212,13 @@
 
 - 当前视频播放结束后，自动播放列表中下一项（HTML5 模式）
 - 「上一个 / 下一个」按钮按当前列表排序顺序切换
+
+**FR-18c HTML5 续播**
+
+- 播放中定期保存 `position_sec`（及可选 `duration_sec`）至 `play_history.json`
+- 再次播放：进度 &lt; 15 秒从头播；距结尾 &lt; 45 秒视为看完；否则从记录位置起播
+- 直连使用 `video.currentTime`；HLS 使用 hls.js `startPosition`
+- HLS 边切边播时，目标位置须已有对应片段（或等待切片追上）
 
 ### 4.6 多视频库
 
@@ -222,7 +235,7 @@
 | 文件/目录 | 内容 |
 |-----------|------|
 | `favorites.json` | 收藏 |
-| `play_history.json` | 播放历史 |
+| `play_history.json` | 播放历史（含 `position_sec` 续播进度） |
 | `category_meta.json` | 分类星标与排序 |
 | `.thumbs/` | 缩略图缓存 |
 | `cache/hls/` | HLS 切片缓存 |
@@ -318,9 +331,22 @@
 | POST | `/api/play/prepare/{video_id}` | 预切片 |
 | GET | `/api/play/status/{video_id}` | 切片进度 |
 | POST | `/api/play/stop` | 停止切片任务 |
+| POST | `/api/play/pause` | 挂起当前 ffmpeg 切片进程 |
+| POST | `/api/play/resume` | 恢复已挂起的切片进程 |
 | GET | `/api/hls/{video_id}/{filename}` | HLS 分片 |
 | POST | `/api/play-external/{video_id}` | 外部播放器 |
 | POST | `/api/open-folder/{video_id}` | 打开资源管理器 |
+
+### 5.5a 收藏与播放历史
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/history/record` | 记录播放（时间、次数） |
+| POST | `/api/history/position` | 保存续播进度 `position_sec` |
+| POST | `/api/history/clear` | 清空播放记录 |
+| GET | `/api/history/summary` | 最近播放条数 |
+
+视频列表 API 返回 `playPosition`、`playDuration`（来自历史条目）。
 
 ### 5.6 视频库
 
@@ -412,6 +438,7 @@ python restart.py
 3. 伪装格式需按需扩展探测规则
 4. 大库首次扫描缩略图按需生成
 5. 转码播放 CPU 占用较高
+6. HLS 续播依赖已切片范围；边切边播时 seek 超前可能需等待
 
 ---
 
@@ -421,6 +448,7 @@ python restart.py
 |------|------|------|
 | 1.0.0 | — | 基础画廊、外部播放器、缩略图队列 |
 | **2.0.0** | **2026-07-19** | **多视频库、设置面板重构、播放列表排序与 HTML5 连播、PotPlayer 自动探测** |
+| **2.1.0** | **2026-07-20** | **HTML5 续播、HLS 30 秒切片、暂停时挂起 ffmpeg、播放/切片 API 扩展** |
 
 详见 [CHANGELOG.md](./CHANGELOG.md)。
 

@@ -58,6 +58,27 @@ def record_play(library_id: str, video_id: str) -> dict:
         return dict(entry)
 
 
+def save_position(
+    library_id: str,
+    video_id: str,
+    position_sec: float,
+    *,
+    duration_sec: float | None = None,
+) -> dict:
+    """保存播放进度（秒），供下次续播。"""
+    pos = max(0.0, float(position_sec))
+    with _lock:
+        data = _load_raw(library_id)
+        items = data.setdefault("items", {})
+        entry = items.get(video_id) or {}
+        entry["position_sec"] = round(pos, 2)
+        if duration_sec is not None and duration_sec > 0:
+            entry["duration_sec"] = round(float(duration_sec), 2)
+        items[video_id] = entry
+        _save_raw(library_id, data)
+        return dict(entry)
+
+
 def list_history_ids_sorted(library_id: str) -> list[str]:
     cutoff = _cutoff_ts(library_id)
     with _lock:
