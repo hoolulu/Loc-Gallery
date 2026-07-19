@@ -33,23 +33,29 @@
 
 > 演示数据为风景图占位，非真实视频库内容。
 
-<p align="center">
-  <img src="docs/screenshots/gallery.png" width="49%" alt="画廊浏览" />
-  <img src="docs/screenshots/player.png" width="49%" alt="内嵌播放" />
-</p>
-<p align="center"><sub>画廊浏览 · 分类 / 子目录 / 分页 &nbsp;&nbsp;|&nbsp;&nbsp; 内嵌播放 · 播放列表</sub></p>
+**画廊浏览** — 左侧分类与子目录树，网格分页浏览整个视频库。
 
-<p align="center">
-  <img src="docs/screenshots/favorites.png" width="49%" alt="我的收藏" />
-  <img src="docs/screenshots/history.png" width="49%" alt="最近播放" />
-</p>
-<p align="center"><sub>我的收藏 &nbsp;&nbsp;|&nbsp;&nbsp; 最近播放</sub></p>
+<p align="center"><img src="docs/screenshots/gallery.png" width="100%" alt="画廊浏览" /></p>
 
-<p align="center">
-  <img src="docs/screenshots/settings.png" width="49%" alt="设置" />
-  <img src="docs/screenshots/batch.png" width="49%" alt="批量选择" />
-</p>
-<p align="center"><sub>设置 &nbsp;&nbsp;|&nbsp;&nbsp; 批量选择</sub></p>
+**内嵌播放** — 页面内播放器与右侧播放列表，支持上一个 / 下一个切换。
+
+<p align="center"><img src="docs/screenshots/player.png" width="100%" alt="内嵌播放" /></p>
+
+**我的收藏** — 一键筛选已收藏视频，卡片左上角显示红心标记。
+
+<p align="center"><img src="docs/screenshots/favorites.png" width="100%" alt="我的收藏" /></p>
+
+**最近播放** — 按播放时间倒序浏览，快速回到上次看到的内容。
+
+<p align="center"><img src="docs/screenshots/history.png" width="100%" alt="最近播放" /></p>
+
+**设置** — 播放方式、缩略图策略、PotPlayer 路径、历史保留天数等。
+
+<p align="center"><img src="docs/screenshots/settings.png" width="100%" alt="设置" /></p>
+
+**批量选择** — 多选后批量收藏、移动、删除，底部浮出操作栏。
+
+<p align="center"><img src="docs/screenshots/batch.png" width="100%" alt="批量选择" /></p>
 
 ---
 
