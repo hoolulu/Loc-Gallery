@@ -4,27 +4,30 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Loc Gallery</title>
-  <link rel="stylesheet" href="/static/tailwind.css?v=1">
-  <link rel="stylesheet" href="/static/style.css?v=52">
+  <link rel="stylesheet" href="/static/tailwind.css?v=2">
+  <link rel="stylesheet" href="/static/style.css?v=59">
 </head>
-<body class="flex h-full flex-col overflow-hidden bg-surface text-zinc-100 antialiased">
+<body class="flex h-full flex-col overflow-hidden bg-surface text-[#f1f1f1] antialiased">
 
-  <header class="z-50 shrink-0 border-b border-surface-border bg-surface-raised/95 backdrop-blur-sm">
-    <div class="flex flex-wrap items-center gap-3 px-5 py-3">
-      <h1 class="text-lg font-bold tracking-tight"><span class="text-accent">Loc</span> Gallery</h1>
-      <div id="library-switcher" class="library-switcher">
-        <span class="library-switcher-label">选择视频库</span>
-        <select id="library-select" class="library-select" title="切换视频库"></select>
+  <header class="app-header z-50 shrink-0">
+    <div class="header-main">
+      <div class="header-left">
+        <h1 class="header-logo"><span class="text-accent">Loc</span> Gallery</h1>
       </div>
-      <div class="ml-auto flex min-w-[280px] flex-1 items-center justify-end gap-2">
-        <input type="search" id="search" placeholder="搜索标题 / 文件名 / 分类..." autocomplete="off"
-          class="w-full max-w-sm rounded-lg border border-surface-border bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-accent/60 focus:ring-1 focus:ring-accent/30">
-        <button id="btn-manage" title="批量选择与管理"
-          class="ui-btn shrink-0 rounded-lg border border-surface-border px-3 py-2 text-sm">批量</button>
-        <button id="btn-settings" title="设置"
-          class="ui-btn shrink-0 rounded-lg border border-surface-border px-3 py-2 text-sm">设置</button>
-        <button id="btn-rescan" title="重新扫描"
-          class="ui-btn shrink-0 rounded-lg border border-surface-border bg-zinc-800 px-3 py-2 text-sm">刷新</button>
+      <nav id="header-nav" class="header-nav" aria-label="主视图">
+        <button type="button" id="btn-view-browse" class="view-mode-btn active" data-view="browse">首页</button>
+        <button type="button" id="btn-view-favorites" class="view-mode-btn" data-view="favorites"><span class="view-mode-icon" aria-hidden="true">♥</span>我的收藏</button>
+        <button type="button" id="btn-view-history" class="view-mode-btn" data-view="history"><span class="view-mode-icon" aria-hidden="true">⏱</span>最近播放</button>
+        <div id="library-switcher" class="library-switcher header-nav-library">
+          <span class="library-switcher-label">视频库</span>
+          <select id="library-select" class="library-select" title="切换视频库"></select>
+        </div>
+      </nav>
+      <div class="header-right">
+        <input type="search" id="search" placeholder="搜索" title="搜索标题 / 文件名 / 分类" autocomplete="off" class="header-search">
+        <button type="button" id="btn-manage" class="header-tool-btn" title="批量选择与管理">批量</button>
+        <button type="button" id="btn-settings" class="header-tool-btn" title="设置">设置</button>
+        <button type="button" id="btn-rescan" class="header-tool-btn header-tool-btn-emphasis" title="重新扫描">刷新</button>
       </div>
     </div>
     <div class="progress-bar-wrap px-5 pb-3">
@@ -51,7 +54,7 @@
   </header>
 
   <div class="layout flex min-h-0 flex-1">
-    <aside id="sidebar" class="flex w-60 shrink-0 flex-col border-r border-surface-border bg-surface">
+    <aside id="sidebar" class="flex w-60 shrink-0 flex-col border-r border-surface-border bg-surface yt-sidebar">
       <div class="sidebar-head border-b border-surface-border">
         <div class="sidebar-title">分类</div>
         <select id="category-sort" class="sidebar-sort" title="分类排序">
@@ -70,16 +73,16 @@
       <main class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <div id="gallery-toolbar" class="toolbar flex shrink-0 flex-wrap items-center justify-between gap-3 px-5 pt-4">
           <div class="toolbar-left flex flex-wrap items-center gap-3">
-            <span id="breadcrumb" class="breadcrumb hidden text-sm text-zinc-400"></span>
-            <span id="status" class="status text-sm text-zinc-500"></span>
+            <span id="breadcrumb" class="breadcrumb hidden text-sm text-[#aaaaaa]"></span>
+            <span id="status" class="status text-sm"></span>
             <div class="batch-tools flex items-center gap-2 border-l border-surface-border pl-3">
-              <label class="batch-select-label flex cursor-pointer items-center gap-2 text-sm text-zinc-400">
+              <label class="batch-select-label flex cursor-pointer items-center gap-2 text-sm text-[#aaaaaa]">
                 <input type="checkbox" id="select-page-all" class="h-4 w-4 accent-red-600">
                 <span>全选本页</span>
               </label>
               <button type="button" id="btn-batch-clear" class="ui-btn sm hidden rounded-md px-2 py-1">取消选择</button>
             </div>
-            <select id="sort" class="rounded-lg border border-surface-border bg-zinc-950 px-2 py-1.5 text-xs text-zinc-300">
+            <select id="sort" class="yt-select text-xs">
               <option value="mtime_desc">最新优先</option>
               <option value="mtime_asc">最旧优先</option>
               <option value="title_asc">标题 A-Z</option>
@@ -90,18 +93,18 @@
             </select>
           </div>
           <div class="toolbar-right flex items-center gap-3">
-            <div class="view-mode-btns flex gap-1 border-r border-surface-border pr-3">
-              <button type="button" id="btn-view-favorites" class="view-mode-btn ui-btn rounded-lg border border-surface-border px-2.5 py-1 text-xs" data-view="favorites"><span class="view-mode-icon" aria-hidden="true">♥</span>我的收藏</button>
-              <button type="button" id="btn-view-history" class="view-mode-btn ui-btn rounded-lg border border-surface-border px-2.5 py-1 text-xs" data-view="history"><span class="view-mode-icon" aria-hidden="true">⏱</span>最近播放</button>
-            </div>
-            <div class="page-size-btns flex gap-1">
-              <button class="page-size ui-btn rounded-lg px-2.5 py-1 text-xs active" data-size="32">32</button>
-              <button class="page-size ui-btn rounded-lg border border-surface-border px-2.5 py-1 text-xs" data-size="64">64</button>
-              <button class="page-size ui-btn rounded-lg border border-surface-border px-2.5 py-1 text-xs" data-size="0">全部</button>
+            <div class="page-size-controls flex flex-wrap items-center gap-2">
+              <button type="button" id="btn-page-size-auto" class="page-size ui-btn rounded-lg px-2.5 py-1 text-xs active" data-size="auto" title="按当前窗口大小计算每页条数">自适应</button>
+              <label class="page-size-custom-label flex items-center gap-1 text-xs text-[#aaaaaa]">
+                每页
+                <input type="number" id="page-size-custom" class="page-size-input yt-select" min="1" max="999" step="1" placeholder="—" title="自定义每页条数，回车生效">
+                条
+              </label>
+              <button type="button" id="btn-page-size-all" class="page-size ui-btn rounded-lg border border-surface-border px-2.5 py-1 text-xs" data-size="0">全部</button>
             </div>
             <div class="pagination flex items-center gap-2 text-sm">
               <button id="btn-prev" class="ui-btn rounded-lg border border-surface-border px-2 py-1" disabled>◀</button>
-              <span id="page-info" class="text-zinc-500">第 1 页</span>
+              <span id="page-info" class="text-[#aaaaaa]">第 1 页</span>
               <button id="btn-next" class="ui-btn rounded-lg border border-surface-border px-2 py-1" disabled>▶</button>
             </div>
           </div>
@@ -347,6 +350,7 @@
             <label class="opt-cell">
               <span class="settings-field-label">默认每页</span>
               <select id="set-page-size" class="dlg-input compact-input">
+                <option value="-1">自适应</option>
                 <option value="32">32</option>
                 <option value="64">64</option>
                 <option value="0">全部</option>
@@ -424,6 +428,6 @@
   </dialog>
 
   <script src="/static/vendor/hls.min.js"></script>
-  <script src="/static/app.js?v=93"></script>
+  <script src="/static/app.js?v=98"></script>
 </body>
 </html>

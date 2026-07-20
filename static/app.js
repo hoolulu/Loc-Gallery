@@ -2,6 +2,168 @@
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => document.querySelectorAll(sel);
 
+  /** 与 style.css `.grid` 的 CSS 变量一致；列数优先从 DOM 实测 */
+  const GRID_LAYOUT = { titleH: 34, hPad: 40, maxCols: 10 };
+
+  let lastAutoPageSize = 0;
+  let autoPageSizeTimer = null;
+  let autoReconcileLock = false;
+
+  function parseCssLength(val, rootPx) {
+    if (!val) return 0;
+    const v = String(val).trim();
+    if (v.endsWith("rem")) return parseFloat(v) * rootPx;
+    if (v.endsWith("px")) return parseFloat(v);
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function readGridMetrics() {
+    const grid = $("#grid");
+    const rootPx = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+    if (!grid) {
+      return { min: 200, max: 260, gap: 14, maxCols: GRID_LAYOUT.maxCols };
+    }
+    const cs = getComputedStyle(grid);
+    const maxCols = parseInt(cs.getPropertyValue("--grid-max-cols"), 10) || GRID_LAYOUT.maxCols;
+    return {
+      min: parseCssLength(cs.getPropertyValue("--grid-min"), rootPx) || 200,
+      max: parseCssLength(cs.getPropertyValue("--grid-max"), rootPx) || 260,
+      gap: parseCssLength(cs.getPropertyValue("--grid-gap"), rootPx) || 14,
+      maxCols,
+    };
+  }
+
+  function getGridContentWidth() {
+    const grid = $("#grid");
+    if (grid && grid.clientWidth > 0) return grid.clientWidth;
+    const gallery = $("#gallery-view");
+    if (!gallery) return 0;
+    return Math.max(0, gallery.clientWidth - GRID_LAYOUT.hPad);
+  }
+
+  function estimateGridColumns(containerWidth, metrics) {
+    const { min, max, gap, maxCols } = metrics;
+    const w = Math.max(min, containerWidth);
+    if (w <= 0) return 1;
+    const floorMin = Math.max(
+      min,
+      (w - (maxCols - 1) * gap) / maxCols,
+    );
+    const minCols = Math.max(1, Math.ceil((w + gap) / (max + gap)));
+    let cols = minCols;
+    for (let n = minCols; n <= maxCols; n++) {
+      const cell = (w - (n - 1) * gap) / n;
+      if (cell >= floorMin - 1) cols = n;
+      else break;
+    }
+    return Math.min(maxCols, cols);
+  }
+
+  function measureRenderedGridColumns() {
+    const grid = $("#grid");
+    if (!grid) return 0;
+    const cards = grid.querySelectorAll(".card");
+    if (!cards.length) return 0;
+    const top = cards[0].offsetTop;
+    let cols = 0;
+    for (const card of cards) {
+      if (card.offsetTop <= top + 2) cols += 1;
+      else break;
+    }
+    return cols || 1;
+  }
+
+  function computeAutoPageSize(forcedCols) {
+    const gallery = $("#gallery-view");
+    if (!gallery) return 32;
+    const metrics = readGridMetrics();
+    const width = getGridContentWidth();
+    const cols = forcedCols || estimateGridColumns(width, metrics);
+    const cellW = Math.min(
+      metrics.max,
+      Math.max(metrics.min, (width - (cols - 1) * metrics.gap) / cols),
+    );
+    const cardH = cellW * (9 / 16) + GRID_LAYOUT.titleH;
+    const availH = Math.max(cardH, gallery.clientHeight - 16);
+    const rows = Math.max(2, Math.floor((availH + metrics.gap) / (cardH + metrics.gap)));
+    const size = cols * rows;
+    return Math.min(128, Math.max(cols * 2, size));
+  }
+
+  function playbackInProgress() {
+    if (pendingPlayId) return true;
+    if (state.playerViewOpen) return true;
+    const ov = $("#play-overlay");
+    return !!(ov && !ov.classList.contains("hidden"));
+  }
+
+  function reconcileAutoPageSizeAfterRender() {
+    if (state.pageSize !== "auto" || autoReconcileLock) return;
+    if (playbackInProgress()) return;
+    requestAnimationFrame(() => {
+      const cols = measureRenderedGridColumns();
+      if (!cols) return;
+      const target = computeAutoPageSize(cols);
+      const n = state.pageItems.length;
+      const requested = lastAutoPageSize || target;
+      const fullPage = requested > 0 && n >= requested;
+      const raggedFullPage = fullPage && n % cols !== 0;
+      const targetChanged = target !== requested;
+
+      if (!raggedFullPage && !targetChanged) {
+        lastAutoPageSize = target;
+        return;
+      }
+      if (!raggedFullPage && targetChanged) {
+        lastAutoPageSize = target;
+        state.page = 1;
+        scheduleAutoPageSizeCheck();
+        return;
+      }
+      autoReconcileLock = true;
+      lastAutoPageSize = target;
+      state.page = 1;
+      loadVideos().finally(() => {
+        autoReconcileLock = false;
+      });
+    });
+  }
+
+  function getEffectivePageSize() {
+    if (state.pageSize !== "auto") return state.pageSize;
+    const measured = measureRenderedGridColumns();
+    return computeAutoPageSize(measured || undefined);
+  }
+
+  function syncPageSizeControls() {
+    const isAuto = state.pageSize === "auto";
+    const isAll = state.pageSize === 0;
+    $("#btn-page-size-auto")?.classList.toggle("active", isAuto);
+    $("#btn-page-size-all")?.classList.toggle("active", isAll);
+    const input = $("#page-size-custom");
+    if (!input) return;
+    const custom = !isAuto && !isAll && Number(state.pageSize) > 0;
+    input.classList.toggle("page-size-input-active", custom);
+    if (isAuto || isAll) input.value = "";
+    else if (custom) input.value = String(state.pageSize);
+  }
+
+  function scheduleAutoPageSizeCheck() {
+    if (state.pageSize !== "auto") return;
+    if (playbackInProgress()) return;
+    clearTimeout(autoPageSizeTimer);
+    autoPageSizeTimer = setTimeout(() => {
+      const cols = measureRenderedGridColumns();
+      const next = computeAutoPageSize(cols || undefined);
+      if (next > 0 && next !== lastAutoPageSize) {
+        lastAutoPageSize = next;
+        state.page = 1;
+        loadVideos();
+      }
+    }, 200);
+  }
+
   const LS_KEY = "loc-gallery-state";
 
   const state = {
@@ -10,7 +172,7 @@
     query: "",
     sort: "mtime_desc",
     page: 1,
-    pageSize: 32,
+    pageSize: "auto",
     categorySortMode: "custom",
     expandedCategories: new Set(),
     folderTrees: {},
@@ -215,7 +377,8 @@
       if (saved.sort) state.sort = saved.sort;
       if (saved.pageSize !== undefined) {
         const ps = saved.pageSize;
-        state.pageSize = ps === 28 ? 32 : ps === 56 ? 64 : ps;
+        if (ps === "auto") state.pageSize = "auto";
+        else state.pageSize = ps === 28 ? 32 : ps === 56 ? 64 : ps;
       }
       if (saved.libraryId !== undefined) state.libraryId = saved.libraryId;
       if (saved.playlistSort) state.playlistSort = saved.playlistSort;
@@ -419,7 +582,7 @@
     thumb_random_max: 0.8,
     thumb_workers: 3,
     thumb_idle_scan: false,
-    default_page_size: 32,
+    default_page_size: -1,
     potplayer_path: "",
     history_retention_days: 180,
     hls_large_h264: false,
@@ -454,7 +617,7 @@
     setVal("set-random-max", s.thumb_random_max);
     setVal("set-workers", s.thumb_workers);
     setVal("set-idle-scan", String(!!s.thumb_idle_scan));
-    setVal("set-page-size", String(s.default_page_size ?? 32));
+    setVal("set-page-size", String(s.default_page_size === -1 ? -1 : (s.default_page_size ?? -1)));
     setVal("set-potplayer", s.potplayer_path || "");
     setVal("set-history-days", s.history_retention_days ?? 180);
     setVal("set-hls-large-h264", String(!!s.hls_large_h264));
@@ -574,18 +737,21 @@
   }
 
   function updatePagination(totalPages, page, total) {
-    const showPager = state.pageSize !== 0 && total > 0;
+    const pageSize = getEffectivePageSize();
+    const showPager = pageSize !== 0 && total > 0;
     $("#pagination-bottom").classList.toggle("hidden", !showPager);
 
     const prevDisabled = page <= 1;
-    const nextDisabled = page >= totalPages || state.pageSize === 0;
+    const nextDisabled = page >= totalPages || pageSize === 0;
 
     $("#btn-prev").disabled = prevDisabled;
     $("#btn-next").disabled = nextDisabled;
 
-    const pageText = state.pageSize === 0
+    const pageText = pageSize === 0
       ? `全部 ${total} 个`
-      : `第 ${page} / ${totalPages} 页`;
+      : state.pageSize === "auto"
+        ? `第 ${page} / ${totalPages} 页 · 本页 ${pageSize}`
+        : `第 ${page} / ${totalPages} 页`;
 
     $("#page-info").textContent = pageText;
     $("#page-info-bottom").textContent = pageText;
@@ -804,13 +970,17 @@
   }
 
   function setViewMode(mode) {
-    if (state.viewMode === mode) {
+    const prev = state.viewMode;
+    if (mode === "browse") {
       state.viewMode = "browse";
     } else {
       state.viewMode = mode;
-      state.category = "";
-      state.folder = "";
+      if (prev !== mode) {
+        state.category = "";
+        state.folder = "";
+      }
     }
+    if (prev === state.viewMode) return;
     state.page = 1;
     updateViewModeButtons();
     saveState();
@@ -1051,7 +1221,7 @@
     if (state.query) params.set("q", state.query);
     params.set("sort", state.sort);
     params.set("page", String(state.page));
-    params.set("page_size", String(state.pageSize));
+    params.set("page_size", String(getEffectivePageSize()));
     return params;
   }
 
@@ -1362,6 +1532,7 @@
   }
 
   async function loadVideos({ forceRebuild = false } = {}) {
+    if (!forceRebuild && playbackInProgress()) return;
     if (state.playerViewOpen) await hideHtml5Player();
     const params = buildVideosParams();
 
@@ -1409,6 +1580,10 @@
       renderPlayerPlaylist();
       highlightPlayingCard();
       scheduleFormatBadgePoll();
+      if (state.pageSize === "auto") {
+        lastAutoPageSize = getEffectivePageSize();
+        reconcileAutoPageSizeAfterRender();
+      }
       return;
     }
 
@@ -1454,6 +1629,10 @@
     renderPlayerPlaylist();
     highlightPlayingCard();
     scheduleFormatBadgePoll();
+    if (state.pageSize === "auto") {
+      lastAutoPageSize = getEffectivePageSize();
+      reconcileAutoPageSizeAfterRender();
+    }
   }
 
   function updateUrl() {
@@ -1463,7 +1642,8 @@
     if (state.folder && !state.query) params.set("folder", state.folder);
     if (state.query) params.set("q", state.query);
     if (state.page > 1) params.set("page", state.page);
-    if (state.pageSize !== 32) params.set("size", state.pageSize);
+    if (state.pageSize === "auto") params.set("size", "auto");
+    else if (state.pageSize !== 0) params.set("size", String(state.pageSize));
     const qs = params.toString();
     history.replaceState(null, "", qs ? `?${qs}` : "/");
   }
@@ -1481,7 +1661,10 @@
       $("#search").value = state.query;
     }
     if (params.has("page")) state.page = parseInt(params.get("page"), 10) || 1;
-    if (params.has("size")) state.pageSize = parseInt(params.get("size"), 10);
+    if (params.has("size")) {
+      const s = params.get("size");
+      state.pageSize = s === "auto" ? "auto" : (parseInt(s, 10) || 32);
+    }
   }
 
   function scheduleThumbRefresh(id) {
@@ -2382,7 +2565,6 @@
     if (!video) return;
     resetVideoDisplay(video);
     mountVideoToPlayer();
-    openPlayerView(item);
     detachVideoStream(video);
     video = getPlaybackVideo();
     if (!video) return;
@@ -2809,6 +2991,7 @@
     $("#gallery-toolbar")?.classList.remove("hidden");
     state.playingId = null;
     highlightPlayingCard();
+    if (state.pageSize === "auto") scheduleAutoPageSizeCheck();
   }
 
   function playAdjacentVideo(delta) {
@@ -3028,13 +3211,28 @@
   }
 
   function setPageSize(size) {
-    state.pageSize = size;
+    if (size === "auto") {
+      state.pageSize = "auto";
+    } else {
+      const n = Number(size);
+      if (!Number.isFinite(n) || n < 0) return;
+      state.pageSize = n === 0 ? 0 : Math.min(999, Math.max(1, Math.floor(n)));
+    }
     state.page = 1;
-    $$(".page-size").forEach(btn => {
-      btn.classList.toggle("active", parseInt(btn.dataset.size, 10) === size);
-    });
+    if (state.pageSize === "auto") {
+      lastAutoPageSize = computeAutoPageSize(measureRenderedGridColumns() || undefined);
+    }
+    syncPageSizeControls();
     saveState();
     loadVideos();
+  }
+
+  function applyCustomPageSize() {
+    const input = $("#page-size-custom");
+    if (!input) return;
+    const n = parseInt(input.value, 10);
+    if (!Number.isFinite(n) || n < 1) return;
+    setPageSize(n);
   }
 
   let sseHandle = null;
@@ -3128,7 +3326,11 @@
           thumb_random_max: rMax,
           thumb_workers: workers,
           thumb_idle_scan: $("#set-idle-scan")?.value === "true",
-          default_page_size: parseInt($("#set-page-size")?.value, 10),
+          default_page_size: (() => {
+            const raw = $("#set-page-size")?.value;
+            if (raw === "-1") return -1;
+            return parseInt(raw, 10);
+          })(),
           potplayer_path: $("#set-potplayer")?.value || "",
           player_mode: document.querySelector('input[name="player-mode"]:checked')?.value || SETTINGS_DEFAULTS.player_mode,
           hls_large_h264: $("#set-hls-large-h264")?.value === "true",
@@ -3212,9 +3414,15 @@
     loadVideos();
   });
 
-  $$(".page-size").forEach(btn => {
-    btn.addEventListener("click", () => setPageSize(parseInt(btn.dataset.size, 10)));
+  $("#btn-page-size-auto")?.addEventListener("click", () => setPageSize("auto"));
+  $("#btn-page-size-all")?.addEventListener("click", () => setPageSize(0));
+  $("#page-size-custom")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      applyCustomPageSize();
+    }
   });
+  $("#page-size-custom")?.addEventListener("change", () => applyCustomPageSize());
 
   $("#btn-prev").addEventListener("click", () => goToPage(state.page - 1));
 
@@ -3262,8 +3470,9 @@
     loadProgress();
   });
 
-  $("#btn-view-favorites").addEventListener("click", () => setViewMode("favorites"));
-  $("#btn-view-history").addEventListener("click", () => setViewMode("history"));
+  $("#btn-view-browse")?.addEventListener("click", () => setViewMode("browse"));
+  $("#btn-view-favorites")?.addEventListener("click", () => setViewMode("favorites"));
+  $("#btn-view-history")?.addEventListener("click", () => setViewMode("history"));
 
   $("#btn-sel-fav-add").addEventListener("click", () => batchFavoritesAction("add"));
   $("#btn-sel-fav-remove").addEventListener("click", () => batchFavoritesAction("remove"));
@@ -3513,9 +3722,17 @@
   syncPlaylistSortSelect();
   parseUrl();
   $("#sort").value = state.sort;
-  $$(".page-size").forEach(btn => {
-    btn.classList.toggle("active", parseInt(btn.dataset.size, 10) === state.pageSize);
-  });
+  if (state.pageSize === "auto") {
+    lastAutoPageSize = computeAutoPageSize();
+  }
+  syncPageSizeControls();
+
+  const galleryViewEl = $("#gallery-view");
+  if (galleryViewEl && typeof ResizeObserver !== "undefined") {
+    const ro = new ResizeObserver(() => scheduleAutoPageSizeCheck());
+    ro.observe(galleryViewEl);
+  }
+  window.addEventListener("resize", () => scheduleAutoPageSizeCheck());
 
   loadLibraries().then(() => loadPlayerSettings()).then(() => updatePotplayerPathVisibility());
   updateViewModeButtons();

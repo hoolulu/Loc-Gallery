@@ -9,7 +9,7 @@ module.exports = {
     extend: {
       colors: {
         accent: { DEFAULT: "#e50914", hover: "#f40612" },
-        surface: { DEFAULT: "#141414", raised: "#1f1f1f", border: "#333333" },
+        surface: { DEFAULT: "#0f0f0f", raised: "#212121", border: "#303030" },
       },
     },
   },
