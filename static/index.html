@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Loc Gallery</title>
   <link rel="stylesheet" href="/static/tailwind.css?v=2">
-  <link rel="stylesheet" href="/static/style.css?v=72">
+  <link rel="stylesheet" href="/static/style.css?v=75">
 </head>
 <body class="flex h-full flex-col overflow-hidden bg-surface text-[#f1f1f1] antialiased">
 
@@ -261,7 +261,7 @@
       </header>
 
       <div class="settings-body">
-        <section class="settings-block">
+        <section class="settings-block settings-block--compact">
           <h3 class="settings-block-title">视频库</h3>
 
           <div class="settings-sub">
@@ -291,10 +291,10 @@
           </div>
         </section>
 
-        <section class="settings-block">
+        <section class="settings-block settings-block--compact">
           <h3 class="settings-block-title">其他选项</h3>
-          <div class="options-grid">
-            <div class="opt-cell opt-span-2">
+          <div class="options-grid options-grid--dense">
+            <div class="opt-cell opt-cell--stack opt-full">
               <span class="settings-field-label">播放方式</span>
               <div class="player-mode-inline">
                 <label class="player-mode-opt">
@@ -308,46 +308,51 @@
               </div>
             </div>
 
-            <div id="potplayer-path-wrap" class="opt-cell opt-span-2">
+            <div id="potplayer-path-wrap" class="opt-cell opt-full opt-row hidden">
               <label class="settings-field-label" for="set-potplayer">PotPlayer 路径</label>
-              <input type="text" id="set-potplayer" class="dlg-input compact-input" placeholder="自动检测">
+              <input type="text" id="set-potplayer" class="dlg-input compact-input input-fit input-fit--path" placeholder="自动检测">
             </div>
 
-            <label class="opt-cell opt-span-2">
+            <label class="opt-cell">
               <span class="settings-field-label">大文件 H.264 强制 HLS</span>
-              <select id="set-hls-large-h264" class="dlg-input compact-input" title="HTML5 模式下，≥300MB 的 H.264 MP4 是否切片播放">
+              <select id="set-hls-large-h264" class="dlg-input compact-input input-fit input-fit--lg" title="HTML5 模式下，≥300MB 的 H.264 MP4 是否切片播放">
                 <option value="false">否（直连，省磁盘）</option>
                 <option value="true">是（切片，起播更快）</option>
               </select>
             </label>
 
-            <label class="opt-cell opt-span-2">
+            <label class="opt-cell">
               <span class="settings-field-label">索引在末尾 H.264 强制 HLS</span>
-              <select id="set-hls-moov-end-h264" class="dlg-input compact-input" title="HTML5 模式下，moov 在文件后半段的 H.264 是否切片播放">
+              <select id="set-hls-moov-end-h264" class="dlg-input compact-input input-fit input-fit--md" title="HTML5 模式下，moov 在文件后半段的 H.264 是否切片播放">
                 <option value="false">否（直连）</option>
                 <option value="true">是（切片）</option>
               </select>
             </label>
 
-            <label class="opt-cell opt-span-2">
+            <label class="opt-cell">
               <span class="settings-field-label">HTML5 记忆播放位置</span>
-              <select id="set-html5-resume-playback" class="dlg-input compact-input" title="退出或切换后再次打开从上次进度继续（距结尾不足 45 秒视为看完）">
+              <select id="set-html5-resume-playback" class="dlg-input compact-input input-fit input-fit--md" title="退出或切换后再次打开从上次进度继续（距结尾不足 45 秒视为看完）">
                 <option value="true">开启续播</option>
                 <option value="false">每次从头播</option>
               </select>
             </label>
 
-            <label class="opt-cell opt-span-2">
+            <label class="opt-cell">
               <span class="settings-field-label">HTML5 播放列表连播</span>
-              <select id="set-html5-playlist-autoplay" class="dlg-input compact-input" title="按右侧播放列表顺序，当前集播完后是否自动播下一集">
+              <select id="set-html5-playlist-autoplay" class="dlg-input compact-input input-fit input-fit--lg" title="按右侧播放列表顺序，当前集播完后是否自动播下一集">
                 <option value="true">播完自动下一集</option>
                 <option value="false">播完停止</option>
               </select>
             </label>
 
-            <label class="opt-cell opt-span-2">
+            <label class="opt-cell">
+              <span class="settings-field-label">滚轮快进/快退</span>
+              <input type="number" id="set-html5-wheel-seek-sec" class="dlg-input compact-input input-fit input-fit--xs" min="0" max="120" step="1" title="播放画面区滚轮：下快进、上快退；0=关闭">
+            </label>
+
+            <label class="opt-cell">
               <span class="settings-field-label">碎片化 MP4（HTML5）</span>
-              <select id="set-html5-fragmented-mp4" class="dlg-input compact-input" title="碎片化 MP4 无法用浏览器直连，可选本地播放器或切片">
+              <select id="set-html5-fragmented-mp4" class="dlg-input compact-input input-fit input-fit--xl" title="碎片化 MP4 无法用浏览器直连，可选本地播放器或切片">
                 <option value="external">PotPlayer（省磁盘，推荐）</option>
                 <option value="hls">边切边播（耗硬盘）</option>
               </select>
@@ -355,7 +360,7 @@
 
             <label class="opt-cell">
               <span class="settings-field-label">默认每页</span>
-              <select id="set-page-size" class="dlg-input compact-input">
+              <select id="set-page-size" class="dlg-input compact-input input-fit input-fit--sm">
                 <option value="-1">自适应</option>
                 <option value="32">32</option>
                 <option value="64">64</option>
@@ -365,17 +370,17 @@
 
             <label class="opt-cell">
               <span class="settings-field-label">历史保留天数</span>
-              <input type="number" id="set-history-days" min="1" max="3650" step="1" value="180" class="dlg-input compact-input">
+              <input type="number" id="set-history-days" min="1" max="3650" step="1" value="180" class="dlg-input compact-input input-fit input-fit--xs">
             </label>
 
             <label class="opt-cell">
               <span class="settings-field-label">截图位置</span>
-              <input type="number" id="set-position" min="0.05" max="0.95" step="0.05" value="0.6" class="dlg-input compact-input">
+              <input type="number" id="set-position" min="0.05" max="0.95" step="0.05" value="0.6" class="dlg-input compact-input input-fit input-fit--xs">
             </label>
 
             <label class="opt-cell">
               <span class="settings-field-label">空闲扫描</span>
-              <select id="set-idle-scan" class="dlg-input compact-input">
+              <select id="set-idle-scan" class="dlg-input compact-input input-fit input-fit--xs">
                 <option value="true">是</option>
                 <option value="false">否</option>
               </select>
@@ -383,7 +388,7 @@
 
             <label class="opt-cell">
               <span class="settings-field-label">缩略图进度条</span>
-              <select id="set-thumb-progress-bar" class="dlg-input compact-input" title="全库就绪时自动收起，顶栏保留红色装饰线">
+              <select id="set-thumb-progress-bar" class="dlg-input compact-input input-fit input-fit--md" title="全库就绪时自动收起，顶栏保留红色装饰线">
                 <option value="auto">仅活动时显示</option>
                 <option value="always">始终显示</option>
                 <option value="never">始终隐藏</option>
@@ -393,18 +398,18 @@
             <div class="opt-cell">
               <span class="settings-field-label">随机截图</span>
               <div class="range-inputs compact">
-                <input type="number" id="set-random-min" min="0.05" max="0.95" step="0.05" value="0.5" class="dlg-input compact-input">
+                <input type="number" id="set-random-min" min="0.05" max="0.95" step="0.05" value="0.5" class="dlg-input compact-input input-fit input-fit--xs">
                 <span class="range-sep">~</span>
-                <input type="number" id="set-random-max" min="0.05" max="0.95" step="0.05" value="0.8" class="dlg-input compact-input">
+                <input type="number" id="set-random-max" min="0.05" max="0.95" step="0.05" value="0.8" class="dlg-input compact-input input-fit input-fit--xs">
               </div>
             </div>
 
             <label class="opt-cell">
               <span class="settings-field-label">缩略图并发</span>
-              <input type="number" id="set-workers" min="1" max="8" step="1" class="dlg-input compact-input">
+              <input type="number" id="set-workers" min="1" max="8" step="1" class="dlg-input compact-input input-fit input-fit--xs">
             </label>
 
-            <div class="opt-cell opt-span-4 opt-footer">
+            <div class="opt-cell opt-footer opt-full">
               <button type="button" id="btn-clear-history" class="ui-btn sm">清空播放记录</button>
               <span class="hint-inline">并发数需重启服务生效</span>
             </div>
@@ -443,6 +448,6 @@
   </dialog>
 
   <script src="/static/vendor/hls.min.js"></script>
-  <script src="/static/app.js?v=111"></script>
+  <script src="/static/app.js?v=117"></script>
 </body>
 </html>

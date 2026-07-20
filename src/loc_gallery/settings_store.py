@@ -13,6 +13,7 @@ from loc_gallery.config import (
     HTML5_FRAGMENTED_MP4,
     HTML5_PLAYLIST_AUTOPLAY,
     HTML5_RESUME_PLAYBACK,
+    HTML5_WHEEL_SEEK_SEC,
     PLAYER_MODE,
     SETTINGS_FILE,
     THUMB_IDLE_SCAN,
@@ -43,6 +44,7 @@ _DEFAULTS = {
     "html5_fragmented_mp4": HTML5_FRAGMENTED_MP4,
     "html5_playlist_autoplay": HTML5_PLAYLIST_AUTOPLAY,
     "html5_resume_playback": HTML5_RESUME_PLAYBACK,
+    "html5_wheel_seek_sec": HTML5_WHEEL_SEEK_SEC,
 }
 
 _LIBRARY_OVERRIDE_KEYS = {
@@ -61,6 +63,7 @@ _LIBRARY_OVERRIDE_KEYS = {
     "html5_fragmented_mp4",
     "html5_playlist_autoplay",
     "html5_resume_playback",
+    "html5_wheel_seek_sec",
 }
 
 

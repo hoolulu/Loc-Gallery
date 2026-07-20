@@ -194,7 +194,14 @@
     libraries: [],
     playlistSort: "page",
     playlistAutoplay: true,
+    playlistItems: [],
+    playlistLoadedThrough: 0,
+    playlistTotalPages: 1,
+    playlistLoading: false,
+    playlistScopeKey: "",
+    playlistCanLoadMore: false,
     resumePlayback: true,
+    wheelSeekSec: 5,
     thumbProgressBar: "auto",
     pendingRestorePlayId: null,
   };
@@ -483,8 +490,19 @@
     html5_fragmented_mp4: "external",
     html5_playlist_autoplay: true,
     html5_resume_playback: true,
+    html5_wheel_seek_sec: 5,
     thumb_progress_bar: "auto",
   };
+
+  function normalizeWheelSeekSec(raw) {
+    const n = parseInt(raw, 10);
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    return Math.min(120, Math.max(1, n));
+  }
+
+  function wheelSeekStepSec() {
+    return normalizeWheelSeekSec(state.wheelSeekSec);
+  }
 
   function playlistAutoplayEnabled() {
     return state.playlistAutoplay !== false;
@@ -576,8 +594,10 @@
     setVal("set-html5-fragmented-mp4", s.html5_fragmented_mp4 || "external");
     setVal("set-html5-playlist-autoplay", String(s.html5_playlist_autoplay !== false));
     setVal("set-html5-resume-playback", String(s.html5_resume_playback !== false));
+    setVal("set-html5-wheel-seek-sec", String(normalizeWheelSeekSec(s.html5_wheel_seek_sec ?? SETTINGS_DEFAULTS.html5_wheel_seek_sec)));
     state.playlistAutoplay = s.html5_playlist_autoplay !== false;
     state.resumePlayback = s.html5_resume_playback !== false;
+    state.wheelSeekSec = normalizeWheelSeekSec(s.html5_wheel_seek_sec ?? SETTINGS_DEFAULTS.html5_wheel_seek_sec);
     document.querySelectorAll('input[name="player-mode"]').forEach(r => {
       r.checked = r.value === state.playerMode;
     });
@@ -1090,7 +1110,7 @@
 
   function getItemById(id) {
     return state.pageItems.find(v => v.id === id)
-      || getPlaylistItems().find(v => v.id === id);
+      || state.playlistItems.find(v => v.id === id);
   }
 
   function naturalCompare(a, b) {
@@ -1132,8 +1152,194 @@
     return list;
   }
 
+  function playlistApiSort() {
+    return state.playlistSort === "page" ? state.sort : state.playlistSort;
+  }
+
+  function buildPlaylistScopeKey() {
+    return [
+      state.libraryId,
+      state.viewMode,
+      state.category,
+      state.folder,
+      state.query,
+      state.playlistSort,
+      playlistApiSort(),
+    ].join("\0");
+  }
+
+  function playlistScopeMatches() {
+    return state.playlistScopeKey === buildPlaylistScopeKey();
+  }
+
+  function buildPlaylistFetchParams(pageNum) {
+    const params = new URLSearchParams();
+    if (state.viewMode === "favorites") params.set("favorites", "1");
+    else if (state.viewMode === "history") params.set("history", "1");
+    else {
+      if (state.category) params.set("category", state.category);
+      if (state.category && !state.query) params.set("folder", state.folder || "");
+    }
+    if (state.query) params.set("q", state.query);
+    params.set("sort", playlistApiSort());
+    params.set("page", String(pageNum));
+    params.set("page_size", String(getEffectivePageSize()));
+    return params;
+  }
+
+  function updatePlaylistPagingMeta(pageNum, totalPages) {
+    state.playlistLoadedThrough = pageNum;
+    state.playlistTotalPages = totalPages;
+    const pageSize = getEffectivePageSize();
+    state.playlistCanLoadMore = pageSize !== 0 && pageNum < totalPages;
+  }
+
+  async function ensurePlaylistCoversId(id) {
+    if (!id) return;
+    if (state.playlistItems.some(v => v.id === id)) return;
+    const pageSize = getEffectivePageSize();
+    if (pageSize === 0) {
+      await ensurePlayingItemInPlaylist(id);
+      return;
+    }
+    const maxPages = Math.max(state.playlistTotalPages || 1, 1);
+    let guard = 0;
+    while (
+      state.playlistCanLoadMore
+      && !state.playlistItems.some(v => v.id === id)
+      && guard < maxPages
+    ) {
+      guard += 1;
+      const nextPage = state.playlistLoadedThrough + 1;
+      await loadPlaylistPage(nextPage, { replace: false });
+    }
+    if (!state.playlistItems.some(v => v.id === id)) {
+      await ensurePlayingItemInPlaylist(id);
+    }
+  }
+
+  function resetPlayerPlaylistFromGrid() {
+    state.playlistItems = [...state.pageItems];
+    state.playlistScopeKey = buildPlaylistScopeKey();
+    updatePlaylistPagingMeta(state.page, state.totalPages);
+  }
+
+  function syncPlaylistItemFieldsFromPageItems() {
+    const map = new Map(state.pageItems.map(v => [v.id, v]));
+    state.playlistItems = state.playlistItems.map(v => (map.has(v.id) ? { ...v, ...map.get(v.id) } : v));
+  }
+
+  function syncPlayerPlaylistAfterGridReload() {
+    if (!state.playerViewOpen) return;
+    if (!playlistScopeMatches()) {
+      resetPlayerPlaylistFromGrid();
+      return;
+    }
+    syncPlaylistItemFieldsFromPageItems();
+    if (state.playlistSort === "page") {
+      updatePlaylistPagingMeta(state.page, state.totalPages);
+    }
+  }
+
+  function mergePlaylistItems(existing, incoming) {
+    const seen = new Set(existing.map(v => v.id));
+    const added = [];
+    incoming.forEach(v => {
+      if (seen.has(v.id)) return;
+      seen.add(v.id);
+      added.push(v);
+    });
+    return { merged: [...existing, ...added], added };
+  }
+
+  async function fetchPlaylistPage(pageNum) {
+    const data = await api(`/api/videos?${buildPlaylistFetchParams(pageNum)}`);
+    return data;
+  }
+
+  async function ensurePlayingItemInPlaylist(id) {
+    if (!id || state.playlistItems.some(v => v.id === id)) return;
+    let item = getItemById(id);
+    if (!item) {
+      try {
+        item = await api(`/api/videos/${id}`);
+      } catch (_) { /* ignore */ }
+    }
+    if (item) {
+      state.playlistItems = [item, ...state.playlistItems.filter(v => v.id !== id)];
+    }
+  }
+
+  async function loadPlaylistPage(pageNum, { replace = false } = {}) {
+    const data = await fetchPlaylistPage(pageNum);
+    if (replace) {
+      state.playlistItems = data.items || [];
+    } else {
+      const { merged } = mergePlaylistItems(state.playlistItems, data.items || []);
+      state.playlistItems = merged;
+    }
+    updatePlaylistPagingMeta(pageNum, data.totalPages || 1);
+    state.playlistScopeKey = buildPlaylistScopeKey();
+    return data;
+  }
+
+  async function loadMorePlaylist() {
+    if (state.playlistLoading || !state.playlistCanLoadMore) return false;
+    const pageSize = getEffectivePageSize();
+    if (pageSize === 0) return false;
+    state.playlistLoading = true;
+    updatePlaylistFooterUi();
+    try {
+      const nextPage = state.playlistLoadedThrough + 1;
+      await loadPlaylistPage(nextPage, { replace: false });
+      renderPlayerPlaylist(true, { scrollToActive: false });
+      bindPlaylistInfiniteScroll();
+      return true;
+    } catch (err) {
+      console.warn("播放列表加载失败", err);
+      return false;
+    } finally {
+      state.playlistLoading = false;
+      updatePlaylistFooterUi();
+    }
+  }
+
+  async function resetPlaylistForSortChange() {
+    const keepId = state.playingId;
+    state.playlistLoading = true;
+    try {
+      if (state.playlistSort === "page") {
+        state.playlistItems = [...state.pageItems];
+        updatePlaylistPagingMeta(state.page, state.totalPages);
+        state.playlistScopeKey = buildPlaylistScopeKey();
+        await ensurePlayingItemInPlaylist(keepId);
+      } else {
+        await loadPlaylistPage(1, { replace: true });
+        await ensurePlayingItemInPlaylist(keepId);
+      }
+    } finally {
+      state.playlistLoading = false;
+    }
+    renderPlayerPlaylist(true);
+    bindPlaylistInfiniteScroll();
+    prefetchPlaylistIfNeeded();
+  }
+
+  function prefetchPlaylistIfNeeded() {
+    if (!state.playerViewOpen || !state.playlistCanLoadMore || state.playlistLoading) return;
+    const now = Date.now();
+    if (prefetchPlaylistIfNeeded._at && now - prefetchPlaylistIfNeeded._at < 5000) return;
+    const list = getPlaylistItems();
+    const idx = state.playingId ? list.findIndex(v => v.id === state.playingId) : -1;
+    if (idx < 0) return;
+    if (list.length - idx <= 3) {
+      prefetchPlaylistIfNeeded._at = now;
+      void loadMorePlaylist();
+    }
+  }
+
   function getPlaylistItems() {
-    return sortPlaylistItems(state.pageItems, state.playlistSort);
+    return state.playlistItems;
   }
 
   function syncPlaylistSortSelect() {
@@ -1550,6 +1756,7 @@
       saveState();
       updateSelectionBar();
       updatePageSelectAll();
+      syncPlayerPlaylistAfterGridReload();
       renderPlayerPlaylist();
       highlightPlayingCard();
       scheduleFormatBadgePoll();
@@ -1599,6 +1806,7 @@
     saveState();
     updateSelectionBar();
     updatePageSelectAll();
+    syncPlayerPlaylistAfterGridReload();
     renderPlayerPlaylist();
     highlightPlayingCard();
     scheduleFormatBadgePoll();
@@ -1958,6 +2166,7 @@
       state.playerMode = normalizePlayerMode(s.player_mode);
       state.playlistAutoplay = s.html5_playlist_autoplay !== false;
       state.resumePlayback = s.html5_resume_playback !== false;
+      state.wheelSeekSec = normalizeWheelSeekSec(s.html5_wheel_seek_sec ?? SETTINGS_DEFAULTS.html5_wheel_seek_sec);
       state.thumbProgressBar = normalizeThumbProgressBar(s.thumb_progress_bar);
       return s;
     } catch (_) {
@@ -1977,6 +2186,67 @@
   }
 
   let _playlistRenderedIds = "";
+  let playlistScrollObserver = null;
+
+  function playlistItemRowHtml(v) {
+    return `
+      <button type="button" class="player-pl-item w-full ${v.id === state.playingId ? "active" : ""}" data-id="${escAttr(v.id)}">
+        <div class="player-pl-thumb">${renderThumbHtml(v)}</div>
+        <div class="player-pl-meta min-w-0">
+          <p class="truncate text-xs font-medium">${esc(v.title || v.filename)}</p>
+          <p class="truncate text-[10px] text-zinc-600">${esc(v.filename)}</p>
+        </div>
+      </button>`;
+  }
+
+  function playlistFooterHtml() {
+    const pageSize = getEffectivePageSize();
+    const items = getPlaylistItems();
+    if (!items.length) return "";
+    if (pageSize === 0) {
+      return `<p class="player-pl-footer-hint">共 ${items.length} 个（已全部加载）</p>`;
+    }
+    if (!state.playlistCanLoadMore) {
+      const tp = state.playlistTotalPages || 1;
+      const through = state.playlistLoadedThrough || 1;
+      return `<p class="player-pl-footer-hint">已加载 ${through} / ${tp} 页</p>`;
+    }
+    const nextPage = (state.playlistLoadedThrough || 1) + 1;
+    const tp = state.playlistTotalPages || 1;
+    const label = state.playlistLoading
+      ? "加载中…"
+      : `加载下一页（${nextPage} / ${tp}）`;
+    return `
+      <div class="player-pl-footer">
+        <button type="button" class="player-pl-load-more ui-btn sm w-full" ${state.playlistLoading ? "disabled" : ""}>
+          ${esc(label)}
+        </button>
+        <div id="player-playlist-sentinel" class="player-pl-sentinel" aria-hidden="true"></div>
+      </div>`;
+  }
+
+  function updatePlaylistFooterUi() {
+    const footer = $("#player-playlist")?.querySelector(".player-pl-footer, .player-pl-footer-hint");
+    const wrap = $("#player-playlist");
+    if (!wrap) return;
+    const oldFooter = wrap.querySelector(".player-pl-footer, .player-pl-footer-hint");
+    const html = playlistFooterHtml();
+    if (oldFooter) oldFooter.outerHTML = html || "";
+    else if (html) wrap.insertAdjacentHTML("beforeend", html);
+    bindPlaylistInfiniteScroll();
+  }
+
+  function bindPlaylistInfiniteScroll() {
+    playlistScrollObserver?.disconnect();
+    playlistScrollObserver = null;
+    const root = $("#player-playlist");
+    const sentinel = $("#player-playlist-sentinel");
+    if (!root || !sentinel || !state.playlistCanLoadMore) return;
+    playlistScrollObserver = new IntersectionObserver((entries) => {
+      if (entries.some(e => e.isIntersecting)) void loadMorePlaylist();
+    }, { root, rootMargin: "64px", threshold: 0 });
+    playlistScrollObserver.observe(sentinel);
+  }
 
   function playlistRenderKey() {
     const items = getPlaylistItems();
@@ -2012,36 +2282,35 @@
     });
   }
 
-  function renderPlayerPlaylist(force = false) {
+  function renderPlayerPlaylist(force = false, { scrollToActive = true } = {}) {
     const el = $("#player-playlist");
     if (!el) return;
+    const savedScrollTop = scrollToActive ? 0 : el.scrollTop;
     syncPlaylistSortSelect();
     const items = getPlaylistItems();
     if (!items.length) {
-      el.innerHTML = '<p class="px-2 py-4 text-center text-xs text-zinc-600">当前页无视频</p>';
+      el.innerHTML = '<p class="px-2 py-4 text-center text-xs text-zinc-600">当前列表无视频</p>';
       _playlistRenderedIds = "";
+      playlistScrollObserver?.disconnect();
       return;
     }
     const ids = playlistRenderKey();
     if (!force && ids === _playlistRenderedIds && el.querySelector(".player-pl-item")) {
       updatePlayerPlaylistActive();
-      scrollPlaylistToActive();
+      if (scrollToActive) scrollPlaylistToActive();
+      else el.scrollTop = savedScrollTop;
+      updatePlaylistFooterUi();
       return;
     }
     _playlistRenderedIds = ids;
-    el.innerHTML = items.map(v => `
-      <button type="button" class="player-pl-item w-full ${v.id === state.playingId ? "active" : ""}" data-id="${escAttr(v.id)}">
-        <div class="player-pl-thumb">${renderThumbHtml(v)}</div>
-        <div class="player-pl-meta min-w-0">
-          <p class="truncate text-xs font-medium">${esc(v.title || v.filename)}</p>
-          <p class="truncate text-[10px] text-zinc-600">${esc(v.filename)}</p>
-        </div>
-      </button>`).join("");
+    el.innerHTML = items.map(v => playlistItemRowHtml(v)).join("") + playlistFooterHtml();
     el.querySelectorAll(".player-pl-thumb").forEach((wrap, i) => {
       const v = items[i];
       if (v) applyThumbToWrap(wrap, v);
     });
-    scrollPlaylistToActive();
+    if (scrollToActive) scrollPlaylistToActive();
+    else el.scrollTop = savedScrollTop;
+    bindPlaylistInfiniteScroll();
   }
 
   function destroyHlsPlayer() {
@@ -2352,6 +2621,37 @@
     }
   }
 
+  let playerWheelSeekLastAt = 0;
+
+  function bindPlayerStageWheelSeek() {
+    const stage = $("#player-stage");
+    if (!stage || stage.dataset.wheelSeekBound) return;
+    stage.dataset.wheelSeekBound = "1";
+    stage.addEventListener("wheel", (e) => {
+      if (!state.playerViewOpen) return;
+      const stepSec = wheelSeekStepSec();
+      if (!stepSec) return;
+      const video = getPlaybackVideo();
+      if (!video || video.parentElement !== stage) return;
+      if (!Number.isFinite(video.duration) || video.duration <= 0) return;
+
+      e.preventDefault();
+      const now = Date.now();
+      if (now - playerWheelSeekLastAt < 120) return;
+      if (!e.deltaY) return;
+
+      playerWheelSeekLastAt = now;
+      const step = e.deltaY > 0 ? stepSec : -stepSec;
+      const dur = video.duration;
+      let t = video.currentTime + step;
+      if (!Number.isFinite(t)) return;
+      t = Math.max(0, Math.min(dur, t));
+      try {
+        video.currentTime = t;
+      } catch (_) { /* ignore */ }
+    }, { passive: false });
+  }
+
   function formatPlaybackLabel(info) {
     if (!info) return { text: "", cls: "" };
     const codec = (info.codec || "").toUpperCase();
@@ -2430,6 +2730,7 @@
 
   function openPlayerView(item) {
     if (!item?.id) return;
+    const entering = !state.playerViewOpen;
     state.playingId = item.id;
     state.playerViewOpen = true;
     $("#gallery-view")?.classList.add("hidden");
@@ -2444,7 +2745,28 @@
       pathEl.textContent = item.path || "";
       pathEl.title = item.path || "";
     }
-    renderPlayerPlaylist();
+
+    const finishOpen = () => {
+      renderPlayerPlaylist(true, { scrollToActive: true });
+      highlightPlayingCard();
+      updatePlayerFavoriteButton(item);
+      updateUrl();
+    };
+
+    if (entering) {
+      resetPlayerPlaylistFromGrid();
+      void ensurePlaylistCoversId(item.id).then(finishOpen);
+      return;
+    }
+
+    if (!state.playlistItems.some(v => v.id === item.id)) {
+      void ensurePlaylistCoversId(item.id).then(finishOpen);
+      return;
+    }
+
+    renderPlayerPlaylist(false);
+    updatePlayerPlaylistActive();
+    scrollPlaylistToActive();
     highlightPlayingCard();
     updatePlayerFavoriteButton(item);
     updateUrl();
@@ -2461,6 +2783,7 @@
     pendingPlayId = null;
     recordPlayHistory(item.id);
     if (video) bindPlaybackProgressSaver(video, item.id);
+    prefetchPlaylistIfNeeded();
   }
 
   function videoHasPicture(video) {
@@ -2749,8 +3072,8 @@
       scrollPlaylistToActive();
       highlightPlayingCard();
       updateUrl();
+      prefetchPlaylistIfNeeded();
     }
-
     const base = item || { id, title: id, filename: "", path: "" };
     parkVideoEngine();
     hidePlayerPreparing();
@@ -2992,18 +3315,29 @@
     $("#gallery-view")?.classList.remove("hidden");
     $("#gallery-toolbar")?.classList.remove("hidden");
     state.playingId = null;
+    state.playlistItems = [];
+    state.playlistCanLoadMore = false;
+    playlistScrollObserver?.disconnect();
+    playlistScrollObserver = null;
     highlightPlayingCard();
     updateUrl();
     if (state.pageSize === "auto") scheduleAutoPageSizeCheck();
   }
 
-  function playAdjacentVideo(delta) {
+  async function playAdjacentVideo(delta) {
     const list = getPlaylistItems();
     if (!state.playingId || !list.length) return;
     const idx = list.findIndex(v => v.id === state.playingId);
     if (idx < 0) return;
-    const next = list[idx + delta];
-    if (next) playVideo(next.id);
+    let next = list[idx + delta];
+    if (!next && delta > 0 && state.playlistCanLoadMore) {
+      const loaded = await loadMorePlaylist();
+      if (loaded) {
+        const list2 = getPlaylistItems();
+        next = list2[idx + delta];
+      }
+    }
+    if (next) await playVideo(next.id);
   }
 
   async function playVideoExternal(id) {
@@ -3142,6 +3476,7 @@
     if (result.errors?.length) {
       alert(result.errors.map(e => `${e.id}: ${e.error}`).join("\n"));
     }
+    state.playlistItems = state.playlistItems.filter(v => !idSet.has(v.id));
     state.selected.clear();
     await loadCategories();
     await loadVideos({ forceRebuild: true, keepPlayerOpen: inPlayer });
@@ -3367,6 +3702,11 @@
       alert("并发线程数需在 1 ~ 8 之间");
       return;
     }
+    const wheelParsed = parseInt($("#set-html5-wheel-seek-sec")?.value, 10);
+    if (Number.isNaN(wheelParsed) || wheelParsed < 0 || wheelParsed > 120) {
+      alert("滚轮快进秒数需在 0 ~ 120 之间（0 表示关闭）");
+      return;
+    }
     try {
       await api("/api/settings", {
         method: "POST",
@@ -3390,6 +3730,7 @@
           html5_fragmented_mp4: $("#set-html5-fragmented-mp4")?.value || "external",
           html5_playlist_autoplay: $("#set-html5-playlist-autoplay")?.value === "true",
           html5_resume_playback: $("#set-html5-resume-playback")?.value === "true",
+          html5_wheel_seek_sec: normalizeWheelSeekSec($("#set-html5-wheel-seek-sec")?.value),
           history_retention_days: historyDays,
           scope: "global",
         }),
@@ -3397,6 +3738,7 @@
       state.playerMode = document.querySelector('input[name="player-mode"]:checked')?.value || SETTINGS_DEFAULTS.player_mode;
       state.playlistAutoplay = $("#set-html5-playlist-autoplay")?.value === "true";
       state.resumePlayback = $("#set-html5-resume-playback")?.value === "true";
+      state.wheelSeekSec = normalizeWheelSeekSec($("#set-html5-wheel-seek-sec")?.value);
       state.thumbProgressBar = normalizeThumbProgressBar($("#set-thumb-progress-bar")?.value);
       $("#settings-dialog")?.close();
       loadProgress();
@@ -3645,12 +3987,17 @@
 
   $("#btn-player-prev").addEventListener("click", () => playAdjacentVideo(-1));
   $("#btn-player-next").addEventListener("click", () => playAdjacentVideo(1));
-  $("#player-playlist-sort")?.addEventListener("change", (e) => {
+  $("#player-playlist-sort")?.addEventListener("change", async (e) => {
     state.playlistSort = e.target.value;
     saveState();
-    renderPlayerPlaylist(true);
+    await resetPlaylistForSortChange();
   });
   $("#player-playlist")?.addEventListener("click", (e) => {
+    if (e.target.closest(".player-pl-load-more")) {
+      e.preventDefault();
+      void loadMorePlaylist();
+      return;
+    }
     const btn = e.target.closest(".player-pl-item");
     const vid = btn?.dataset?.id;
     if (!vid) return;
@@ -3783,6 +4130,7 @@
 
   // --- Init ---
   parkVideoEngine();
+  bindPlayerStageWheelSeek();
   loadState();
   syncPlaylistSortSelect();
   parseUrl();
