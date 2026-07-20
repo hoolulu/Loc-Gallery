@@ -838,10 +838,26 @@ async def api_play_pause(library_id: str = Depends(resolve_library_id)):
     return {"ok": True, "paused": paused}
 
 
+class PlayCatchupRequest(BaseModel):
+    position_sec: float = 0.0
+
+
 @app.post("/api/play/resume")
 async def api_play_resume(library_id: str = Depends(resolve_library_id)):
     resumed = hls_manager.resume_playback_slicing()
     return {"ok": True, "resumed": resumed}
+
+
+@app.post("/api/play/catchup/{video_id}")
+async def api_play_catchup(
+    video_id: str,
+    body: PlayCatchupRequest,
+    library_id: str = Depends(resolve_library_id),
+):
+    item = get_by_id(library_id, video_id)
+    if not item:
+        raise HTTPException(404, "视频不存在")
+    return hls_manager.catchup_from_position(video_id, Path(item.path), body.position_sec)
 
 
 @app.get("/api/hls/{video_id}/{filename}")

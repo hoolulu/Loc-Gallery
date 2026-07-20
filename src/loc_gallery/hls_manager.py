@@ -12,7 +12,12 @@ from pathlib import Path
 
 from loc_gallery.config import HLS_CACHE_MAX_BYTES, hls_cache_dir, service_environ
 from loc_gallery.library_context import current_library_id
-from loc_gallery.process_util import hidden_subprocess_kwargs, resume_process, suspend_process
+from loc_gallery.process_util import (
+    deprioritize_process,
+    hidden_subprocess_kwargs,
+    resume_process,
+    suspend_process,
+)
 from loc_gallery.thumb_manager import ffmpeg_path
 
 _lock = threading.RLock()
@@ -26,6 +31,7 @@ _slice_paused = False
 HLS_SEGMENT_SECONDS = 30
 # 本地单用户播放：保留 independent_segments 便于 seek；去掉 temp_file 避免每段双写
 HLS_FLAGS = "independent_segments"
+HLS_FLAGS_APPEND = "independent_segments+append_list"
 MIN_SEGMENTS_TO_PLAY = 1
 _LRU_FILE = "_lru.json"
 _COMPLETE_MARK = ".complete"
@@ -386,6 +392,8 @@ def _status_dict(
         "state": state,
         "ready": ready,
         "segments": segments,
+        "segment_seconds": HLS_SEGMENT_SECONDS,
+        "produced_end_sec": segments * HLS_SEGMENT_SECONDS,
         "processing": processing,
         "slice_paused": slice_paused,
         "elapsed_sec": elapsed,
@@ -446,6 +454,67 @@ def get_status(video_id: str) -> dict:
         )
 
 
+def _build_hls_ffmpeg_cmd(
+    source: Path,
+    playlist: Path,
+    segment_pattern: str,
+    *,
+    transcode: bool,
+    input_format: str | None = None,
+    seek_sec: float | None = None,
+    start_number: int | None = None,
+    append_playlist: bool = False,
+) -> list[str]:
+    flags = HLS_FLAGS_APPEND if append_playlist else HLS_FLAGS
+    cmd: list[str] = [
+        ffmpeg_path(),
+        "-hide_banner",
+        "-loglevel", "error",
+        "-y",
+    ]
+    if seek_sec is not None and seek_sec > 0.05:
+        cmd.extend(["-ss", f"{seek_sec:.3f}"])
+
+    if input_format == "mpegts":
+        cmd.extend([
+            "-fflags", "+genpts+ignidx+discardcorrupt",
+            "-err_detect", "ignore_err",
+            "-f", "mpegts",
+            "-i", str(source),
+        ])
+    else:
+        cmd.extend(["-i", str(source)])
+
+    cmd.extend(["-map", "0:v:0?", "-map", "0:a:0?"])
+    if transcode:
+        cmd.extend([
+            "-vf", "setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709",
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "23",
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac",
+            "-b:a", "128k",
+        ])
+    else:
+        cmd.extend(["-c", "copy"])
+
+    cmd.extend([
+        "-f", "hls",
+        "-hls_time", str(HLS_SEGMENT_SECONDS),
+        "-hls_list_size", "0",
+        "-hls_playlist_type", "event",
+        "-hls_flags", flags,
+    ])
+    if start_number is not None and start_number > 0:
+        cmd.extend(["-start_number", str(start_number)])
+    cmd.extend([
+        "-hls_segment_filename", segment_pattern,
+        str(playlist),
+    ])
+    return cmd
+
+
 def _start_ffmpeg(
     video_id: str,
     source: Path,
@@ -454,78 +523,26 @@ def _start_ffmpeg(
     transcode: bool,
     input_format: str | None = None,
     input_offset: int = 0,
+    seek_sec: float | None = None,
+    start_number: int | None = None,
+    append_playlist: bool = False,
 ) -> dict:
     global _current_id, _process, _process_pid, _started_at, _error, _slice_paused
 
     playlist = work / "playlist.m3u8"
     segment_pattern = str(work / "seg%05d.ts")
 
-    if input_format == "mpegts":
-        cmd = [
-            ffmpeg_path(),
-            "-hide_banner",
-            "-loglevel", "error",
-            "-y",
-            "-fflags", "+genpts+ignidx+discardcorrupt",
-            "-err_detect", "ignore_err",
-            "-f", "mpegts",
-            "-i", str(source),
-            "-map", "0:v:0?",
-            "-map", "0:a:0?",
-            "-c", "copy",
-            "-f", "hls",
-            "-hls_time", str(HLS_SEGMENT_SECONDS),
-            "-hls_list_size", "0",
-            "-hls_playlist_type", "event",
-            "-hls_flags", HLS_FLAGS,
-            "-hls_segment_filename", segment_pattern,
-            str(playlist),
-        ]
-        stdin = subprocess.DEVNULL
-    elif transcode:
-        cmd = [
-            ffmpeg_path(),
-            "-hide_banner",
-            "-loglevel", "error",
-            "-y",
-            "-i", str(source),
-            "-map", "0:v:0?",
-            "-map", "0:a:0?",
-            "-vf", "setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709",
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "23",
-            "-pix_fmt", "yuv420p",
-            "-c:a", "aac",
-            "-b:a", "128k",
-            "-f", "hls",
-            "-hls_time", str(HLS_SEGMENT_SECONDS),
-            "-hls_list_size", "0",
-            "-hls_playlist_type", "event",
-            "-hls_flags", HLS_FLAGS,
-            "-hls_segment_filename", segment_pattern,
-            str(playlist),
-        ]
-        stdin = subprocess.DEVNULL
-    else:
-        cmd = [
-            ffmpeg_path(),
-            "-hide_banner",
-            "-loglevel", "error",
-            "-y",
-            "-i", str(source),
-            "-map", "0:v:0?",
-            "-map", "0:a:0?",
-            "-c", "copy",
-            "-f", "hls",
-            "-hls_time", str(HLS_SEGMENT_SECONDS),
-            "-hls_list_size", "0",
-            "-hls_playlist_type", "event",
-            "-hls_flags", HLS_FLAGS,
-            "-hls_segment_filename", segment_pattern,
-            str(playlist),
-        ]
-        stdin = subprocess.DEVNULL
+    cmd = _build_hls_ffmpeg_cmd(
+        source,
+        playlist,
+        segment_pattern,
+        transcode=transcode,
+        input_format=input_format,
+        seek_sec=seek_sec,
+        start_number=start_number,
+        append_playlist=append_playlist,
+    )
+    stdin = subprocess.DEVNULL
 
     try:
         proc = subprocess.Popen(
@@ -539,6 +556,9 @@ def _start_ffmpeg(
     except Exception as exc:
         _error = str(exc)
         return {"ok": False, "error": _error}
+
+    if proc.pid:
+        deprioritize_process(proc.pid)
 
     _write_meta(
         work, source,
@@ -619,6 +639,69 @@ def prepare(
             input_format=input_format,
             input_offset=input_offset,
         )
+
+
+def catchup_from_position(video_id: str, source: Path, position_sec: float) -> dict:
+    """播放位置接近/超过已切片段末尾时续切；大幅拖进度则从该处 append 切片。"""
+    global _slice_paused, _error
+    source = source.resolve()
+    work = _work_dir(video_id)
+    with _lock:
+        if not work.exists():
+            return {"ok": False, "error": "无 HLS 缓存"}
+        if _cache_complete(work):
+            return {"ok": True, "action": "complete"}
+        if _current_id != video_id:
+            return {"ok": True, "action": "skipped", "reason": "not_active"}
+
+        meta = _read_meta(work)
+        if not meta:
+            return {"ok": False, "error": "无切片元数据"}
+
+        transcode = bool(meta.get("transcode"))
+        input_format = meta.get("input_format")
+        input_offset = int(meta.get("input_offset") or 0)
+        segments = _count_segments(work)
+        produced_end = segments * HLS_SEGMENT_SECONDS
+        pos = max(0.0, float(position_sec))
+        produced_ahead = produced_end - pos
+        forward_jump = pos - produced_end
+
+        comfortable = produced_ahead >= HLS_SEGMENT_SECONDS * 3
+        if comfortable:
+            if _process is not None and _process.poll() is None and _slice_paused:
+                resume_playback_slicing()
+            return {"ok": True, "action": "ok", "produced_ahead": round(produced_ahead, 2)}
+
+        need_restart = (
+            segments > 0
+            and forward_jump > HLS_SEGMENT_SECONDS * 1.5
+        )
+        if need_restart:
+            start_number = segments
+            seek_to = max(0.0, start_number * HLS_SEGMENT_SECONDS - 2.0)
+            _kill_process_only()
+            _slice_paused = False
+            _error = None
+            return _start_ffmpeg(
+                video_id,
+                source,
+                work,
+                transcode=transcode,
+                input_format=input_format,
+                input_offset=input_offset,
+                seek_sec=seek_to,
+                start_number=start_number,
+                append_playlist=True,
+            )
+
+        if _process is not None and _process.poll() is None:
+            resume_playback_slicing()
+        return {
+            "ok": True,
+            "action": "resume",
+            "produced_ahead": round(produced_ahead, 2),
+        }
 
 
 def normalize_playlist_m3u8(text: str) -> str:

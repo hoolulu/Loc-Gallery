@@ -217,6 +217,18 @@
   let lastLibraryVersion = "";
   let hlsInstance = null;
 
+  /**
+   * HLS 切片水位：最多领先播放点约 2 分钟；跌到约 1 分钟时恢复切片（留 1 分钟给机械盘续切）。
+   * 拖进度条后若磁盘上已切内容不够 2 分钟，立即续切。
+   */
+  const HLS_SLICE_SEGMENT_SEC_DEFAULT = 30;
+  const SLICE_AHEAD_MAX_SEC = 120;
+  const SLICE_AHEAD_MIN_SEC = 60;
+  /** 距已切末尾不足此时长时强制续切（约 3 个分片） */
+  const SLICE_EDGE_RESERVE_SEC = 90;
+  let hlsSliceThrottle = null;
+  let sliceCatchupTimer = null;
+
   /** 立刻断开浏览器视频拉流，停止 Range 请求与后台缓冲；hard 时替换节点（退出播放页用） */
   function detachVideoStream(video, { hard = false } = {}) {
     if (!video) {
@@ -1218,6 +1230,16 @@
     }
   }
 
+  function initPlayerPlaylistIfNeeded() {
+    if (!state.playlistItems.length || !playlistScopeMatches()) {
+      resetPlayerPlaylistFromGrid();
+      return;
+    }
+    state.playlistTotalPages = state.totalPages;
+    const pageSize = getEffectivePageSize();
+    state.playlistCanLoadMore = pageSize !== 0 && state.playlistLoadedThrough < state.playlistTotalPages;
+  }
+
   function resetPlayerPlaylistFromGrid() {
     state.playlistItems = [...state.pageItems];
     state.playlistScopeKey = buildPlaylistScopeKey();
@@ -1236,9 +1258,9 @@
       return;
     }
     syncPlaylistItemFieldsFromPageItems();
-    if (state.playlistSort === "page") {
-      updatePlaylistPagingMeta(state.page, state.totalPages);
-    }
+    state.playlistTotalPages = state.totalPages;
+    const pageSize = getEffectivePageSize();
+    state.playlistCanLoadMore = pageSize !== 0 && state.playlistLoadedThrough < state.playlistTotalPages;
   }
 
   function mergePlaylistItems(existing, incoming) {
@@ -2335,11 +2357,152 @@
 
   /** 立即停止服务端 HLS 切片/转码进程（保留磁盘缓存） */
   async function stopActiveSlice() {
+    clearHlsSliceThrottle();
     destroyHlsPlayer();
     state.activeSliceVideoId = null;
     try {
       await api("/api/play/stop", { method: "POST" });
     } catch (_) { /* ignore */ }
+  }
+
+  function mediaBufferedAheadSec(video) {
+    if (!video || !Number.isFinite(video.currentTime)) return 0;
+    const t = video.currentTime;
+    const buf = video.buffered;
+    if (!buf?.length) return 0;
+    for (let i = 0; i < buf.length; i += 1) {
+      if (buf.start(i) <= t && t <= buf.end(i)) {
+        return Math.max(0, buf.end(i) - t);
+      }
+    }
+    if (t < buf.start(0)) {
+      return Math.max(0, buf.end(0) - t);
+    }
+    return Math.max(0, buf.end(buf.length - 1) - t);
+  }
+
+  function clearHlsSliceThrottle() {
+    if (sliceCatchupTimer) {
+      clearTimeout(sliceCatchupTimer);
+      sliceCatchupTimer = null;
+    }
+    if (!hlsSliceThrottle) return;
+    const { timer, video, onTick, onSeeked, onStall } = hlsSliceThrottle;
+    clearInterval(timer);
+    if (video && onTick) {
+      video.removeEventListener("timeupdate", onTick);
+      video.removeEventListener("seeking", onTick);
+      video.removeEventListener("seeked", onSeeked);
+      video.removeEventListener("waiting", onStall);
+    }
+    hlsSliceThrottle = null;
+  }
+
+  function nudgeHlsPlaylist() {
+    if (!hlsInstance) return;
+    try {
+      hlsInstance.startLoad(-1);
+    } catch (_) { /* ignore */ }
+  }
+
+  async function postSliceCatchup(videoId, positionSec) {
+    if (!videoId || !Number.isFinite(positionSec)) return;
+    try {
+      await api(`/api/play/catchup/${encodeURIComponent(videoId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ position_sec: positionSec }),
+      });
+      nudgeHlsPlaylist();
+    } catch (_) { /* ignore */ }
+  }
+
+  function scheduleSliceCatchup(videoId, positionSec, delayMs = 180) {
+    clearTimeout(sliceCatchupTimer);
+    sliceCatchupTimer = setTimeout(() => {
+      sliceCatchupTimer = null;
+      void postSliceCatchup(videoId, positionSec);
+    }, delayMs);
+  }
+
+  async function tickHlsSliceThrottle({ afterSeek = false, forceResume = false } = {}) {
+    const ctx = hlsSliceThrottle;
+    if (!ctx) return;
+    if (ctx.session !== state.playSession || state.activeSliceVideoId !== ctx.videoId) {
+      clearHlsSliceThrottle();
+      return;
+    }
+    if (ctx.inFlight) return;
+    const video = getPlaybackVideo();
+    if (!video) return;
+    ctx.inFlight = true;
+    try {
+      const st = await api(`/api/play/status/${ctx.videoId}`);
+      const segSec = st.segment_seconds || HLS_SLICE_SEGMENT_SEC_DEFAULT;
+      const processing = !!st.processing && !st.cached;
+      if (!processing) {
+        clearHlsSliceThrottle();
+        return;
+      }
+      const t = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+      const producedEnd = st.produced_end_sec ?? (st.segments || 0) * segSec;
+      const producedAhead = Math.max(0, producedEnd - t);
+      const paused = !!st.slice_paused;
+      const nearEdge = producedAhead <= SLICE_EDGE_RESERVE_SEC;
+      const runningLow = producedAhead <= SLICE_AHEAD_MIN_SEC;
+
+      if (afterSeek || forceResume || nearEdge) {
+        if (afterSeek || forceResume) {
+          await postSliceCatchup(ctx.videoId, t);
+        } else {
+          scheduleSliceCatchup(ctx.videoId, t);
+        }
+      }
+
+      if (!paused && producedAhead >= SLICE_AHEAD_MAX_SEC) {
+        await api("/api/play/pause", { method: "POST" });
+      } else if (paused && (runningLow || nearEdge || afterSeek || forceResume)) {
+        await api("/api/play/resume", { method: "POST" });
+      }
+    } catch (_) { /* ignore */ }
+    finally {
+      ctx.inFlight = false;
+    }
+  }
+
+  function bindHlsSliceThrottle(video, videoId, session) {
+    clearHlsSliceThrottle();
+    const onTick = () => { void tickHlsSliceThrottle(); };
+    const onSeeked = () => {
+      void tickHlsSliceThrottle({ afterSeek: true });
+    };
+    const onStall = () => {
+      void tickHlsSliceThrottle({ forceResume: true });
+    };
+    hlsSliceThrottle = {
+      videoId,
+      session,
+      video,
+      onTick,
+      onSeeked,
+      onStall,
+      inFlight: false,
+      timer: setInterval(onTick, 1200),
+    };
+    video.addEventListener("timeupdate", onTick);
+    video.addEventListener("seeking", onTick);
+    video.addEventListener("seeked", onSeeked);
+    video.addEventListener("waiting", onStall);
+    onTick();
+  }
+
+  async function maybePauseSliceDuringPrep(st) {
+    const segSec = st.segment_seconds || HLS_SLICE_SEGMENT_SEC_DEFAULT;
+    if (!st.processing || st.cached) return;
+    const produced = (st.segments || 0) * segSec;
+    if (produced >= SLICE_AHEAD_MAX_SEC && !st.slice_paused) {
+      await api("/api/play/pause", { method: "POST" });
+    }
   }
 
   function setPlayerStatus(text) {
@@ -2374,6 +2537,11 @@
       $("#gallery-view")?.classList.remove("hidden");
       $("#gallery-toolbar")?.classList.remove("hidden");
       state.playingId = null;
+      state.playlistItems = [];
+      state.playlistCanLoadMore = false;
+      state.playlistLoadedThrough = 0;
+      playlistScrollObserver?.disconnect();
+      playlistScrollObserver = null;
       highlightPlayingCard();
     }
   }
@@ -2672,7 +2840,13 @@
       return { text: `转码播放${codec ? ` · ${codec}` : ""}`, cls: "fmt-transcode" };
     }
     if (kind === "fragmented") {
-      return { text: `碎片化 MP4${codec ? ` · ${codec}` : ""}`, cls: "fmt-fragmented" };
+      const interleaved = (info.structure?.mdat_count || 0) > 3;
+      return {
+        text: interleaved
+          ? `多段交错 MP4${codec ? ` · ${codec}` : ""}`
+          : `碎片化 MP4${codec ? ` · ${codec}` : ""}`,
+        cls: "fmt-fragmented",
+      };
     }
     if (kind === "moov_end") {
       return { text: `索引在末尾${codec ? ` · ${codec}` : ""}`, cls: "fmt-moov-end" };
@@ -2728,7 +2902,7 @@
     return `${(bytes / 1024).toFixed(0)} KB`;
   }
 
-  function openPlayerView(item) {
+  function openPlayerView(item, { scrollToActive = true } = {}) {
     if (!item?.id) return;
     const entering = !state.playerViewOpen;
     state.playingId = item.id;
@@ -2747,29 +2921,27 @@
     }
 
     const finishOpen = () => {
-      renderPlayerPlaylist(true, { scrollToActive: true });
+      renderPlayerPlaylist(true, { scrollToActive });
       highlightPlayingCard();
       updatePlayerFavoriteButton(item);
       updateUrl();
+      bindPlaylistInfiniteScroll();
     };
 
-    if (entering) {
-      resetPlayerPlaylistFromGrid();
-      void ensurePlaylistCoversId(item.id).then(finishOpen);
+    initPlayerPlaylistIfNeeded();
+
+    if (!entering && state.playlistItems.some(v => v.id === item.id)) {
+      renderPlayerPlaylist(false);
+      updatePlayerPlaylistActive();
+      if (scrollToActive) scrollPlaylistToActive();
+      highlightPlayingCard();
+      updatePlayerFavoriteButton(item);
+      updateUrl();
+      bindPlaylistInfiniteScroll();
       return;
     }
 
-    if (!state.playlistItems.some(v => v.id === item.id)) {
-      void ensurePlaylistCoversId(item.id).then(finishOpen);
-      return;
-    }
-
-    renderPlayerPlaylist(false);
-    updatePlayerPlaylistActive();
-    scrollPlaylistToActive();
-    highlightPlayingCard();
-    updatePlayerFavoriteButton(item);
-    updateUrl();
+    void ensurePlaylistCoversId(item.id).then(finishOpen);
   }
 
   function resetVideoDisplay(video) {
@@ -2901,8 +3073,8 @@
     updatePlayOverlay(
       "加载视频",
       moovEnd
-        ? `索引在文件末尾${sizeHint ? `（${sizeHint}）` : ""}，正在拉取…${largeHint}`
-        : `正在缓冲${sizeHint ? `（${sizeHint}）` : ""}…${largeHint}`,
+        ? `索引在文件末尾${sizeHint ? ` · 约 ${sizeHint}` : ""}，正在拉取…${largeHint}`
+        : `正在缓冲${sizeHint ? ` · 文件约 ${sizeHint}` : ""}…${largeHint}`,
       { indeterminate: true },
     );
     await waitCanPlay(video, session, moovEnd ? 180000 : 90000, (ratio) => {
@@ -2965,6 +3137,7 @@
       if (await abortIfStale(session)) return;
       hidePlayOverlay();
       revealPlayerView(item, video);
+      bindHlsSliceThrottle(video, id, session);
       return;
     }
     if (video.canPlayType("application/vnd.apple.mpegurl")) {
@@ -2979,6 +3152,7 @@
       if (await abortIfStale(session)) return;
       hidePlayOverlay();
       revealPlayerView(item, video);
+      bindHlsSliceThrottle(video, id, session);
       return;
     }
     throw new Error("浏览器不支持 HLS，请改用 PotPlayer");
@@ -2992,6 +3166,7 @@
       if (await abortIfStale(session)) throw new Error("已切换视频");
       const st = await api(`/api/play/status/${id}`);
       if (st.ready) {
+        await maybePauseSliceDuringPrep(st);
         updatePlayOverlay(transcode ? "转码完成" : "切片就绪", "即将加载播放器…", { progress: 100 });
         return st;
       }
@@ -3011,6 +3186,7 @@
         indeterminate: segs <= 0,
       });
       if (segs > lastSeg) lastSeg = segs;
+      await maybePauseSliceDuringPrep(st);
       await new Promise(r => setTimeout(r, 600));
     }
     throw new Error(transcode ? "转码准备超时，请使用 PotPlayer" : "准备超时，请使用 PotPlayer");
@@ -3060,7 +3236,10 @@
     detachVideoStream(getPlaybackVideo(), { hard: true });
     await stopActiveSlice();
 
-    if (state.playerViewOpen) {
+    if (!state.playerViewOpen) {
+      const navItem = getItemById(id) || item || { id, title: id, filename: "", path: "" };
+      openPlayerView(navItem, { scrollToActive: false });
+    } else if (state.playerViewOpen) {
       const navItem = getItemById(id) || item || { id, title: id, filename: "" };
       setPlayerHeaderTitle(navItem.title || navItem.filename || id);
       const pathEl = $("#player-path");

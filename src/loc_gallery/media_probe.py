@@ -23,7 +23,7 @@ _HLS_TRANSCODE_VIDEO = {"av1", "hevc", "h265", "vp9"}
 _IMAGE_CODECS = {"png", "mjpeg", "jpeg", "apng", "gif", "bmp", "webp"}
 _BROWSER_NATIVE_EXTENSIONS = {".mp4", ".m4v", ".mov"}
 _WEB_DIRECT_EXTENSIONS = {".webm", ".ogv"}
-_PLAN_VERSION = 14
+_PLAN_VERSION = 15
 _H264_NAL_SIGS = (
     b"\x00\x00\x00\x01\x67", b"\x00\x00\x00\x01\x68", b"\x00\x00\x00\x01\x65",
     b"\x00\x00\x01\x67", b"\x00\x00\x01\x68",
@@ -157,12 +157,17 @@ def _mp4_has_box(path: Path, box_type: str, max_bytes: int = 64 * 1024 * 1024) -
 
 
 def analyze_mp4_structure(path: Path) -> dict:
+    """识别 MP4 布局：标准单 mdat、moov 在末尾、碎片化 fMP4、或多段小 mdat 交错。"""
     size = path.stat().st_size
     pos = 0
     mdat_count = 0
     moov_pos: int | None = None
+    scan_limit = min(size, 64 * 1024 * 1024)
+    large_mdat_threshold = max(size // 2, 8 * 1024 * 1024)
     with path.open("rb") as f:
         while pos < size:
+            if pos >= scan_limit and mdat_count > 0:
+                break
             f.seek(pos)
             hdr = f.read(8)
             if len(hdr) < 8:
@@ -173,12 +178,12 @@ def analyze_mp4_structure(path: Path) -> dict:
                 break
             if box_type == "mdat":
                 mdat_count += 1
+                if box_size >= large_mdat_threshold:
+                    break
+                if mdat_count > 3:
+                    break
             if box_type == "moov" and moov_pos is None:
                 moov_pos = pos
-            if mdat_count > 3:
-                break
-            if moov_pos is not None and mdat_count >= 1:
-                break
             pos += box_size
 
     if moov_pos is None and size > 0:
@@ -594,7 +599,16 @@ def _build_playback_plan(path: Path) -> dict:
         }
 
     if kind == "fragmented":
+        interleaved_mdat = (structure.get("mdat_count") or 0) > 3 and not _mp4_has_box(path, "moof")
         frag_mode = str(get_setting("html5_fragmented_mp4") or "external").strip().lower()
+        if interleaved_mdat:
+            return {
+                "mode": "hls",
+                "transcode": False,
+                "reason": "多段 mdat 交错（部分站点源），边切边播以加快起播",
+                "codec": codec,
+                "structure": structure,
+            }
         if frag_mode == "hls":
             return {
                 "mode": "hls",
