@@ -5,17 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Loc Gallery</title>
   <link rel="stylesheet" href="/static/tailwind.css?v=2">
-  <link rel="stylesheet" href="/static/style.css?v=59">
+  <link rel="stylesheet" href="/static/style.css?v=72">
 </head>
 <body class="flex h-full flex-col overflow-hidden bg-surface text-[#f1f1f1] antialiased">
 
-  <header class="app-header z-50 shrink-0">
+  <header class="app-header z-50 shrink-0" id="app-header">
     <div class="header-main">
       <div class="header-left">
         <h1 class="header-logo"><span class="text-accent">Loc</span> Gallery</h1>
       </div>
       <nav id="header-nav" class="header-nav" aria-label="主视图">
-        <button type="button" id="btn-view-browse" class="view-mode-btn active" data-view="browse">首页</button>
+        <a href="/" id="btn-view-browse" class="view-mode-btn active" data-view="browse">首页</a>
         <button type="button" id="btn-view-favorites" class="view-mode-btn" data-view="favorites"><span class="view-mode-icon" aria-hidden="true">♥</span>我的收藏</button>
         <button type="button" id="btn-view-history" class="view-mode-btn" data-view="history"><span class="view-mode-icon" aria-hidden="true">⏱</span>最近播放</button>
         <div id="library-switcher" class="library-switcher header-nav-library">
@@ -27,10 +27,14 @@
         <input type="search" id="search" placeholder="搜索" title="搜索标题 / 文件名 / 分类" autocomplete="off" class="header-search">
         <button type="button" id="btn-manage" class="header-tool-btn" title="批量选择与管理">批量</button>
         <button type="button" id="btn-settings" class="header-tool-btn" title="设置">设置</button>
+        <button type="button" id="thumb-status-chip" class="thumb-status-chip hidden" title="缩略图状态，点击展开详情" aria-label="缩略图，点击查看详情">
+          <span class="thumb-status-dot" aria-hidden="true"></span>
+          <span class="thumb-status-label">缩略图</span>
+        </button>
         <button type="button" id="btn-rescan" class="header-tool-btn header-tool-btn-emphasis" title="重新扫描">刷新</button>
       </div>
     </div>
-    <div class="progress-bar-wrap px-5 pb-3">
+    <div id="progress-bar-wrap" class="progress-bar-wrap px-5 pb-3">
       <div class="progress-info">
         <div class="progress-info-left">
           <span id="progress-text">缩略图: 加载中...</span>
@@ -128,24 +132,26 @@
         </div>
 
         <div id="player-view" class="player-view hidden min-h-0 flex-1 flex-col overflow-hidden">
-          <div class="player-view-header flex shrink-0 flex-wrap items-center gap-3 border-b border-surface-border px-5 py-3">
-            <button type="button" id="btn-player-back" class="ui-btn rounded-lg border border-surface-border px-3 py-1.5 text-sm">← 返回列表</button>
-            <div class="min-w-0 flex-1">
-              <h2 id="player-title" class="truncate text-sm font-semibold text-zinc-100"></h2>
-              <p id="player-path" class="truncate text-xs text-zinc-500" title=""></p>
-              <p id="player-status" class="player-status hidden text-xs text-amber-400/90"></p>
+          <div class="player-view-header">
+            <button type="button" id="btn-player-back" class="player-header-back ui-btn sm">← 返回列表</button>
+            <div class="player-header-main">
+              <h2 id="player-title" class="player-header-title" title=""></h2>
+              <div class="player-header-meta">
+                <p id="player-path" class="player-header-path" title=""></p>
+                <p id="player-status" class="player-status hidden"></p>
+              </div>
             </div>
-            <div class="flex gap-2">
-              <button type="button" id="btn-player-favorite" class="ui-btn sm player-fav-btn rounded px-2 py-1 text-xs" aria-pressed="false" title="加入收藏">♡ 收藏</button>
-              <button type="button" id="btn-player-prev" class="ui-btn sm rounded px-2 py-1 text-xs">上一个</button>
-              <button type="button" id="btn-player-next" class="ui-btn sm rounded px-2 py-1 text-xs">下一个</button>
-              <button type="button" id="btn-player-potplayer" class="ui-btn sm rounded px-2 py-1 text-xs">PotPlayer</button>
+            <div class="player-header-actions">
+              <button type="button" id="btn-player-favorite" class="ui-btn sm player-fav-btn player-header-action" aria-pressed="false" title="加入收藏">♡ 收藏</button>
+              <button type="button" id="btn-player-prev" class="ui-btn sm player-header-action">上一个</button>
+              <button type="button" id="btn-player-next" class="ui-btn sm player-header-action">下一个</button>
+              <button type="button" id="btn-player-potplayer" class="ui-btn sm player-header-action">PotPlayer</button>
             </div>
           </div>
           <div class="flex min-h-0 flex-1 flex-col lg:flex-row">
             <div id="player-stage" class="player-stage flex min-h-0 flex-1 p-2 sm:p-4"></div>
-            <div class="player-playlist-wrap flex w-full shrink-0 flex-col border-t border-surface-border lg:w-72 lg:border-l lg:border-t-0">
-              <div class="player-playlist-head flex shrink-0 items-center justify-between gap-2 border-b border-surface-border px-2 py-1.5">
+            <div class="player-playlist-wrap flex w-full shrink-0 flex-col lg:w-72 lg:border-l lg:border-t-0">
+              <div class="player-playlist-head flex shrink-0 items-center justify-between gap-2 px-2 py-1.5">
                 <span class="text-xs font-medium text-zinc-400">播放列表</span>
                 <select id="player-playlist-sort" class="player-playlist-sort" title="播放列表排序（连播时按此顺序下一集）">
                   <option value="page">列表顺序</option>
@@ -375,6 +381,15 @@
               </select>
             </label>
 
+            <label class="opt-cell">
+              <span class="settings-field-label">缩略图进度条</span>
+              <select id="set-thumb-progress-bar" class="dlg-input compact-input" title="全库就绪时自动收起，顶栏保留红色装饰线">
+                <option value="auto">仅活动时显示</option>
+                <option value="always">始终显示</option>
+                <option value="never">始终隐藏</option>
+              </select>
+            </label>
+
             <div class="opt-cell">
               <span class="settings-field-label">随机截图</span>
               <div class="range-inputs compact">
@@ -428,6 +443,6 @@
   </dialog>
 
   <script src="/static/vendor/hls.min.js"></script>
-  <script src="/static/app.js?v=98"></script>
+  <script src="/static/app.js?v=111"></script>
 </body>
 </html>

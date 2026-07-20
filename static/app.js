@@ -189,16 +189,18 @@
     failedItems: [],
     playSession: 0,
     activeSliceVideoId: null,
-    directStreamVideoId: null,
-    directStreamPausedAt: null,
     viewMode: "browse",
     libraryId: "",
     libraries: [],
     playlistSort: "page",
     playlistAutoplay: true,
     resumePlayback: true,
+    thumbProgressBar: "auto",
+    pendingRestorePlayId: null,
   };
 
+  let thumbProgressManualExpand = false;
+  let lastThumbProgressGlobal = null;
   let searchTimer = null;
   let thumbRetryTimers = {};
   let progressTimer = null;
@@ -207,123 +209,6 @@
   let versionDebounceTimer = null;
   let lastLibraryVersion = "";
   let hlsInstance = null;
-  let directPauseDetachTimer = null;
-
-  function captureVideoFrame(video) {
-    if (!video || video.videoWidth <= 0 || video.videoHeight <= 0) return null;
-    try {
-      const canvas = document.createElement("canvas");
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return null;
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      return canvas.toDataURL("image/jpeg", 0.82);
-    } catch (_) {
-      return null;
-    }
-  }
-
-  async function resumeDirectStream(video, id) {
-    if (!video || video._resumingStream) return;
-    const resume = state.directStreamPausedAt;
-    if (!resume || resume.id !== id) return;
-    video._resumingStream = true;
-    try {
-      setPlayerStatus("正在恢复播放…");
-      const libQ = state.libraryId ? `?library_id=${encodeURIComponent(state.libraryId)}` : "";
-      video.preload = "metadata";
-      video.src = `/api/stream/${id}${libQ}`;
-      await new Promise((resolve, reject) => {
-        const cleanup = () => {
-          video.removeEventListener("loadeddata", onReady);
-          video.removeEventListener("error", onErr);
-        };
-        const onReady = () => { cleanup(); resolve(); };
-        const onErr = () => { cleanup(); reject(new Error("加载失败")); };
-        video.addEventListener("loadeddata", onReady, { once: true });
-        video.addEventListener("error", onErr, { once: true });
-      });
-      if (resume.time > 0) {
-        video.currentTime = resume.time;
-        await new Promise((resolve) => {
-          if (video.readyState >= 2) {
-            resolve();
-            return;
-          }
-          video.addEventListener("seeked", () => resolve(), { once: true });
-          setTimeout(resolve, 800);
-        });
-      }
-      video.removeAttribute("poster");
-      state.directStreamPausedAt = null;
-      state.directStreamVideoId = id;
-      const resumed = resume.time >= 1 ? `从 ${formatPlaybackTime(resume.time)} 继续` : "";
-      setPlayerStatus(resumed);
-      await video.play();
-    } catch (_) {
-      setPlayerStatus("恢复播放失败，请再点一次播放");
-      if (resume.poster) video.poster = resume.poster;
-    } finally {
-      video._resumingStream = false;
-    }
-  }
-
-  function unbindDirectStreamLifecycle(video) {
-    if (!video?._directStreamHandlers) return;
-    const { onPause, onPlay, onClick } = video._directStreamHandlers;
-    clearTimeout(directPauseDetachTimer);
-    video.removeEventListener("pause", onPause);
-    video.removeEventListener("play", onPlay);
-    video.removeEventListener("click", onClick);
-    delete video._directStreamHandlers;
-  }
-
-  function bindDirectStreamLifecycle(video, id) {
-    unbindDirectStreamLifecycle(video);
-    if (!video || !id) return;
-
-    const onPause = () => {
-      if (state.activeSliceVideoId) return;
-      if (state.directStreamVideoId !== id) return;
-      clearTimeout(directPauseDetachTimer);
-      directPauseDetachTimer = setTimeout(() => {
-        if (!video.paused || state.directStreamVideoId !== id) return;
-        const poster = captureVideoFrame(video);
-        state.directStreamPausedAt = {
-          id,
-          time: video.currentTime,
-          duration: Number.isFinite(video.duration) ? video.duration : null,
-          poster,
-        };
-        if (poster) video.poster = poster;
-        video.preload = "none";
-        video.removeAttribute("src");
-        video.src = "";
-        video.load();
-        state.directStreamVideoId = null;
-        setPlayerStatus("已暂停（已停止读盘，点播放继续）");
-      }, 600);
-    };
-
-    const onPlay = () => {
-      clearTimeout(directPauseDetachTimer);
-      if (state.directStreamPausedAt?.id === id) {
-        void resumeDirectStream(video, id);
-      }
-    };
-
-    const onClick = () => {
-      if (state.directStreamPausedAt?.id === id && video.paused) {
-        void resumeDirectStream(video, id);
-      }
-    };
-
-    video.addEventListener("pause", onPause);
-    video.addEventListener("play", onPlay);
-    video.addEventListener("click", onClick);
-    video._directStreamHandlers = { onPause, onPlay, onClick };
-  }
 
   /** 立刻断开浏览器视频拉流，停止 Range 请求与后台缓冲；hard 时替换节点（退出播放页用） */
   function detachVideoStream(video, { hard = false } = {}) {
@@ -331,12 +216,7 @@
       if (hard) recreateVideoElement();
       return getPlaybackVideo();
     }
-    clearTimeout(directPauseDetachTimer);
-    unbindDirectStreamLifecycle(video);
-    unbindSlicePauseResume(video);
     destroyHlsPlayer();
-    state.directStreamVideoId = null;
-    state.directStreamPausedAt = null;
     try { video.pause(); } catch (_) { /* ignore */ }
     try { video.preload = "none"; } catch (_) { /* ignore */ }
     video.removeAttribute("poster");
@@ -366,6 +246,19 @@
     video.playsInline = true;
     video.preload = "none";
     old.parentElement.replaceChild(video, old);
+  }
+
+  /** 播放页顶栏标题最多显示字数 */
+  const PLAYER_TITLE_MAX_CHARS = 26;
+
+  function setPlayerHeaderTitle(full) {
+    const text = String(full || "").trim();
+    const el = $("#player-title");
+    if (!el) return;
+    el.title = text;
+    el.textContent = text.length > PLAYER_TITLE_MAX_CHARS
+      ? `${text.slice(0, PLAYER_TITLE_MAX_CHARS)}…`
+      : text;
   }
 
   function loadState() {
@@ -590,6 +483,7 @@
     html5_fragmented_mp4: "external",
     html5_playlist_autoplay: true,
     html5_resume_playback: true,
+    thumb_progress_bar: "auto",
   };
 
   function playlistAutoplayEnabled() {
@@ -605,6 +499,61 @@
     return m === "smart" ? "html5" : m;
   }
 
+  function normalizeThumbProgressBar(mode) {
+    const m = (mode || SETTINGS_DEFAULTS.thumb_progress_bar || "auto").trim().toLowerCase();
+    if (m === "always" || m === "never") return m;
+    return "auto";
+  }
+
+  function isThumbProgressIdle(global) {
+    if (!global) return true;
+    const failCount = global.failed ?? 0;
+    const thumbWorkActive = (global.generating ?? 0) > 0
+      || (global.queue_size ?? 0) > 0
+      || (global.missing ?? 0) > 0;
+    const notReady = Math.max(0, (global.total ?? 0) - (global.ready ?? 0));
+    return !thumbWorkActive && failCount === 0 && notReady === 0;
+  }
+
+  function updateProgressBarVisibility(global) {
+    const mode = normalizeThumbProgressBar(state.thumbProgressBar);
+    const idle = isThumbProgressIdle(global);
+    if (!idle) thumbProgressManualExpand = false;
+
+    let showBar;
+    if (mode === "always") showBar = true;
+    else if (mode === "never") showBar = false;
+    else showBar = !idle || thumbProgressManualExpand;
+
+    $("#progress-bar-wrap")?.classList.toggle("progress-bar-collapsed", !showBar);
+    $("#app-header")?.classList.toggle("header-progress-collapsed", !showBar);
+
+    const chip = $("#thumb-status-chip");
+    const dot = chip?.querySelector(".thumb-status-dot");
+    if (!chip || !dot) return;
+    const showChip = mode === "auto" && idle;
+    chip.classList.toggle("hidden", !showChip);
+    chip.classList.toggle("thumb-status-chip--expanded", showChip && thumbProgressManualExpand);
+    chip.setAttribute("aria-expanded", showChip && thumbProgressManualExpand ? "true" : "false");
+    chip.title = thumbProgressManualExpand ? "点击收起缩略图进度" : "缩略图状态，点击展开详情";
+    dot.classList.remove("thumb-status-dot--ok", "thumb-status-dot--busy", "thumb-status-dot--fail");
+    if (!showChip || !global) return;
+    const failCount = global.failed ?? 0;
+    const busy = (global.generating ?? 0) > 0
+      || (global.queue_size ?? 0) > 0
+      || (global.missing ?? 0) > 0;
+    if (failCount > 0) dot.classList.add("thumb-status-dot--fail");
+    else if (busy) dot.classList.add("thumb-status-dot--busy");
+    else dot.classList.add("thumb-status-dot--ok");
+  }
+
+  function toggleThumbProgressBar() {
+    const mode = normalizeThumbProgressBar(state.thumbProgressBar);
+    if (mode !== "auto" || !isThumbProgressIdle(lastThumbProgressGlobal)) return;
+    thumbProgressManualExpand = !thumbProgressManualExpand;
+    updateProgressBarVisibility(lastThumbProgressGlobal);
+  }
+
   function fillSettingsForm(raw) {
     const s = { ...SETTINGS_DEFAULTS, ...(raw || {}) };
     state.playerMode = normalizePlayerMode(s.player_mode);
@@ -617,6 +566,8 @@
     setVal("set-random-max", s.thumb_random_max);
     setVal("set-workers", s.thumb_workers);
     setVal("set-idle-scan", String(!!s.thumb_idle_scan));
+    setVal("set-thumb-progress-bar", normalizeThumbProgressBar(s.thumb_progress_bar));
+    state.thumbProgressBar = normalizeThumbProgressBar(s.thumb_progress_bar);
     setVal("set-page-size", String(s.default_page_size === -1 ? -1 : (s.default_page_size ?? -1)));
     setVal("set-potplayer", s.potplayer_path || "");
     setVal("set-history-days", s.history_retention_days ?? 180);
@@ -967,6 +918,28 @@
     $$(".view-mode-btn").forEach(btn => {
       btn.classList.toggle("active", btn.dataset.view === state.viewMode);
     });
+  }
+
+  function isBrowseHome() {
+    return state.viewMode === "browse"
+      && !state.category
+      && !state.folder
+      && !state.query
+      && state.page <= 1;
+  }
+
+  function goHome() {
+    state.viewMode = "browse";
+    state.category = "";
+    state.folder = "";
+    state.query = "";
+    state.page = 1;
+    const search = $("#search");
+    if (search) search.value = "";
+    updateViewModeButtons();
+    saveState();
+    loadCategories();
+    loadVideos({ forceRebuild: true });
   }
 
   function setViewMode(mode) {
@@ -1531,9 +1504,9 @@
     return oldIds === newIds;
   }
 
-  async function loadVideos({ forceRebuild = false } = {}) {
-    if (!forceRebuild && playbackInProgress()) return;
-    if (state.playerViewOpen) await hideHtml5Player();
+  async function loadVideos({ forceRebuild = false, keepPlayerOpen = false } = {}) {
+    if (!forceRebuild && !keepPlayerOpen && playbackInProgress()) return;
+    if (state.playerViewOpen && !keepPlayerOpen) await hideHtml5Player();
     const params = buildVideosParams();
 
     let data;
@@ -1636,6 +1609,34 @@
   }
 
   function updateUrl() {
+    const applyPlay = (params) => {
+      if (state.playerViewOpen && state.playingId) {
+        params.set("play", state.playingId);
+      }
+      const qs = params.toString();
+      history.replaceState(null, "", qs ? `/?${qs}` : "/");
+    };
+
+    if (state.viewMode === "favorites") {
+      const params = new URLSearchParams();
+      params.set("view", "favorites");
+      applyPlay(params);
+      return;
+    }
+    if (state.viewMode === "history") {
+      const params = new URLSearchParams();
+      params.set("view", "history");
+      applyPlay(params);
+      return;
+    }
+    if (isBrowseHome()) {
+      const params = new URLSearchParams();
+      if (state.pageSize !== "auto" && state.pageSize !== 32 && state.pageSize !== 0) {
+        params.set("size", String(state.pageSize));
+      }
+      applyPlay(params);
+      return;
+    }
     const params = new URLSearchParams();
     if (state.libraryId) params.set("lib", state.libraryId);
     if (state.category) params.set("category", state.category);
@@ -1644,12 +1645,23 @@
     if (state.page > 1) params.set("page", state.page);
     if (state.pageSize === "auto") params.set("size", "auto");
     else if (state.pageSize !== 0) params.set("size", String(state.pageSize));
-    const qs = params.toString();
-    history.replaceState(null, "", qs ? `?${qs}` : "/");
+    applyPlay(params);
   }
 
   function parseUrl() {
     const params = new URLSearchParams(location.search);
+    const view = params.get("view");
+    if (view === "favorites") {
+      state.viewMode = "favorites";
+      state.category = "";
+      state.folder = "";
+    } else if (view === "history") {
+      state.viewMode = "history";
+      state.category = "";
+      state.folder = "";
+    } else {
+      state.viewMode = "browse";
+    }
     if (params.has("lib")) state.libraryId = params.get("lib");
     if (params.has("category")) state.category = params.get("category");
     if (params.has("folder")) {
@@ -1665,6 +1677,18 @@
       const s = params.get("size");
       state.pageSize = s === "auto" ? "auto" : (parseInt(s, 10) || 32);
     }
+    if (params.has("play")) {
+      state.pendingRestorePlayId = params.get("play");
+    }
+  }
+
+  async function tryRestorePlayback() {
+    const id = state.pendingRestorePlayId;
+    if (!id) return;
+    state.pendingRestorePlayId = null;
+    try {
+      await playVideo(id);
+    } catch (_) { /* 留在列表 */ }
   }
 
   function scheduleThumbRefresh(id) {
@@ -1919,8 +1943,12 @@
         if (progressTimer) clearInterval(progressTimer);
         progressTimer = setInterval(loadProgress, progressPollMs);
       }
+
+      lastThumbProgressGlobal = global;
+      updateProgressBarVisibility(global);
     } catch (e) {
       $("#progress-text").textContent = "缩略图: 状态获取失败";
+      updateProgressBarVisibility(lastThumbProgressGlobal);
     }
   }
 
@@ -1930,6 +1958,7 @@
       state.playerMode = normalizePlayerMode(s.player_mode);
       state.playlistAutoplay = s.html5_playlist_autoplay !== false;
       state.resumePlayback = s.html5_resume_playback !== false;
+      state.thumbProgressBar = normalizeThumbProgressBar(s.thumb_progress_bar);
       return s;
     } catch (_) {
       return null;
@@ -2042,30 +2071,6 @@
     try {
       await api("/api/play/stop", { method: "POST" });
     } catch (_) { /* ignore */ }
-  }
-
-  function unbindSlicePauseResume(video) {
-    if (!video?._slicePauseHandlers) return;
-    const { onPause, onPlay } = video._slicePauseHandlers;
-    video.removeEventListener("pause", onPause);
-    video.removeEventListener("play", onPlay);
-    delete video._slicePauseHandlers;
-  }
-
-  function bindSlicePauseResume(video, id) {
-    unbindSlicePauseResume(video);
-    if (!video || !id || !state.activeSliceVideoId) return;
-    const onPause = () => {
-      if (state.activeSliceVideoId !== id) return;
-      void api("/api/play/pause", { method: "POST" }).catch(() => {});
-    };
-    const onPlay = () => {
-      if (state.activeSliceVideoId !== id) return;
-      void api("/api/play/resume", { method: "POST" }).catch(() => {});
-    };
-    video.addEventListener("pause", onPause);
-    video.addEventListener("play", onPlay);
-    video._slicePauseHandlers = { onPause, onPlay };
   }
 
   function setPlayerStatus(text) {
@@ -2433,7 +2438,7 @@
     view?.classList.remove("hidden");
     view?.classList.add("flex");
     const title = item.title || item.filename || item.id;
-    $("#player-title").textContent = title;
+    setPlayerHeaderTitle(title);
     const pathEl = $("#player-path");
     if (pathEl) {
       pathEl.textContent = item.path || "";
@@ -2442,6 +2447,7 @@
     renderPlayerPlaylist();
     highlightPlayingCard();
     updatePlayerFavoriteButton(item);
+    updateUrl();
   }
 
   function resetVideoDisplay(video) {
@@ -2455,12 +2461,6 @@
     pendingPlayId = null;
     recordPlayHistory(item.id);
     if (video) bindPlaybackProgressSaver(video, item.id);
-    if (video && state.activeSliceVideoId === item.id) {
-      bindSlicePauseResume(video, item.id);
-    } else if (video) {
-      state.directStreamVideoId = item.id;
-      bindDirectStreamLifecycle(video, item.id);
-    }
   }
 
   function videoHasPicture(video) {
@@ -2574,9 +2574,7 @@
     const moovEnd = info?.structure?.kind === "moov_end";
     const sizeBytes = info?.structure?.size_bytes || 0;
     const sizeHint = sizeBytes ? formatSize(sizeBytes) : "";
-    const largeHint = sizeBytes >= 300 * 1024 * 1024
-      ? " · 大文件 HTML5 会持续读盘，建议用 PotPlayer"
-      : "";
+    const largeHint = sizeBytes >= 300 * 1024 * 1024 ? " · 大文件可用 PotPlayer 更流畅" : "";
     updatePlayOverlay(
       "加载视频",
       moovEnd
@@ -2677,9 +2675,13 @@
       if (st.state === "error") throw new Error(st.error || "HLS 准备失败");
       const segs = st.segments || 0;
       const elapsed = st.elapsed_sec || 0;
-      const detail = transcode
-        ? `已生成 ${segs} 个片段 · 耗时 ${elapsed}s`
-        : `已切片 ${segs} 个片段 · 耗时 ${elapsed}s`;
+      const detail = segs <= 0
+        ? (transcode
+          ? `正在编码首段（转码较慢，首段常需 20～40 秒）· 已等待 ${Math.round(elapsed)}s`
+          : `正在生成首段切片 · 已等待 ${Math.round(elapsed)}s`)
+        : (transcode
+          ? `已生成 ${segs} 个片段 · 耗时 ${elapsed}s`
+          : `已切片 ${segs} 个片段 · 耗时 ${elapsed}s`);
       const pct = segs > 0 ? Math.min(92, 12 + segs * 8) : null;
       updatePlayOverlay(transcode ? "正在转码" : "正在切片", detail, {
         progress: pct,
@@ -2731,14 +2733,13 @@
       );
     }
     unbindPlaybackProgressSaver();
-    clearTimeout(directPauseDetachTimer);
 
     detachVideoStream(getPlaybackVideo(), { hard: true });
     await stopActiveSlice();
 
     if (state.playerViewOpen) {
       const navItem = getItemById(id) || item || { id, title: id, filename: "" };
-      $("#player-title").textContent = navItem.title || navItem.filename || id;
+      setPlayerHeaderTitle(navItem.title || navItem.filename || id);
       const pathEl = $("#player-path");
       if (pathEl && navItem.path) {
         pathEl.textContent = navItem.path;
@@ -2747,6 +2748,7 @@
       updatePlayerPlaylistActive();
       scrollPlaylistToActive();
       highlightPlayingCard();
+      updateUrl();
     }
 
     const base = item || { id, title: id, filename: "", path: "" };
@@ -2991,6 +2993,7 @@
     $("#gallery-toolbar")?.classList.remove("hidden");
     state.playingId = null;
     highlightPlayingCard();
+    updateUrl();
     if (state.pageSize === "auto") scheduleAutoPageSizeCheck();
   }
 
@@ -3101,9 +3104,36 @@
     return confirm(msg);
   }
 
+  async function stopPlaybackForSwitch() {
+    state.playSession += 1;
+    pendingPlayId = null;
+    unbindPlaybackProgressSaver();
+    detachVideoStream(getPlaybackVideo(), { hard: false });
+    state.activeSliceVideoId = null;
+    await stopActiveSlice();
+    hidePlayOverlay();
+    parkVideoEngine();
+    resetVideoDisplay(getPlaybackVideo());
+  }
+
   async function deleteVideos(ids) {
     if (!ids.length) return;
     if (!await confirmDelete(ids)) return;
+
+    const inPlayer = state.playerViewOpen;
+    const idSet = new Set(ids);
+    const deletedCurrent = inPlayer && state.playingId && idSet.has(state.playingId);
+    const playlistBefore = inPlayer ? getPlaylistItems() : [];
+    const curIdx = deletedCurrent
+      ? playlistBefore.findIndex(v => v.id === state.playingId)
+      : -1;
+    const preferNextId = curIdx >= 0 ? playlistBefore[curIdx + 1]?.id : null;
+
+    if (deletedCurrent) {
+      await stopPlaybackForSwitch();
+      state.playingId = null;
+    }
+
     const result = await api("/api/videos/delete", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3114,8 +3144,29 @@
     }
     state.selected.clear();
     await loadCategories();
-    await loadVideos();
+    await loadVideos({ forceRebuild: true, keepPlayerOpen: inPlayer });
     loadProgress();
+
+    if (!inPlayer) return;
+
+    renderPlayerPlaylist(true);
+    if (!deletedCurrent) {
+      highlightPlayingCard();
+      updateUrl();
+      return;
+    }
+
+    const list = getPlaylistItems();
+    let targetId = preferNextId && list.some(v => v.id === preferNextId) ? preferNextId : null;
+    if (!targetId && list.length) {
+      targetId = list[Math.min(curIdx, list.length - 1)]?.id || null;
+    }
+    if (targetId) {
+      await playVideo(targetId);
+    } else {
+      state.playingId = null;
+      await hideHtml5Player();
+    }
   }
 
   let renameTargetId = null;
@@ -3326,6 +3377,7 @@
           thumb_random_max: rMax,
           thumb_workers: workers,
           thumb_idle_scan: $("#set-idle-scan")?.value === "true",
+          thumb_progress_bar: normalizeThumbProgressBar($("#set-thumb-progress-bar")?.value),
           default_page_size: (() => {
             const raw = $("#set-page-size")?.value;
             if (raw === "-1") return -1;
@@ -3345,6 +3397,7 @@
       state.playerMode = document.querySelector('input[name="player-mode"]:checked')?.value || SETTINGS_DEFAULTS.player_mode;
       state.playlistAutoplay = $("#set-html5-playlist-autoplay")?.value === "true";
       state.resumePlayback = $("#set-html5-resume-playback")?.value === "true";
+      state.thumbProgressBar = normalizeThumbProgressBar($("#set-thumb-progress-bar")?.value);
       $("#settings-dialog")?.close();
       loadProgress();
       if ($("#set-idle-scan")?.value === "true") {
@@ -3456,7 +3509,7 @@
     state.folderTrees = {};
     await api("/api/rescan", { method: "POST" });
     await loadCategories();
-    await loadVideos();
+    await loadVideos({ forceRebuild: true });
     await loadProgress();
   });
 
@@ -3470,7 +3523,11 @@
     loadProgress();
   });
 
-  $("#btn-view-browse")?.addEventListener("click", () => setViewMode("browse"));
+  $("#btn-view-browse")?.addEventListener("click", (e) => {
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button === 1) return;
+    e.preventDefault();
+    goHome();
+  });
   $("#btn-view-favorites")?.addEventListener("click", () => setViewMode("favorites"));
   $("#btn-view-history")?.addEventListener("click", () => setViewMode("history"));
 
@@ -3580,6 +3637,7 @@
   $("#progress-text")?.addEventListener("click", () => {
     if (state.failedItems.length) showFailedDialog();
   });
+  $("#thumb-status-chip")?.addEventListener("click", toggleThumbProgressBar);
   $("#btn-show-failed-list").addEventListener("click", showFailedDialog);
   $("#btn-retry-all-failed").addEventListener("click", retryAllFailed);
   $("#failed-dialog-close").addEventListener("click", () => $("#failed-dialog")?.close());
@@ -3598,6 +3656,13 @@
     if (!vid) return;
     e.preventDefault();
     void playVideo(vid);
+  });
+  $("#player-playlist")?.addEventListener("contextmenu", (e) => {
+    const btn = e.target.closest(".player-pl-item");
+    const vid = btn?.dataset?.id;
+    if (!vid) return;
+    e.preventDefault();
+    showCtxMenu(e.clientX, e.clientY, vid);
   });
   $("#btn-player-potplayer").addEventListener("click", () => {
     if (state.playingId) playVideoExternal(state.playingId);
@@ -3737,7 +3802,10 @@
   loadLibraries().then(() => loadPlayerSettings()).then(() => updatePotplayerPathVisibility());
   updateViewModeButtons();
   loadCategories().then(() => {
-    loadVideos({ forceRebuild: true }).then(loadProgress);
+    loadVideos({ forceRebuild: true }).then(async () => {
+      await loadProgress();
+      await tryRestorePlayback();
+    });
   });
   connectSSE();
   progressTimer = setInterval(loadProgress, progressPollMs);

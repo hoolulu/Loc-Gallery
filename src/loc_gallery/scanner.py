@@ -6,7 +6,7 @@ from pathlib import Path
 
 from loc_gallery.config import IGNORE_DIRS, VIDEO_EXTENSIONS, WEB_ROOT
 from loc_gallery.file_stability import is_ready_for_index
-from loc_gallery.title import extract_title
+from loc_gallery import title as title_mod
 
 
 @dataclass
@@ -56,7 +56,7 @@ def scan_all(video_root: Path, library_id: str) -> list[VideoItem]:
             path=str(video_path),
             category=category,
             subfolder=subfolder,
-            title=extract_title(video_path),
+            title=title_mod.extract_title(video_path),
             filename=video_path.name,
             size=stat.st_size,
             mtime=stat.st_mtime,
@@ -86,6 +86,9 @@ def scan_all(video_root: Path, library_id: str) -> list[VideoItem]:
 
 
 def refresh_cache(library_id: str, video_root: Path | None = None) -> int:
+    import importlib
+
+    importlib.reload(title_mod)
     if video_root is None:
         from loc_gallery.library_store import get_library
         lib = get_library(library_id)

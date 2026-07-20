@@ -201,6 +201,7 @@ class SettingsUpdate(BaseModel):
     html5_fragmented_mp4: str | None = None
     html5_playlist_autoplay: bool | None = None
     html5_resume_playback: bool | None = None
+    thumb_progress_bar: str | None = None  # auto | always | never
     scope: str | None = None  # global | library
 
 
