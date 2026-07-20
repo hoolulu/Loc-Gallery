@@ -1,0 +1,18 @@
+---
+description: Loc Gallery 发版流程（版本号、tag、GitHub Release）
+alwaysApply: true
+---
+
+# 发版（用户说「发版」「release」）
+
+在 Loc-Gallery 仓库完成发版时，**必须全部做完**，不要只改版本号或只打本地 tag：
+
+1. **版本与文档**：`pyproject.toml`、`src/loc_gallery/__init__.py`、`CHANGELOG.md`（新章节）、`README.md` 当前版本行、`PRD.md` 版本表与里程碑行。
+2. **提交**：`release: Loc Gallery X.Y.Z`（含本版 CHANGELOG 要点）；勿改 git config，可用与历史提交一致的 `GIT_AUTHOR_*` / `GIT_COMMITTER_*` 环境变量。
+3. **Annotated tag**：`git tag -a vX.Y.Z -m "Loc Gallery X.Y.Z"`（若 tag 已存在则跳过或先确认）。
+4. **推送**：`git push origin master`（或当前主分支）与 `git push origin vX.Y.Z`。
+5. **GitHub Release**：`gh release create vX.Y.Z --title "Loc Gallery X.Y.Z" --notes "…"`  
+   - 正文风格对齐既有 Release（概要 + 新增/改进/修复 + 链到 CHANGELOG）。  
+   - 不要只 push tag 而不发 Release。
+
+发版结束后向用户给出 **Release URL**。
