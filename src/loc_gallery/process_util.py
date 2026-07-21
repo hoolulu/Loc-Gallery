@@ -2,8 +2,11 @@
 """Windows 子进程静默启动（避免 ffmpeg/ffprobe 弹出黑框）。"""
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
+from dataclasses import dataclass
+from pathlib import Path
 
 
 def suspend_process(pid: int) -> bool:
@@ -89,6 +92,59 @@ def deprioritize_process(pid: int) -> bool:
         return True
     except OSError:
         return False
+
+
+@dataclass(frozen=True)
+class FileTimestamps:
+    atime: float
+    mtime: float
+    ctime: float | None = None
+
+
+def capture_file_timestamps(path: Path) -> FileTimestamps:
+    """读取文件访问/修改时间；Windows 上额外保留创建时间。"""
+    st = path.stat()
+    ctime = st.st_ctime if sys.platform == "win32" else None
+    return FileTimestamps(st.st_atime, st.st_mtime, ctime)
+
+
+def restore_file_timestamps(path: Path, timestamps: FileTimestamps) -> None:
+    """恢复 capture_file_timestamps 保存的时间戳。"""
+    os.utime(path, (timestamps.atime, timestamps.mtime))
+    if sys.platform == "win32" and timestamps.ctime is not None:
+        _win_set_creation_time(path, timestamps.ctime)
+
+
+def _win_set_creation_time(path: Path, ctime: float) -> None:
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    GENERIC_WRITE = 0x40000000
+    FILE_SHARE_READ = 1
+    OPEN_EXISTING = 3
+    FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
+    INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+
+    handle = kernel32.CreateFileW(
+        str(path),
+        GENERIC_WRITE,
+        FILE_SHARE_READ,
+        None,
+        OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS,
+        None,
+    )
+    if handle == INVALID_HANDLE_VALUE:
+        return
+    try:
+        if ctime < 0:
+            ctime = 0.0
+        ft = int((ctime + 11644473600) * 10_000_000)
+        creation = wintypes.FILETIME(ft & 0xFFFFFFFF, ft >> 32)
+        kernel32.SetFileTime(handle, ctypes.byref(creation), None, None)
+    finally:
+        kernel32.CloseHandle(handle)
 
 
 def hidden_subprocess_kwargs() -> dict:

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Loc Gallery</title>
   <link rel="stylesheet" href="/static/tailwind.css?v=2">
-  <link rel="stylesheet" href="/static/style.css?v=75">
+  <link rel="stylesheet" href="/static/style.css?v=76">
 </head>
 <body class="flex h-full flex-col overflow-hidden bg-surface text-[#f1f1f1] antialiased">
 
@@ -212,6 +212,7 @@
     <button data-action="play">播放</button>
     <button data-action="folder">打开文件夹</button>
     <button data-action="regen-random">生成缩略图</button>
+    <button data-action="remux" class="hidden">修复为标准 MP4</button>
     <button data-action="copy">复制路径</button>
     <button data-action="fav-toggle">加入收藏</button>
     <div class="sep"></div>
@@ -448,6 +449,6 @@
   </dialog>
 
   <script src="/static/vendor/hls.min.js"></script>
-  <script src="/static/app.js?v=122"></script>
+  <script src="/static/app.js?v=131"></script>
 </body>
 </html>

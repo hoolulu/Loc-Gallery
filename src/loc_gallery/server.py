@@ -70,12 +70,13 @@ from loc_gallery.history_store import (
 )
 from loc_gallery import hls_manager
 from loc_gallery.media_probe import (
+    can_remux_from_plan,
     get_format_badge,
     get_format_badges,
     get_playback_plan,
     schedule_probe_for_ids,
 )
-from loc_gallery.remux_manager import can_remux_video, get_status as remux_status, start_remux
+from loc_gallery.remux_manager import get_status as remux_status, start_remux
 from loc_gallery.library_context import set_thread_library
 from loc_gallery.library_store import (
     add_library,
@@ -232,6 +233,28 @@ def resolve_library_id(library_id: str | None = Query(None)) -> str:
     return lid
 
 
+def _broadcast(event_type: str = "version", library_id: str | None = None, data: str | None = None):
+    lid = library_id or get_active_library_id()
+    if data is None:
+        data = str(get_version(lid))
+    payload = f"{lid}:{data}" if event_type == "version" else data
+    for q in _sse_queues:
+        try:
+            q.put_nowait(f"{event_type}:{payload}")
+        except Exception:
+            pass
+
+
+def notify_library_sse(library_id: str) -> None:
+    """轻量通知前端刷新（不触发全库扫描）。"""
+    _broadcast("version", library_id, str(get_version(library_id)))
+
+
+async def _playback_plan(path: Path) -> dict:
+    """在后台线程执行播放策略分析，避免阻塞事件循环。"""
+    return await asyncio.to_thread(get_playback_plan, path)
+
+
 def _on_library_changed(library_id: str) -> None:
     """文件库变更：刷新索引，并为新/变更视频排队缩略图与格式分析。"""
     set_thread_library(library_id)
@@ -246,18 +269,6 @@ def _on_library_changed(library_id: str) -> None:
     _broadcast("progress", library_id)
 
 
-def _broadcast(event_type: str = "version", library_id: str | None = None, data: str | None = None):
-    lid = library_id or get_active_library_id()
-    if data is None:
-        data = str(get_version(lid))
-    payload = f"{lid}:{data}" if event_type == "version" else data
-    for q in _sse_queues:
-        try:
-            q.put_nowait(f"{event_type}:{payload}")
-        except Exception:
-            pass
-
-
 class _ChangeHandler(FileSystemEventHandler):
     def __init__(self, library_id: str):
         self.library_id = library_id
@@ -267,6 +278,10 @@ class _ChangeHandler(FileSystemEventHandler):
             return
         path = Path(event.src_path)
         if is_incomplete_filename(path.name):
+            return
+        from loc_gallery.remux_manager import is_remux_path_suppressed
+
+        if is_remux_path_suppressed(path):
             return
         if path.suffix.lower() not in VIDEO_EXTENSIONS:
             return
@@ -774,8 +789,8 @@ async def api_play_info(video_id: str, library_id: str = Depends(resolve_library
     item = get_by_id(library_id, video_id)
     if not item:
         raise HTTPException(404, "视频不存在")
-    plan = get_playback_plan(Path(item.path))
-    remuxable, remux_reason = can_remux_video(library_id, video_id)
+    plan = await _playback_plan(Path(item.path))
+    remuxable, remux_reason = can_remux_from_plan(plan)
     hist = get_history_entry(library_id, video_id) or {}
     return {
         "id": video_id,
@@ -808,7 +823,7 @@ async def api_play_prepare(video_id: str, library_id: str = Depends(resolve_libr
     item = get_by_id(library_id, video_id)
     if not item:
         raise HTTPException(404, "视频不存在")
-    plan = get_playback_plan(Path(item.path))
+    plan = await _playback_plan(Path(item.path))
     if plan["mode"] != "hls":
         return {"ok": True, "mode": plan["mode"], **plan}
     result = hls_manager.prepare(
@@ -884,7 +899,7 @@ async def api_play(video_id: str, library_id: str = Depends(resolve_library_id))
 
     settings = load_settings(library_id)
     if (settings.get("player_mode") or "").strip().lower() in ("html5", "smart"):
-        plan = get_playback_plan(Path(item.path))
+        plan = await _playback_plan(Path(item.path))
         return {
             "ok": True,
             "mode": "html5",

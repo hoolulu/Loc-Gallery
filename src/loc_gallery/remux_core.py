@@ -57,7 +57,7 @@ def remux_to_file(
             output_file.unlink(missing_ok=True)
             raise RuntimeError(f"ffmpeg 重封装失败（退出码 {proc.returncode}）")
         if on_progress:
-            on_progress(100.0, "重封装完成，正在替换原文件…")
+            on_progress(100.0, "重封装完成")
     except Exception:
         if proc.poll() is None:
             proc.kill()

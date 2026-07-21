@@ -78,6 +78,30 @@ def _send_to_recycle_bin(library_id: str, path: Path) -> None:
         raise OSError(f"删除到回收站失败 (code={result})")
 
 
+def delete_path_to_recycle_bin(library_id: str, path: Path) -> None:
+    """将库目录下的文件移入系统回收站（用于修复备份等）。"""
+    resolved = _resolve_under_root(library_id, path)
+    if not resolved.is_file():
+        return
+    name = resolved.name.lower()
+    if ".bak" not in name:
+        raise ValueError("仅允许删除备份文件")
+    _send_to_recycle_bin(library_id, resolved)
+
+
+def delete_backup_file(library_id: str, path: Path, *, recycle: bool = False) -> None:
+    """删除修复产生的 .bak 备份。默认直接 unlink（快）；recycle=True 时走回收站。"""
+    resolved = _resolve_under_root(library_id, path)
+    if not resolved.is_file():
+        return
+    if ".bak" not in resolved.name.lower():
+        raise ValueError("仅允许删除备份文件")
+    if recycle:
+        _send_to_recycle_bin(library_id, resolved)
+    else:
+        resolved.unlink()
+
+
 def delete_videos(library_id: str, video_ids: list[str]) -> dict:
     deleted: list[str] = []
     errors: list[dict] = []

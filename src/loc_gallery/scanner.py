@@ -109,6 +109,34 @@ def refresh_all_libraries() -> None:
         refresh_cache(lib.id, lib.path_obj)
 
 
+def bump_library_version(library_id: str) -> int:
+    """仅递增版本号（供 SSE / 前端刷新），不触发全库扫描。"""
+    with _lock:
+        _versions[library_id] = _versions.get(library_id, 0) + 1
+        return _versions[library_id]
+
+
+def refresh_video_item_stat(library_id: str, video_id: str) -> bool:
+    """重封装等原地替换后，更新缓存中的 size/mtime。"""
+    with _lock:
+        item = (_caches.get(library_id) or {}).get(video_id)
+        if not item:
+            return False
+        path = Path(item.path)
+    try:
+        st = path.stat()
+    except OSError:
+        return False
+    with _lock:
+        item = (_caches.get(library_id) or {}).get(video_id)
+        if not item:
+            return False
+        item.size = st.st_size
+        item.mtime = st.st_mtime
+        _versions[library_id] = _versions.get(library_id, 0) + 1
+        return True
+
+
 def get_version(library_id: str) -> int:
     with _lock:
         return _versions.get(library_id, 0)

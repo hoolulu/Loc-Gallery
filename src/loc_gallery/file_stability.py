@@ -103,6 +103,18 @@ def is_ready_for_video(path: Path, *, size: int, mtime: float) -> bool:
     return True
 
 
+def clear_path_pending(path: Path) -> None:
+    """修复/写入完成后清除待稳定标记，避免播放被误判为正在写入。"""
+    key = str(path.resolve())
+    timer = None
+    with _lock:
+        _pending.discard(key)
+        timer = _timers.pop(key, None)
+        _path_libraries.pop(key, None)
+    if timer:
+        timer.cancel()
+
+
 def notify_file_activity(path: Path, library_id: str | None = None) -> None:
     """文件系统事件：加入待稳定队列，延迟后再触发库刷新。"""
     if is_incomplete_filename(path.name):
@@ -111,6 +123,13 @@ def notify_file_activity(path: Path, library_id: str | None = None) -> None:
         return
     if not path.exists():
         return
+    try:
+        from loc_gallery.remux_manager import is_remux_path_suppressed
+
+        if is_remux_path_suppressed(path):
+            return
+    except Exception:
+        pass
 
     key = str(path.resolve())
     with _lock:

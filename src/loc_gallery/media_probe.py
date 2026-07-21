@@ -358,13 +358,36 @@ def _peek_cached_plan(path: Path) -> dict | None:
         return _disk_cache_get(key, st.st_mtime, st.st_size)
 
 
+def can_remux_from_plan(plan: dict) -> tuple[bool, str]:
+    """根据已缓存的播放计划判断是否可流复制修复。"""
+    kind = (plan.get("structure") or {}).get("kind")
+    codec = (plan.get("codec") or "").lower()
+    mdat_count = int((plan.get("structure") or {}).get("mdat_count") or 0)
+    fragmented = kind == "fragmented" or mdat_count > 3
+    if not fragmented:
+        return False, "仅碎片化 / 多段 mdat 的 MP4 需要重封装"
+    if codec not in ("h264", "avc1"):
+        if codec in ("av1", "hevc", "h265", "vp9"):
+            return (
+                False,
+                f"{codec.upper()} 不能「修复」为 H.264：修复仅重排 MP4 容器（流复制）。",
+            )
+        return False, f"暂不支持 {codec.upper()} 重封装，请用 PotPlayer"
+    if plan.get("transcode"):
+        return False, "该视频需要转码，无法流复制重封装"
+    return True, ""
+
+
 def get_format_badge(path: Path) -> str | None:
-    """已分析过的非标准格式角标；未缓存则返回 None。"""
+    """已分析过的格式角标；未缓存则返回 None。"""
     plan = _peek_cached_plan(path)
     if not plan:
         return None
+    if can_remux_from_plan(plan)[0]:
+        return "remuxable"
     kind = (plan.get("structure") or {}).get("kind")
-    if plan.get("disguised") or kind in ("fragmented", "disguised_mpegts"):
+    mdat_count = int((plan.get("structure") or {}).get("mdat_count") or 0)
+    if plan.get("disguised") or kind in ("fragmented", "disguised_mpegts") or mdat_count > 3:
         return "non_standard"
     return None
 
@@ -379,7 +402,7 @@ def get_format_badges(paths: dict[str, Path]) -> dict[str, str]:
     return out
 
 
-def invalidate_playback_plan(path: Path) -> None:
+def invalidate_playback_plan(path: Path, *, purge_hls: bool = True) -> None:
     """清除播放策略缓存（文件被修复/替换后调用）。"""
     key = str(path.resolve())
     with _plan_lock:
@@ -388,7 +411,29 @@ def invalidate_playback_plan(path: Path) -> None:
         if key in store:
             store.pop(key, None)
             _schedule_disk_flush()
-    _purge_hls_for_path(path)
+    if purge_hls:
+        _purge_hls_for_path(path)
+
+
+def seed_direct_playback_plan(path: Path, *, codec: str = "h264") -> dict:
+    """流复制修复后的标准 MP4：跳过 ffprobe/结构扫描，直接写入 direct 计划。"""
+    path = path.resolve()
+    st = path.stat()
+    key = str(path)
+    plan = {
+        "mode": "direct",
+        "transcode": False,
+        "reason": "H.264 MP4，直接播放",
+        "codec": codec,
+        "structure": {"kind": "standard", "mdat_count": 1, "size_bytes": st.st_size},
+    }
+    tagged = {**plan, "_policy": _hls_policy_tag()}
+    with _plan_lock:
+        _plan_cache[key] = (st.st_mtime, st.st_size, tagged)
+    _disk_cache_put(key, st.st_mtime, st.st_size, plan)
+    out = dict(plan)
+    out["cached"] = True
+    return out
 
 
 def get_playback_plan(path: Path) -> dict:

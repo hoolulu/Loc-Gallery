@@ -1457,6 +1457,9 @@
   }
 
   function thumbFormatBadgeHtml(v) {
+    if (v.formatBadge === "remuxable") {
+      return '<span class="thumb-format-badge thumb-format-badge--remuxable" title="碎片化 H.264 MP4，可流复制修复为标准格式">可修复</span>';
+    }
     if (v.formatBadge !== "non_standard") return "";
     return '<span class="thumb-format-badge" title="非标准格式（碎片化/转码/伪装等），建议 PotPlayer 或修复">非标准</span>';
   }
@@ -1490,8 +1493,10 @@
       const wrap = document.getElementById(`thumb-${v.id}`);
       if (!wrap) return;
       let badge = wrap.querySelector(".thumb-format-badge");
-      if (v.formatBadge === "non_standard") {
-        if (!badge) wrap.insertAdjacentHTML("beforeend", thumbFormatBadgeHtml(v));
+      const html = thumbFormatBadgeHtml(v);
+      if (html) {
+        if (badge) badge.outerHTML = html;
+        else wrap.insertAdjacentHTML("beforeend", html);
       } else if (badge) {
         badge.remove();
       }
@@ -3353,6 +3358,28 @@
     }
   }
 
+  async function finishRemuxRefreshInPlace(id) {
+    state.playSession += 1;
+    pendingPlayId = null;
+    hidePlayOverlay();
+
+    const clearBadge = (item) => {
+      if (item && item.id === id) item.formatBadge = null;
+    };
+    clearBadge(getItemById(id));
+    state.pageItems.forEach(clearBadge);
+    patchGridFormatBadges();
+
+    const item = getItemById(id) || { id, title: id, filename: "", path: "" };
+    if (state.playerViewOpen && state.playingId === id) {
+      void playVideoHtml5(id, item);
+      return;
+    }
+    if (state.playerViewOpen) {
+      highlightPlayingCard();
+    }
+  }
+
   async function runVideoRemux(id, item, { batchLabel = "" } = {}) {
     const session = ++state.playSession;
     pendingPlayId = null;
@@ -3379,15 +3406,7 @@
           );
         }
         if (st.state === "done") {
-          hidePlayOverlay();
-          alert(
-            `修复完成！\n\n原文件已备份为：${st.backup_name || "（同目录 .bak）"}\n现在为标准 MP4，可直接 HTML5 播放。`,
-          );
-          await loadVideos({ forceRebuild: true });
-          if (normalizePlayerMode(state.playerMode) === "html5") {
-            const fresh = getItemById(id) || base;
-            await playVideoHtml5(id, fresh);
-          }
+          await finishRemuxRefreshInPlace(id);
           return;
         }
         if (st.state === "error") {
@@ -3455,7 +3474,6 @@
       const label = `${i + 1}/${remuxable.length}`;
       await runVideoRemux(id, { id, title, filename: "", path: "" }, { batchLabel: label });
     }
-    await loadVideos({ forceRebuild: true });
     patchGridFormatBadges();
     scheduleFormatBadgePoll();
   }
@@ -3734,6 +3752,11 @@
     const item = getItemById(id);
     const favBtn = $("#ctx-menu")?.querySelector('[data-action="fav-toggle"]');
     if (favBtn) favBtn.textContent = item?.favorited ? "取消收藏" : "加入收藏";
+    const remuxBtn = $("#ctx-menu")?.querySelector('[data-action="remux"]');
+    if (remuxBtn) {
+      const show = item?.formatBadge === "remuxable";
+      remuxBtn.classList.toggle("hidden", !show);
+    }
     const menu = $("#ctx-menu");
     menu.classList.remove("hidden");
     menu.style.visibility = "hidden";
@@ -4252,6 +4275,10 @@
     if (action === "play") playVideo(id);
     else if (action === "folder") await api(`/api/open-folder/${id}`, { method: "POST" });
     else if (action === "regen-random") await regenerateRandomThumbs([id]);
+    else if (action === "remux") {
+      const v = getItemById(id);
+      await runVideoRemux(id, v || { id, title: id, filename: "", path: "" });
+    }
     else if (action === "copy") {
       const v = getItemById(id);
       if (v?.path) navigator.clipboard.writeText(v.path);
