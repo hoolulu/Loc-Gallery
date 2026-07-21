@@ -3,6 +3,7 @@ import asyncio
 import mimetypes
 import os
 import subprocess
+import threading
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -76,7 +77,13 @@ from loc_gallery.media_probe import (
     get_playback_plan,
     schedule_probe_for_ids,
 )
-from loc_gallery.remux_manager import get_status as remux_status, start_remux
+from loc_gallery.remux_manager import (
+    begin_remux_batch,
+    end_remux_batch,
+    get_status as remux_status,
+    is_remux_watcher_paused,
+    start_remux,
+)
 from loc_gallery.library_context import set_thread_library
 from loc_gallery.library_store import (
     add_library,
@@ -90,7 +97,7 @@ from loc_gallery.library_store import (
 )
 from loc_gallery.scanner import (
     get_all, get_by_id, get_categories, get_folder_tree, get_version, refresh_all_libraries,
-    refresh_cache,
+    refresh_cache, upsert_video_from_path,
 )
 from loc_gallery.settings_store import load_settings, save_settings
 from loc_gallery.thumb_manager import (
@@ -250,6 +257,16 @@ def notify_library_sse(library_id: str) -> None:
     _broadcast("version", library_id, str(get_version(library_id)))
 
 
+def schedule_library_refresh(library_id: str) -> None:
+    """后台补一次库索引刷新（批量修复结束后等场景）。"""
+    threading.Thread(
+        target=_on_library_changed,
+        args=(library_id,),
+        daemon=True,
+        name=f"library-refresh-{library_id[:8]}",
+    ).start()
+
+
 async def _playback_plan(path: Path) -> dict:
     """在后台线程执行播放策略分析，避免阻塞事件循环。"""
     return await asyncio.to_thread(get_playback_plan, path)
@@ -269,27 +286,58 @@ def _on_library_changed(library_id: str) -> None:
     _broadcast("progress", library_id)
 
 
+def _on_video_stable(library_id: str, path: Path) -> None:
+    """单个文件写入稳定后增量入库（新下载完成）。"""
+    set_thread_library(library_id)
+    item = upsert_video_from_path(library_id, path)
+    if not item:
+        _on_library_changed(library_id)
+        return
+    reconcile_deferred_thumbs()
+    changed_ids = sync_index_with_videos()
+    thumb_ids = [item.id]
+    if changed_ids:
+        thumb_ids = list(dict.fromkeys([item.id, *changed_ids]))
+    schedule_ids(thumb_ids, Priority.NORMAL)
+    schedule_probe_for_ids([item.id], library_id)
+    _broadcast("version", library_id, str(get_version(library_id)))
+    _broadcast("progress", library_id)
+
+
 class _ChangeHandler(FileSystemEventHandler):
     def __init__(self, library_id: str):
         self.library_id = library_id
 
-    def on_any_event(self, event):
-        if event.is_directory:
-            return
-        path = Path(event.src_path)
-        if is_incomplete_filename(path.name):
-            return
-        from loc_gallery.remux_manager import is_remux_path_suppressed
+    def _candidate_paths(self, event) -> list[Path]:
+        out: list[Path] = []
+        dest = getattr(event, "dest_path", None)
+        if dest and not Path(dest).is_dir():
+            out.append(Path(dest))
+        src = getattr(event, "src_path", None)
+        if src:
+            src_path = Path(src)
+            if not src_path.is_dir() and src_path not in out:
+                out.append(src_path)
+        return out
 
-        if is_remux_path_suppressed(path):
+    def _handle_path(self, path: Path, event_type: str) -> None:
+        if is_remux_watcher_paused(self.library_id):
+            return
+        if is_incomplete_filename(path.name):
             return
         if path.suffix.lower() not in VIDEO_EXTENSIONS:
             return
-        if event.event_type == "deleted":
+        if event_type == "deleted":
             _on_library_changed(self.library_id)
             return
         set_thread_library(self.library_id)
         notify_file_activity(path, self.library_id)
+
+    def on_any_event(self, event):
+        if event.is_directory:
+            return
+        for path in self._candidate_paths(event):
+            self._handle_path(path, event.event_type)
 
 
 def _start_watchers() -> None:
@@ -318,9 +366,14 @@ def _restart_watchers() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    def _stable_cb():
+    def _stable_cb(path: Path | None = None):
         from loc_gallery.library_context import current_library_id
-        _on_library_changed(current_library_id())
+
+        library_id = current_library_id()
+        if path is not None:
+            _on_video_stable(library_id, path)
+        else:
+            _on_library_changed(library_id)
 
     set_stable_callback(_stable_cb)
     refresh_all_libraries()
@@ -811,6 +864,18 @@ async def api_video_remux_start(video_id: str, library_id: str = Depends(resolve
     if not result.get("ok"):
         raise HTTPException(400, result.get("error") or "无法开始修复")
     return result
+
+
+@app.post("/api/remux/batch/begin")
+async def api_remux_batch_begin(library_id: str = Depends(resolve_library_id)):
+    begin_remux_batch(library_id)
+    return {"ok": True}
+
+
+@app.post("/api/remux/batch/end")
+async def api_remux_batch_end(library_id: str = Depends(resolve_library_id)):
+    end_remux_batch(library_id)
+    return {"ok": True}
 
 
 @app.get("/api/videos/{video_id}/remux")

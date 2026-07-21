@@ -31,7 +31,7 @@ _lock = threading.Lock()
 _pending: set[str] = set()
 _path_libraries: dict[str, str] = {}
 _timers: dict[str, threading.Timer] = {}
-_on_stable_callback: Callable[[], None] | None = None
+_on_stable_callback: Callable[[Path | None], None] | None = None
 
 
 def set_stable_callback(callback: Callable[[], None] | None) -> None:
@@ -123,13 +123,6 @@ def notify_file_activity(path: Path, library_id: str | None = None) -> None:
         return
     if not path.exists():
         return
-    try:
-        from loc_gallery.remux_manager import is_remux_path_suppressed
-
-        if is_remux_path_suppressed(path):
-            return
-    except Exception:
-        pass
 
     key = str(path.resolve())
     with _lock:
@@ -145,6 +138,16 @@ def notify_file_activity(path: Path, library_id: str | None = None) -> None:
         timer.start()
 
 
+def _invoke_stable_callback(path: Path | None, library_id: str | None) -> None:
+    if not _on_stable_callback:
+        return
+    if library_id:
+        from loc_gallery.library_context import set_thread_library
+
+        set_thread_library(library_id)
+    _on_stable_callback(path)
+
+
 def _run_stability_check(path: Path) -> None:
     key = str(path.resolve())
     library_id = None
@@ -153,11 +156,7 @@ def _run_stability_check(path: Path) -> None:
             _pending.discard(key)
             _timers.pop(key, None)
             library_id = _path_libraries.pop(key, None)
-        if _on_stable_callback:
-            if library_id:
-                from loc_gallery.library_context import set_thread_library
-                set_thread_library(library_id)
-            _on_stable_callback()
+        _invoke_stable_callback(None, library_id)
         return
 
     if is_file_stable(path):
@@ -165,11 +164,7 @@ def _run_stability_check(path: Path) -> None:
             _pending.discard(key)
             _timers.pop(key, None)
             library_id = _path_libraries.pop(key, None)
-        if _on_stable_callback:
-            if library_id:
-                from loc_gallery.library_context import set_thread_library
-                set_thread_library(library_id)
-            _on_stable_callback()
+        _invoke_stable_callback(path, library_id)
         return
 
     with _lock:

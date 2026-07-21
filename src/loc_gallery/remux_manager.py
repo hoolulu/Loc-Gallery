@@ -18,41 +18,56 @@ from loc_gallery.scanner import get_by_id, refresh_video_item_stat
 
 _lock = threading.RLock()
 _jobs: dict[str, "RemuxJob"] = {}
-_suppress_lock = threading.Lock()
-_suppressed_paths: set[str] = set()
+_session_lock = threading.Lock()
+_batch_sessions: set[str] = set()
+_active_job_count: dict[str, int] = {}
 
 
-def _remux_path_keys(path: Path) -> set[str]:
-    resolved = path.resolve()
-    keys = {str(resolved)}
-    name = resolved.name.lower()
-    if name.endswith(".mp4.bak") or name.endswith(".m4v.bak"):
-        keys.add(str(resolved.with_name(resolved.name[:-4])))
-    elif resolved.suffix.lower() in {".mp4", ".m4v"}:
-        keys.add(str(resolved.with_suffix(resolved.suffix + ".bak")))
-    return keys
+def begin_remux_batch(library_id: str) -> None:
+    """批量修复开始：整个批次期间暂停该库的文件监视触发。"""
+    with _session_lock:
+        _batch_sessions.add(library_id)
 
 
-def suppress_remux_paths(*paths: Path) -> None:
-    keys: set[str] = set()
-    for path in paths:
-        keys.update(_remux_path_keys(path))
-    with _suppress_lock:
-        _suppressed_paths.update(keys)
+def end_remux_batch(library_id: str) -> None:
+    """批量修复结束：恢复监视，并后台补一次库索引刷新。"""
+    with _session_lock:
+        _batch_sessions.discard(library_id)
+        still_paused = _is_remux_watcher_paused_locked(library_id)
+    if not still_paused:
+        _schedule_post_batch_refresh(library_id)
 
 
-def unsuppress_remux_paths(*paths: Path) -> None:
-    keys: set[str] = set()
-    for path in paths:
-        keys.update(_remux_path_keys(path))
-    with _suppress_lock:
-        _suppressed_paths.difference_update(keys)
+def is_remux_watcher_paused(library_id: str) -> bool:
+    with _session_lock:
+        return _is_remux_watcher_paused_locked(library_id)
 
 
-def is_remux_path_suppressed(path: Path) -> bool:
-    keys = _remux_path_keys(path)
-    with _suppress_lock:
-        return bool(keys & _suppressed_paths)
+def _is_remux_watcher_paused_locked(library_id: str) -> bool:
+    return library_id in _batch_sessions or _active_job_count.get(library_id, 0) > 0
+
+
+def _enter_remux_job(library_id: str) -> None:
+    with _session_lock:
+        _active_job_count[library_id] = _active_job_count.get(library_id, 0) + 1
+
+
+def _exit_remux_job(library_id: str) -> None:
+    with _session_lock:
+        count = _active_job_count.get(library_id, 0) - 1
+        if count <= 0:
+            _active_job_count.pop(library_id, None)
+        else:
+            _active_job_count[library_id] = count
+
+
+def _schedule_post_batch_refresh(library_id: str) -> None:
+    try:
+        from loc_gallery.server import schedule_library_refresh
+
+        schedule_library_refresh(library_id)
+    except Exception:
+        pass
 
 
 @dataclass
@@ -140,12 +155,12 @@ def _notify_library_sse(library_id: str) -> None:
         pass
 
 
-def _delete_backup_async(library_id: str, backup: Path, source: Path) -> None:
+def _delete_backup_async(library_id: str, backup: Path) -> None:
     set_thread_library(library_id)
     try:
         delete_backup_file(library_id, backup, recycle=False)
-    finally:
-        unsuppress_remux_paths(source, backup)
+    except OSError:
+        pass
 
 
 def _finish_remuxed_file(
@@ -182,7 +197,7 @@ def _remux_and_finalize(
     _notify_library_sse(job.library_id)
     threading.Thread(
         target=_delete_backup_async,
-        args=(job.library_id, backup, source),
+        args=(job.library_id, backup),
         daemon=True,
         name=f"remux-cleanup-{job.video_id[:8]}",
     ).start()
@@ -194,10 +209,10 @@ def _worker(job: RemuxJob) -> None:
     backup = _backup_path(source)
     _legacy_temp_path(source, job.video_id).unlink(missing_ok=True)
     timestamps: FileTimestamps | None = None
+    _enter_remux_job(job.library_id)
 
     try:
         _release_playback_locks(job.video_id)
-        suppress_remux_paths(source, backup)
         _set_job(
             job,
             state="running",
@@ -221,7 +236,6 @@ def _worker(job: RemuxJob) -> None:
         assert timestamps is not None
         _remux_and_finalize(job, backup, source, timestamps)
     except Exception as exc:
-        unsuppress_remux_paths(source, backup)
         try:
             if backup.is_file() and not source.is_file():
                 os.rename(backup, source)
@@ -236,6 +250,8 @@ def _worker(job: RemuxJob) -> None:
             message="修复失败",
             finished_at=time.time(),
         )
+    finally:
+        _exit_remux_job(job.library_id)
 
 
 def get_status(library_id: str, video_id: str) -> dict:

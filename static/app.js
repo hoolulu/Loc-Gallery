@@ -3469,13 +3469,19 @@
     if (!confirm(`将依次修复 ${remuxable.length} 个视频为标准 MP4（流复制，不重新编码）。${skipHint}\n\n修复期间请勿播放同一文件。继续？`)) {
       return;
     }
-    for (let i = 0; i < remuxable.length; i++) {
-      const { id, title } = remuxable[i];
-      const label = `${i + 1}/${remuxable.length}`;
-      await runVideoRemux(id, { id, title, filename: "", path: "" }, { batchLabel: label });
+    try {
+      await api("/api/remux/batch/begin", { method: "POST" });
+      for (let i = 0; i < remuxable.length; i++) {
+        const { id, title } = remuxable[i];
+        const label = `${i + 1}/${remuxable.length}`;
+        await runVideoRemux(id, { id, title, filename: "", path: "" }, { batchLabel: label });
+      }
+    } finally {
+      await api("/api/remux/batch/end", { method: "POST" }).catch(() => {});
     }
     patchGridFormatBadges();
     scheduleFormatBadgePoll();
+    void loadVideos({ forceRebuild: true });
   }
 
   function prepTitle(transcode, prep) {

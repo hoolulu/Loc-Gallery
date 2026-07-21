@@ -39,6 +39,71 @@ def _should_skip_dir(path: Path) -> bool:
     return path.name in IGNORE_DIRS or path == WEB_ROOT
 
 
+def _video_item_from_path(
+    video_path: Path,
+    video_root: Path,
+    library_id: str,
+    *,
+    trusted_stable: bool = False,
+) -> VideoItem | None:
+    video_path = video_path.resolve()
+    video_root = video_root.resolve()
+    if trusted_stable:
+        if not video_path.is_file():
+            return None
+        if video_path.suffix.lower() not in VIDEO_EXTENSIONS:
+            return None
+        from loc_gallery.file_stability import is_incomplete_filename
+
+        if is_incomplete_filename(video_path.name):
+            return None
+    elif not _is_video(video_path):
+        return None
+    try:
+        rel = video_path.relative_to(video_root).as_posix()
+    except ValueError:
+        return None
+    parts = Path(rel).parts
+    if len(parts) == 1:
+        category = "根目录"
+        category_dir = video_root
+        subfolder = ""
+    else:
+        category = parts[0]
+        category_dir = video_root / parts[0]
+        rel_in_cat = video_path.relative_to(category_dir)
+        subfolder = "" if rel_in_cat.parent == Path(".") else rel_in_cat.parent.as_posix()
+    stat = video_path.stat()
+    return VideoItem(
+        id=_make_id(rel),
+        path=str(video_path),
+        category=category,
+        subfolder=subfolder,
+        title=title_mod.extract_title(video_path),
+        filename=video_path.name,
+        size=stat.st_size,
+        mtime=stat.st_mtime,
+        library_id=library_id,
+    )
+
+
+def upsert_video_from_path(library_id: str, video_path: Path) -> VideoItem | None:
+    """单个稳定文件入库（新下载完成时增量更新，避免全库扫描）。"""
+    from loc_gallery.library_store import get_library
+
+    lib = get_library(library_id)
+    if not lib:
+        return None
+    item = _video_item_from_path(video_path, lib.path_obj, library_id, trusted_stable=True)
+    if not item:
+        return None
+    with _lock:
+        cache = _caches.setdefault(library_id, {})
+        cache[item.id] = item
+        _versions[library_id] = _versions.get(library_id, 0) + 1
+    return item
+
+
 def scan_all(video_root: Path, library_id: str) -> list[VideoItem]:
     items: list[VideoItem] = []
     video_root = video_root.resolve()
