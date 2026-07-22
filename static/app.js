@@ -228,6 +228,49 @@
   const SLICE_EDGE_RESERVE_SEC = 90;
   let hlsSliceThrottle = null;
   let sliceCatchupTimer = null;
+  const playInfoCache = new Map();
+  const playInfoInflight = new Map();
+  const PLAY_INFO_CACHE_TTL_MS = 15 * 60 * 1000;
+
+  function stashPlayInfo(id, info) {
+    if (!id || !info) return;
+    playInfoCache.set(id, { info, at: Date.now() });
+    if (playInfoCache.size > 12) {
+      const oldest = [...playInfoCache.entries()].sort((a, b) => a[1].at - b[1].at)[0];
+      if (oldest) playInfoCache.delete(oldest[0]);
+    }
+  }
+
+  function takeCachedPlayInfo(id) {
+    const row = playInfoCache.get(id);
+    if (!row) return null;
+    if (Date.now() - row.at > PLAY_INFO_CACHE_TTL_MS) {
+      playInfoCache.delete(id);
+      return null;
+    }
+    playInfoCache.delete(id);
+    return row.info;
+  }
+
+  function prefetchPlayInfo(id) {
+    if (!id) return;
+    const row = playInfoCache.get(id);
+    if (row && Date.now() - row.at <= PLAY_INFO_CACHE_TTL_MS) return;
+    if (playInfoInflight.has(id)) return;
+    const p = api(`/api/play/info/${id}`)
+      .then((info) => { stashPlayInfo(id, info); })
+      .catch(() => {})
+      .finally(() => { playInfoInflight.delete(id); });
+    playInfoInflight.set(id, p);
+  }
+
+  function prefetchAdjacentPlayInfo(delta = 1) {
+    const list = getPlaylistItems();
+    const idx = state.playingId ? list.findIndex(v => v.id === state.playingId) : -1;
+    if (idx < 0) return;
+    const next = list[idx + delta];
+    if (next?.id) prefetchPlayInfo(next.id);
+  }
 
   /** 立刻断开浏览器视频拉流，停止 Range 请求与后台缓冲；hard 时替换节点（退出播放页用） */
   function detachVideoStream(video, { hard = false } = {}) {
@@ -556,7 +599,6 @@
     else showBar = !idle || thumbProgressManualExpand;
 
     $("#progress-bar-wrap")?.classList.toggle("progress-bar-collapsed", !showBar);
-    $("#app-header")?.classList.toggle("header-progress-collapsed", !showBar);
 
     const chip = $("#thumb-status-chip");
     const dot = chip?.querySelector(".thumb-status-dot");
@@ -1434,25 +1476,31 @@
     });
   }
 
+  function findPlayerPlaylistThumbWrap(id) {
+    if (!state.playerViewOpen) return null;
+    return $("#player-playlist")?.querySelector(`.player-pl-item[data-id="${id}"] .player-pl-thumb`) || null;
+  }
+
   function markThumbsRegenerating(ids, position) {
     const bust = `${Date.now()}_${position}`;
     ids.forEach(id => {
       state.thumbBust[id] = bust;
       const item = getItemById(id);
+      const stub = {
+        id,
+        title: item?.title || "",
+        thumbReady: false,
+        thumbStatus: "queued",
+      };
       if (item) {
         item.thumbReady = false;
         item.thumbStatus = "queued";
         item.thumbVersion = "";
       }
-      const wrap = document.getElementById(`thumb-${id}`);
-      if (wrap) {
-        applyThumbToWrap(wrap, {
-          id,
-          title: item?.title || "",
-          thumbReady: false,
-          thumbStatus: "queued",
-        });
-      }
+      const gridWrap = document.getElementById(`thumb-${id}`);
+      if (gridWrap) applyThumbToWrap(gridWrap, stub);
+      const plWrap = findPlayerPlaylistThumbWrap(id);
+      if (plWrap) applyThumbToWrap(plWrap, stub);
     });
   }
 
@@ -1936,17 +1984,22 @@
   }
 
   async function refreshThumbById(id) {
-    const wrap = document.getElementById(`thumb-${id}`);
-    if (!wrap) return false;
+    const gridWrap = document.getElementById(`thumb-${id}`);
+    const plWrap = findPlayerPlaylistThumbWrap(id);
+    if (!gridWrap && !plWrap) return false;
     try {
       const v = await api(`/api/videos/${encodeURIComponent(id)}`);
-      const idx = state.pageItems.findIndex(x => x.id === id);
-      if (idx >= 0) state.pageItems[idx] = { ...state.pageItems[idx], ...v };
-      applyThumbToWrap(wrap, v);
-      const card = wrap.closest(".card");
-      if (card) card.classList.toggle("card-failed", v.thumbStatus === "failed");
+      const pageIdx = state.pageItems.findIndex(x => x.id === id);
+      if (pageIdx >= 0) state.pageItems[pageIdx] = { ...state.pageItems[pageIdx], ...v };
+      const plIdx = state.playlistItems.findIndex(x => x.id === id);
+      if (plIdx >= 0) state.playlistItems[plIdx] = { ...state.playlistItems[plIdx], ...v };
+      if (gridWrap) {
+        applyThumbToWrap(gridWrap, v);
+        const card = gridWrap.closest(".card");
+        if (card) card.classList.toggle("card-failed", v.thumbStatus === "failed");
+      }
+      if (plWrap) applyThumbToWrap(plWrap, v);
       if (v.thumbReady) delete state.thumbBust[id];
-      if (state.playerViewOpen) syncPlayerPlaylistThumbs([v]);
       return !v.thumbReady && v.thumbStatus !== "failed";
     } catch (_) {
       return true;
@@ -2365,6 +2418,7 @@
     clearHlsSliceThrottle();
     destroyHlsPlayer();
     state.activeSliceVideoId = null;
+    detachVideoStream(getPlaybackVideo(), { hard: false });
     try {
       await api("/api/play/stop", { method: "POST" });
     } catch (_) { /* ignore */ }
@@ -2702,7 +2756,12 @@
   function bindPlaybackProgressSaver(video, id) {
     unbindPlaybackProgressSaver();
     if (!video || !id) return;
-    const onTimeupdate = () => scheduleSavePlaybackPosition(id, video);
+    const onTimeupdate = () => {
+      scheduleSavePlaybackPosition(id, video);
+      const dur = Number.isFinite(video.duration) ? video.duration : 0;
+      const left = dur > 0 ? dur - video.currentTime : 0;
+      if (left > 0 && left < 180) prefetchAdjacentPlayInfo(1);
+    };
     const onPause = () => {
       if (Number.isFinite(video.currentTime) && video.currentTime >= 1) {
         const dur = Number.isFinite(video.duration) ? video.duration : null;
@@ -2712,13 +2771,17 @@
     const onEnded = () => {
       const dur = Number.isFinite(video.duration) ? video.duration : null;
       void savePlaybackPosition(id, dur || video.currentTime, dur);
-      if (
-        playlistAutoplayEnabled()
-        && state.playerViewOpen
-        && normalizePlayerMode(state.playerMode) === "html5"
-      ) {
-        playAdjacentVideo(1);
-      }
+      void (async () => {
+        detachVideoStream(getPlaybackVideo(), { hard: false });
+        await stopActiveSlice();
+        if (
+          playlistAutoplayEnabled()
+          && state.playerViewOpen
+          && normalizePlayerMode(state.playerMode) === "html5"
+        ) {
+          await playAdjacentVideo(1);
+        }
+      })();
     };
     video.addEventListener("timeupdate", onTimeupdate);
     video.addEventListener("pause", onPause);
@@ -2961,6 +3024,7 @@
     recordPlayHistory(item.id);
     if (video) bindPlaybackProgressSaver(video, item.id);
     prefetchPlaylistIfNeeded();
+    prefetchAdjacentPlayInfo(1);
   }
 
   function videoHasPicture(video) {
@@ -3222,7 +3286,8 @@
     await startHlsStream(id, base, session, transcode);
   }
 
-  async function playVideoHtml5(id, item) {
+  async function playVideoHtml5(id, item, opts = {}) {
+    const { batchLabel = "", prefetchedInfo = null } = opts;
     const prevId = state.playingId;
     const prevVideo = getPlaybackVideo();
     const session = ++state.playSession;
@@ -3238,6 +3303,7 @@
     }
     unbindPlaybackProgressSaver();
 
+    clearHlsSliceThrottle();
     detachVideoStream(getPlaybackVideo(), { hard: true });
     await stopActiveSlice();
 
@@ -3262,11 +3328,17 @@
     parkVideoEngine();
     hidePlayerPreparing();
     setPlayOverlayContext(base, null);
-    showPlayOverlay("检测兼容性", "正在分析视频格式…", { indeterminate: true, item: base });
+    const cachedInfo = prefetchedInfo || takeCachedPlayInfo(id);
+    showPlayOverlay(
+      cachedInfo ? "准备播放" : "检测兼容性",
+      cachedInfo ? (cachedInfo.reason || "") : "正在分析视频格式…",
+      { indeterminate: !cachedInfo, progress: cachedInfo ? 15 : null, item: base },
+    );
 
     try {
       if (await abortIfStale(session)) return;
-      const info = await api(`/api/play/info/${id}`);
+      const info = cachedInfo || await api(`/api/play/info/${id}`);
+      if (!cachedInfo) stashPlayInfo(id, info);
       if (await abortIfStale(session)) return;
       if (info.title) base.title = info.title;
       if (info.path) base.path = info.path;
@@ -3540,7 +3612,10 @@
         next = list2[idx + delta];
       }
     }
-    if (next) await playVideo(next.id);
+    if (next) {
+      const prefetched = takeCachedPlayInfo(next.id);
+      await playVideo(next.id, { prefetchedInfo: prefetched });
+    }
   }
 
   async function playVideoExternal(id) {
@@ -3552,12 +3627,12 @@
     }
   }
 
-  async function playVideo(id) {
+  async function playVideo(id, opts = {}) {
     const item = getItemById(id);
     const mode = normalizePlayerMode(state.playerMode);
 
     if (mode === "html5") {
-      await playVideoHtml5(id, item || { id, title: id, filename: "", path: "" });
+      await playVideoHtml5(id, item || { id, title: id, filename: "", path: "" }, opts);
       return;
     }
 
@@ -4300,6 +4375,14 @@
   });
 
   document.addEventListener("click", hideCtxMenu);
+  document.addEventListener("click", (e) => {
+    if (!thumbProgressManualExpand) return;
+    const wrap = $("#progress-bar-wrap");
+    const chip = $("#thumb-status-chip");
+    if (wrap?.contains(e.target) || chip?.contains(e.target)) return;
+    thumbProgressManualExpand = false;
+    updateProgressBarVisibility(lastThumbProgressGlobal);
+  });
 
   window.addEventListener("pagehide", () => {
     const video = getPlaybackVideo();

@@ -126,11 +126,22 @@ body {
 
 /* 顶栏 */
 .app-header {
+  position: relative;
   background: var(--yt-bg-elevated);
   border-bottom: 1px solid var(--yt-border);
 }
-.app-header.header-progress-collapsed {
-  border-bottom: 2px solid #e50914;
+.progress-bar-wrap {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 51;
+  padding: 0.65rem 1.25rem 0.75rem;
+  background: var(--yt-bg-elevated);
+  border: 1px solid var(--yt-border);
+  border-top: none;
+  border-radius: 0 0 10px 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.42);
 }
 .progress-bar-wrap.progress-bar-collapsed {
   display: none;
@@ -718,10 +729,6 @@ body {
 /* player-view replaces sidebar player panel */
 
 /* legacy header removed — use Tailwind in index.html */
-
-.progress-bar-wrap {
-  padding: 0 20px 10px;
-}
 
 .progress-info {
   display: flex;

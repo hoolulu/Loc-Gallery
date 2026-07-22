@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Loc Gallery</title>
   <link rel="stylesheet" href="/static/tailwind.css?v=2">
-  <link rel="stylesheet" href="/static/style.css?v=76">
+  <link rel="stylesheet" href="/static/style.css?v=77">
 </head>
 <body class="flex h-full flex-col overflow-hidden bg-surface text-[#f1f1f1] antialiased">
 
@@ -34,7 +34,7 @@
         <button type="button" id="btn-rescan" class="header-tool-btn header-tool-btn-emphasis" title="重新扫描">刷新</button>
       </div>
     </div>
-    <div id="progress-bar-wrap" class="progress-bar-wrap px-5 pb-3">
+    <div id="progress-bar-wrap" class="progress-bar-wrap">
       <div class="progress-info">
         <div class="progress-info-left">
           <span id="progress-text">缩略图: 加载中...</span>
@@ -389,7 +389,7 @@
 
             <label class="opt-cell">
               <span class="settings-field-label">缩略图进度条</span>
-              <select id="set-thumb-progress-bar" class="dlg-input compact-input input-fit input-fit--md" title="全库就绪时自动收起，顶栏保留红色装饰线">
+              <select id="set-thumb-progress-bar" class="dlg-input compact-input input-fit input-fit--md" title="全库就绪时自动收起为顶栏小圆点，活动时以浮层显示详情">
                 <option value="auto">仅活动时显示</option>
                 <option value="always">始终显示</option>
                 <option value="never">始终隐藏</option>
@@ -449,6 +449,6 @@
   </dialog>
 
   <script src="/static/vendor/hls.min.js"></script>
-  <script src="/static/app.js?v=132"></script>
+  <script src="/static/app.js?v=135"></script>
 </body>
 </html>
