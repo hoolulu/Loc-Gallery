@@ -26,8 +26,9 @@ STATUS_GENERATING = "generating"
 STATUS_READY = "ready"
 STATUS_FAILED = "failed"
 
-MAX_QUEUE_SIZE = 32
-GENERATING_TIMEOUT = 300
+MAX_QUEUE_SIZE = 48
+HIGH_QUEUE_BURST = 18
+GENERATING_TIMEOUT = 180
 FFPROBE_MAX_SIZE = 500 * 1024 * 1024
 
 
@@ -62,6 +63,10 @@ _flush_timer: threading.Timer | None = None
 
 _progress_callbacks: list = []
 _cached_status: dict = {}
+_status_cache_at = 0.0
+_STATUS_CACHE_TTL = 8.0
+_last_reconcile_at = 0.0
+_RECONCILE_INTERVAL = 20.0
 _last_notify = 0.0
 _idle_scan_thread: threading.Thread | None = None
 _ffmpeg_bin: str | None = None
@@ -230,13 +235,30 @@ def _recover_stale_states() -> None:
         _flush_index_sync(lib.id)
 
 
+def _thumb_file_ok(video_id: str, library_id: str | None = None) -> bool:
+    path = _thumb_file(video_id, library_id)
+    try:
+        return path.is_file() and path.stat().st_size > 0
+    except OSError:
+        return False
+
+
+def _index_thumb_ready(video_id: str, library_id: str | None = None) -> bool:
+    entry = _idx(library_id).get(video_id)
+    return bool(entry and entry.get("status") == STATUS_READY)
+
+
 def _has_usable_thumb(video_id: str, library_id: str | None = None) -> bool:
     """磁盘上已有可用缩略图（不受队列状态影响）。"""
-    if not _thumb_file(video_id, library_id).exists():
+    if not _thumb_file_ok(video_id, library_id):
         return False
     with _lock:
-        entry = _idx(library_id).get(video_id)
-        return bool(entry and entry.get("status") == STATUS_READY)
+        return _index_thumb_ready(video_id, library_id)
+
+
+def _has_usable_thumb_locked(video_id: str, library_id: str | None = None) -> bool:
+    """调用方已持有 _lock。"""
+    return _thumb_file_ok(video_id, library_id) and _index_thumb_ready(video_id, library_id)
 
 
 def _prune_ready_from_queue() -> int:
@@ -246,7 +268,7 @@ def _prune_ready_from_queue() -> int:
         before = len(_queue)
         _queue[:] = [
             q for q in _queue
-            if not _has_usable_thumb(q.video_id, q.library_id or _lid())
+            if not _has_usable_thumb_locked(q.video_id, q.library_id or _lid())
         ]
         removed = before - len(_queue)
     if removed:
@@ -298,7 +320,7 @@ def reconcile_deferred_thumbs() -> int:
                 entry["status"] = STATUS_MISSING
                 entry["error"] = None
                 changed += 1
-            elif st == STATUS_READY and item and not _has_usable_thumb(vid):
+            elif st == STATUS_READY and item and not _thumb_file_ok(vid):
                 entry["status"] = STATUS_MISSING
                 entry["thumb_file"] = None
                 changed += 1
@@ -321,6 +343,17 @@ def reconcile_deferred_thumbs() -> int:
         _rebuild_status_cache()
         _notify_progress()
     return changed
+
+
+def _maybe_kick_idle_scan() -> None:
+    """空闲扫描开启且队列停滞时，尝试重新调度未生成的缩略图。"""
+    if _paused or not get_setting("thumb_idle_scan"):
+        return
+    with _lock:
+        if len(_queue) > 0 or len(_generating) > 0:
+            return
+    _prune_ready_from_queue()
+    schedule_all_missing(Priority.LOW)
 
 
 def get_failed_items() -> list[dict]:
@@ -359,7 +392,7 @@ def _is_busy(video_id: str, library_id: str | None = None) -> bool:
         )
 
 
-def init_manager() -> None:
+def init_manager(*, sync_videos: bool = True) -> None:
     global _executor, _worker_thread, _stop_worker
     _stop_worker = False
     try:
@@ -378,6 +411,27 @@ def init_manager() -> None:
     _executor = ThreadPoolExecutor(max_workers=workers)
     _worker_thread = threading.Thread(target=_worker_loop, daemon=True, name="thumb-worker")
     _worker_thread.start()
+    if sync_videos:
+        for lib in list_libraries():
+            set_thread_library(lib.id)
+            sync_index_with_videos()
+        for lib in list_libraries():
+            _flush_index_sync(lib.id)
+        _prune_ready_from_queue()
+        reconcile_deferred_thumbs()
+        if get_setting("thumb_idle_scan"):
+            start_idle_scan_background()
+    else:
+        from loc_gallery.library_store import get_active_library_id
+
+        set_thread_library(get_active_library_id())
+        _rebuild_status_cache()
+
+
+def complete_startup_sync() -> None:
+    """启动后后台同步全库缩略图索引（避免阻塞首屏）。"""
+    from loc_gallery.library_store import get_active_library_id
+
     for lib in list_libraries():
         set_thread_library(lib.id)
         sync_index_with_videos()
@@ -385,8 +439,11 @@ def init_manager() -> None:
         _flush_index_sync(lib.id)
     _prune_ready_from_queue()
     reconcile_deferred_thumbs()
+    set_thread_library(get_active_library_id())
+    _rebuild_status_cache()
     if get_setting("thumb_idle_scan"):
         start_idle_scan_background()
+    _notify_progress()
 
 
 def shutdown_manager() -> None:
@@ -399,12 +456,13 @@ def shutdown_manager() -> None:
         _executor.shutdown(wait=False, cancel_futures=True)
 
 
-def _file_matches(item: VideoItem) -> bool:
+def _file_matches(item: VideoItem, entry: dict | None = None) -> bool:
     thumb = _thumb_file(item.id)
     if not thumb.exists():
         return False
-    with _lock:
-        entry = _idx().get(item.id)
+    if entry is None:
+        with _lock:
+            entry = _idx().get(item.id)
     if not entry:
         return False
     return entry.get("mtime") == item.mtime and entry.get("size") == item.size
@@ -417,7 +475,7 @@ def sync_index_with_videos() -> list[str]:
     with _lock:
         for vid, item in videos.items():
             entry = _idx().get(vid)
-            if _file_matches(item):
+            if _file_matches(item, entry):
                 _idx()[vid] = {
                     "video_id": vid,
                     "path": item.path,
@@ -474,7 +532,7 @@ def sync_index_with_videos() -> list[str]:
 
 
 def _rebuild_status_cache() -> None:
-    global _cached_status
+    global _cached_status, _status_cache_at
     items = get_all(_lid())
     counts = {
         "total": len(items), "ready": 0, "missing": 0,
@@ -488,27 +546,31 @@ def _rebuild_status_cache() -> None:
         counts["generating"] = len(_generating)
         queued_ids = {q.video_id for q in _queue}
         generating_ids = set(_generating)
+        idx_snapshot = dict(_idx())
 
-        for item in items:
-            vid = item.id
-            if _has_usable_thumb(vid):
-                counts["ready"] += 1
-                continue
-            if vid in generating_ids:
-                counts["generating"] += 1
-                continue
-            if vid in queued_ids:
-                counts["queued"] += 1
-                continue
-            entry = _idx().get(vid, {})
-            st = entry.get("status", STATUS_MISSING)
-            if st == STATUS_FAILED and _video_is_processable(item):
-                counts["failed"] += 1
-            else:
-                counts["missing"] += 1
+    for item in items:
+        vid = item.id
+        entry = idx_snapshot.get(vid, {})
+        st = entry.get("status", STATUS_MISSING)
+        if st == STATUS_READY:
+            counts["ready"] += 1
+            continue
+        if not _video_is_processable(item):
+            continue
+        if vid in generating_ids:
+            counts["generating"] += 1
+            continue
+        if vid in queued_ids:
+            counts["queued"] += 1
+            continue
+        if st == STATUS_FAILED:
+            counts["failed"] += 1
+        else:
+            counts["missing"] += 1
 
     counts["percent"] = round(counts["ready"] / counts["total"] * 100, 1) if counts["total"] else 100
     _cached_status = counts
+    _status_cache_at = time.time()
 
 
 def get_worker_health() -> dict:
@@ -536,8 +598,11 @@ def get_status(category: str | None = None, page_ids: list[str] | None = None) -
             queued_ids = {q.video_id for q in _queue}
             generating_ids = set(_generating)
         for vid in page_ids:
+            item = get_by_id(_lid(), vid)
             if _has_usable_thumb(vid):
                 counts["ready"] += 1
+            elif item and not _video_is_processable(item):
+                continue
             elif vid in generating_ids:
                 counts["generating"] += 1
             elif vid in queued_ids:
@@ -545,7 +610,6 @@ def get_status(category: str | None = None, page_ids: list[str] | None = None) -
             else:
                 with _lock:
                     st = _idx().get(vid, {}).get("status", STATUS_MISSING)
-                item = get_by_id(_lid(), vid)
                 if st == STATUS_FAILED and item and _video_is_processable(item):
                     counts["failed"] += 1
                 else:
@@ -554,7 +618,14 @@ def get_status(category: str | None = None, page_ids: list[str] | None = None) -
         return counts
 
     if not category:
-        _rebuild_status_cache()
+        global _last_reconcile_at
+        now = time.time()
+        if now - _last_reconcile_at >= _RECONCILE_INTERVAL:
+            reconcile_deferred_thumbs()
+            _last_reconcile_at = now
+        _maybe_kick_idle_scan()
+        if now - _status_cache_at >= _STATUS_CACHE_TTL:
+            _rebuild_status_cache()
         out = dict(_cached_status)
         out["idle_scan"] = bool(get_setting("thumb_idle_scan"))
         out["paused"] = _paused
@@ -578,6 +649,8 @@ def get_status(category: str | None = None, page_ids: list[str] | None = None) -
         vid = item.id
         if _has_usable_thumb(vid):
             counts["ready"] += 1
+        elif not _video_is_processable(item):
+            continue
         elif vid in generating_ids:
             counts["generating"] += 1
         elif vid in queued_ids:
@@ -594,7 +667,7 @@ def get_status(category: str | None = None, page_ids: list[str] | None = None) -
 
 
 def get_video_thumb_status_fast(video_id: str) -> str:
-    if _has_usable_thumb(video_id):
+    if _thumb_file_ok(video_id):
         return STATUS_READY
     item = get_by_id(_lid(), video_id)
     if item and not _video_is_processable(item):
@@ -635,7 +708,7 @@ def get_video_thumb_error(video_id: str) -> str | None:
 
 
 def is_thumb_ready(video_id: str) -> bool:
-    return _has_usable_thumb(video_id)
+    return _thumb_file_ok(video_id)
 
 
 def get_thumb_path(item: VideoItem) -> Path | None:
@@ -870,11 +943,13 @@ def _estimate_duration_from_size(file_size: int) -> float:
     return max(180.0, file_size * 8 / 4_000_000)
 
 
-def _get_duration(video_path: str, file_size: int = 0) -> float | None:
+def _get_duration(video_path: str, file_size: int = 0, *, fast_only: bool = False) -> float | None:
+    """探测视频时长。大文件可用 fast_only 跳过慢速全量探测。"""
     attempts = [
-        (["-probesize", "32M", "-analyzeduration", "10M"], 20),
-        ([], 60 if file_size > FFPROBE_MAX_SIZE else 15),
+        (["-probesize", "8M", "-analyzeduration", "5M"], 12),
     ]
+    if not fast_only:
+        attempts.append(([], 60 if file_size > FFPROBE_MAX_SIZE else 15))
     for extra, timeout in attempts:
         try:
             result = subprocess.run(
@@ -892,6 +967,52 @@ def _get_duration(video_path: str, file_size: int = 0) -> float | None:
         except Exception:
             pass
     return None
+
+
+def _cached_duration(item: VideoItem) -> float | None:
+    with _lock:
+        entry = _idx().get(item.id)
+    if not entry:
+        return None
+    dur = entry.get("duration_sec")
+    if dur is None:
+        return None
+    if entry.get("mtime") == item.mtime and entry.get("size") == item.size:
+        try:
+            val = float(dur)
+            return val if val > 3 else None
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _remember_duration(item: VideoItem, duration: float) -> None:
+    if duration <= 3:
+        return
+    with _lock:
+        entry = _idx().setdefault(item.id, {"video_id": item.id})
+        entry["duration_sec"] = round(duration, 2)
+        entry["mtime"] = item.mtime
+        entry["size"] = item.size
+        _mark_dirty()
+
+
+def _resolve_duration(item: VideoItem, use_mpegts: bool) -> float:
+    cached = _cached_duration(item)
+    if cached:
+        return cached
+    if use_mpegts:
+        duration = _get_duration_mpegts(item.path)
+    elif item.size > FFPROBE_MAX_SIZE:
+        duration = _get_duration(item.path, item.size, fast_only=True)
+        if not duration:
+            duration = _estimate_duration_from_size(item.size)
+    else:
+        duration = _get_duration(item.path, item.size)
+    if not duration or duration <= 3:
+        duration = _estimate_duration_from_size(item.size)
+    _remember_duration(item, duration)
+    return duration
 
 
 def _recover_stuck_tasks() -> None:
@@ -920,22 +1041,54 @@ def _recover_stuck_tasks() -> None:
         _notify_progress()
 
 
+def _thumb_seek_points(duration: float, position: float) -> list[float]:
+    """先按配置/随机比例快速截图，失败再试固定秒数与比例兜底。"""
+    position = max(0.05, min(0.95, float(position)))
+    points: list[float] = []
+
+    def _add(seek: float) -> None:
+        seek = max(2.0, min(duration - 1.0, seek))
+        if all(abs(seek - p) > 0.5 for p in points):
+            points.append(seek)
+
+    _add(duration * position)
+    for seek in (240.0, 120.0, 60.0, 30.0, 15.0, 5.0):
+        if seek >= duration - 1:
+            continue
+        _add(seek)
+    for ratio in (0.5, 0.35, 0.2, 0.1):
+        _add(duration * ratio)
+    return points
+
+
+def _capture_timeout(seek: float, size: int) -> int:
+    if seek <= 30:
+        return 18
+    if seek <= 180:
+        return 35
+    if seek <= 600:
+        return 50
+    return 65 if size <= FFPROBE_MAX_SIZE else 80
+
+
 def _try_capture_thumb(item: VideoItem, seek: float, output: Path, use_mpegts: bool) -> bool:
     global _last_capture_error, _last_capture_seek
     wip = output.parent / f"{output.stem}_wip.jpg"
     wip.unlink(missing_ok=True)
-    cmd = [ffmpeg_path(), "-hide_banner", "-loglevel", "error", "-y"]
+    cmd = [ffmpeg_path(), "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+           "-probesize", "8M", "-analyzeduration", "5M"]
     if use_mpegts:
         cmd += ["-f", "mpegts", "-ss", f"{seek:.2f}", "-i", item.path]
     else:
         cmd += ["-ss", f"{seek:.2f}", "-i", item.path]
     cmd += [
+        "-an", "-sn", "-dn",
         "-frames:v", "1",
         "-q:v", "3",
-        "-vf", "setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709,scale=320:-1",
+        "-vf", "setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709,scale=640:-1",
         str(wip),
     ]
-    timeout = 90 if seek <= 180 else (150 if item.size > FFPROBE_MAX_SIZE else 90)
+    timeout = _capture_timeout(seek, item.size)
     try:
         result = subprocess.run(
             cmd,
@@ -982,49 +1135,16 @@ def _generate_thumb_file(
 
     modes = [True] if _has_png_header(item.path) else [False]
 
+    def _capture_by_position(use_mpegts: bool) -> bool:
+        duration = _resolve_duration(item, use_mpegts)
+        for seek in _thumb_seek_points(duration, position):
+            if _try_capture_thumb(item, seek, output, use_mpegts):
+                return True
+        return False
+
     for use_mpegts in modes:
-        duration = None
-        if explicit_position:
-            duration = (
-                _get_duration_mpegts(item.path)
-                if use_mpegts
-                else _get_duration(item.path, item.size)
-            )
-            if not duration or duration <= 3:
-                duration = _estimate_duration_from_size(item.size)
-            target = duration * position
-            for seek in (
-                target,
-                duration * max(0.05, position - 0.1),
-                duration * min(0.95, position + 0.1),
-                min(180.0, duration * 0.15),
-                60.0,
-            ):
-                if seek <= 1:
-                    continue
-                if _try_capture_thumb(item, seek, output, use_mpegts):
-                    return True
-            continue
-
-        # 普通队列：先快速定点，再按比例
-        for seek in (60.0, 30.0, 10.0):
-            if _try_capture_thumb(item, seek, output, use_mpegts):
-                return True
-
-        duration = (
-            _get_duration_mpegts(item.path)
-            if use_mpegts
-            else _get_duration(item.path, item.size)
-        )
-        if not duration or duration <= 3:
-            duration = _estimate_duration_from_size(item.size)
-
-        target = duration * position
-        for seek in (target, duration * max(0.1, position - 0.1), min(180.0, duration * 0.15)):
-            if seek <= 3:
-                continue
-            if _try_capture_thumb(item, seek, output, use_mpegts):
-                return True
+        if _capture_by_position(use_mpegts):
+            return True
     return False
 
 
@@ -1050,7 +1170,13 @@ def _process_one(library_id: str, video_id: str) -> None:
 
     with _lock:
         has_override = video_id in _position_override
-    if not has_override and _has_usable_thumb(video_id, library_id):
+    if not has_override and _thumb_file(video_id, library_id).exists():
+        _set_entry(
+            video_id,
+            thumb_file=_thumb_file(video_id, library_id).name,
+            status=STATUS_READY,
+            error=None,
+        )
         return
 
     with _lock:
@@ -1087,14 +1213,40 @@ def _process_one(library_id: str, video_id: str) -> None:
         _notify_progress()
 
 
+def _kick_orphan_queued() -> None:
+    """索引为 queued 但不在队列/生成中的任务，重新入队（每轮限量，避免洪峰）。"""
+    with _lock:
+        queued_in_mem = {q.video_id for q in _queue}
+        generating_ids = {k.split(":", 1)[-1] for k in _generating}
+    kicked = 0
+    for vid, entry in list(_idx().items()):
+        if kicked >= 12:
+            break
+        if entry.get("status") != STATUS_QUEUED:
+            continue
+        if vid in queued_in_mem or vid in generating_ids:
+            continue
+        if _has_usable_thumb(vid):
+            continue
+        item = get_by_id(_lid(), vid)
+        if not item or not _video_is_processable(item):
+            continue
+        _enqueue(vid, Priority.HIGH)
+        kicked += 1
+
+
 def _worker_loop() -> None:
     last_stuck_check = 0.0
+    last_orphan_check = 0.0
     while not _stop_worker:
         try:
             now = time.time()
-            if now - last_stuck_check > 15:
+            if now - last_stuck_check > 10:
                 _recover_stuck_tasks()
                 last_stuck_check = now
+            if now - last_orphan_check > 8:
+                _kick_orphan_queued()
+                last_orphan_check = now
 
             if _paused:
                 time.sleep(0.5)

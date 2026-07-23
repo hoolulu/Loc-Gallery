@@ -126,6 +126,10 @@ def playback_plans_file(library_id: str) -> Path:
     return library_data_dir(library_id) / "cache" / "playback_plans.json"
 
 
+def format_index_file(library_id: str) -> Path:
+    return library_data_dir(library_id) / "cache" / "format_index.json"
+
+
 def _migrate_legacy_data() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     (DATA_DIR / "logs").mkdir(parents=True, exist_ok=True)

@@ -1,13 +1,21 @@
 <!DOCTYPE html>
-<html lang="zh-CN" class="h-full">
+<html lang="zh-CN" class="h-full" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Loc Gallery</title>
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem("loc-gallery-theme");
+        if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+      } catch (_) {}
+    })();
+  </script>
   <link rel="stylesheet" href="/static/tailwind.css?v=2">
-  <link rel="stylesheet" href="/static/style.css?v=78">
+  <link rel="stylesheet" href="/static/style.css?v=91">
 </head>
-<body class="flex h-full flex-col overflow-hidden bg-surface text-[#f1f1f1] antialiased">
+<body class="flex h-full flex-col overflow-hidden bg-surface text-primary antialiased">
 
   <header class="app-header z-50 shrink-0" id="app-header">
     <div class="header-main">
@@ -26,6 +34,10 @@
       <div class="header-right">
         <input type="search" id="search" placeholder="搜索" title="搜索标题 / 文件名 / 分类" autocomplete="off" class="header-search">
         <button type="button" id="btn-manage" class="header-tool-btn" title="批量选择与管理">批量</button>
+        <button type="button" id="btn-theme-toggle" class="header-tool-btn theme-toggle-btn" title="切换到白天模式" aria-label="切换主题">
+          <span class="theme-toggle-icon theme-icon-light" aria-hidden="true">☀</span>
+          <span class="theme-toggle-icon theme-icon-dark" aria-hidden="true">☾</span>
+        </button>
         <button type="button" id="btn-settings" class="header-tool-btn" title="设置">设置</button>
         <button type="button" id="thumb-status-chip" class="thumb-status-chip hidden" title="缩略图状态，点击展开详情" aria-label="缩略图，点击查看详情">
           <span class="thumb-status-dot" aria-hidden="true"></span>
@@ -34,7 +46,7 @@
         <button type="button" id="btn-rescan" class="header-tool-btn header-tool-btn-emphasis" title="重新扫描">刷新</button>
       </div>
     </div>
-    <div id="progress-bar-wrap" class="progress-bar-wrap">
+    <div id="progress-bar-wrap" class="progress-bar-wrap progress-bar-collapsed">
       <div class="progress-info">
         <div class="progress-info-left">
           <span id="progress-text">缩略图: 加载中...</span>
@@ -77,10 +89,10 @@
       <main class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <div id="gallery-toolbar" class="toolbar flex shrink-0 flex-wrap items-center justify-between gap-3 px-5 pt-4">
           <div class="toolbar-left flex flex-wrap items-center gap-3">
-            <span id="breadcrumb" class="breadcrumb hidden text-sm text-[#aaaaaa]"></span>
+            <span id="breadcrumb" class="breadcrumb hidden text-sm text-secondary"></span>
             <span id="status" class="status text-sm"></span>
             <div class="batch-tools flex items-center gap-2 border-l border-surface-border pl-3">
-              <label class="batch-select-label flex cursor-pointer items-center gap-2 text-sm text-[#aaaaaa]">
+              <label class="batch-select-label flex cursor-pointer items-center gap-2 text-sm text-secondary">
                 <input type="checkbox" id="select-page-all" class="h-4 w-4 accent-red-600">
                 <span>全选本页</span>
               </label>
@@ -95,11 +107,24 @@
               <option value="size_asc">体积最小</option>
               <option value="category_asc">分类 A-Z</option>
             </select>
+            <select id="format-filter" class="yt-select text-xs" title="按播放格式筛选">
+              <option value="">全部格式</option>
+              <option value="remuxable">可修复</option>
+              <option value="transcode">需转码</option>
+              <option value="hls">HLS 边切</option>
+              <option value="interleaved">多段交错</option>
+              <option value="disguised">伪装格式</option>
+              <option value="moov_end">索引在末尾</option>
+              <option value="large">大文件</option>
+              <option value="fragmented">碎片化</option>
+              <option value="unsupported">无法播放</option>
+              <option value="non_standard">任意非标准</option>
+            </select>
           </div>
           <div class="toolbar-right flex items-center gap-3">
             <div class="page-size-controls flex flex-wrap items-center gap-2">
               <button type="button" id="btn-page-size-auto" class="page-size ui-btn rounded-lg px-2.5 py-1 text-xs active" data-size="auto" title="按当前窗口大小计算每页条数">自适应</button>
-              <label class="page-size-custom-label flex items-center gap-1 text-xs text-[#aaaaaa]">
+              <label class="page-size-custom-label flex items-center gap-1 text-xs text-secondary">
                 每页
                 <input type="number" id="page-size-custom" class="page-size-input yt-select" min="1" max="999" step="1" placeholder="—" title="自定义每页条数，回车生效">
                 条
@@ -108,7 +133,7 @@
             </div>
             <div class="pagination flex items-center gap-2 text-sm">
               <button id="btn-prev" class="ui-btn rounded-lg border border-surface-border px-2 py-1" disabled>◀</button>
-              <span id="page-info" class="text-[#aaaaaa]">第 1 页</span>
+              <span id="page-info" class="text-secondary">第 1 页</span>
               <button id="btn-next" class="ui-btn rounded-lg border border-surface-border px-2 py-1" disabled>▶</button>
             </div>
           </div>
@@ -152,7 +177,7 @@
             <div id="player-stage" class="player-stage flex min-h-0 flex-1 p-2 sm:p-4"></div>
             <div class="player-playlist-wrap flex w-full shrink-0 flex-col lg:w-72 lg:border-l lg:border-t-0">
               <div class="player-playlist-head flex shrink-0 items-center justify-between gap-2 px-2 py-1.5">
-                <span class="text-xs font-medium text-zinc-400">播放列表</span>
+                <span class="text-xs font-medium text-secondary">播放列表</span>
                 <select id="player-playlist-sort" class="player-playlist-sort" title="播放列表排序（连播时按此顺序下一集）">
                   <option value="page">列表顺序</option>
                   <option value="filename_asc">文件名 A→Z（自然）</option>
@@ -225,7 +250,7 @@
     <form method="dialog" class="p-6">
       <h2 class="text-lg font-semibold">重命名文件</h2>
       <p class="hint mt-2">将修改磁盘上的原文件名（扩展名保持不变），标题会随之更新。</p>
-      <label class="mt-4 block text-sm text-zinc-400">新文件名（不含扩展名）
+      <label class="mt-4 block dialog-label">新文件名（不含扩展名）
         <input type="text" id="rename-input" required class="dlg-input mt-1.5 w-full">
       </label>
       <p id="rename-ext-hint" class="hint"></p>
@@ -240,7 +265,7 @@
     <form method="dialog" class="p-6">
       <h2 class="text-lg font-semibold">移动到分类</h2>
       <p class="hint mt-2">将文件移动到视频库下的目标分类文件夹。</p>
-      <label class="mt-4 block text-sm text-zinc-400">目标分类
+      <label class="mt-4 block dialog-label">目标分类
         <select id="move-category" class="dlg-input mt-1.5 w-full"></select>
       </label>
       <div class="dialog-btns mt-6 flex justify-end gap-2">
@@ -289,6 +314,19 @@
                 <button type="button" id="library-add-submit" class="ui-btn ui-btn-primary sm">添加</button>
               </div>
             </div>
+          </div>
+        </section>
+
+        <section class="settings-block settings-block--compact">
+          <h3 class="settings-block-title">外观</h3>
+          <div class="options-grid options-grid--dense">
+            <label class="opt-cell">
+              <span class="settings-field-label">界面主题</span>
+              <select id="set-ui-theme" class="dlg-input compact-input input-fit input-fit--md" title="白天模式模仿 YouTube 浅色界面">
+                <option value="dark">夜间（默认）</option>
+                <option value="light">白天（YouTube 风格）</option>
+              </select>
+            </label>
           </div>
         </section>
 
@@ -422,10 +460,10 @@
 
   <dialog id="nonstandard-dialog" class="app-dialog app-dialog-wide">
     <form method="dialog" class="p-6">
-      <h2 class="text-lg font-semibold text-zinc-100">非标准格式视频</h2>
-      <p id="nonstandard-dialog-msg" class="mt-3 text-sm leading-relaxed text-zinc-300"></p>
-      <p class="mt-3 text-xs leading-relaxed text-zinc-500">
-        「修复」将流复制重封装为标准 MP4（+faststart，不重新编码）。完成后<strong class="text-zinc-400">替换原文件名</strong>，旧文件备份为同目录下的 <code class="text-zinc-400">*.bak.mp4</code>。大文件可能耗时较久。
+      <h2 class="text-lg font-semibold">非标准格式视频</h2>
+      <p id="nonstandard-dialog-msg" class="dialog-msg mt-3"></p>
+      <p class="dialog-footnote mt-3">
+        「修复」将流复制重封装为标准 MP4（+faststart，不重新编码）。完成后<strong>替换原文件名</strong>，旧文件备份为同目录下的 <code>*.bak.mp4</code>。大文件可能耗时较久。
       </p>
       <div class="dialog-btns mt-6 flex flex-wrap justify-end gap-2">
         <button type="button" id="nonstandard-btn-remux" class="ui-btn ui-btn-primary rounded-lg px-4 py-2">修复为标准 MP4</button>
@@ -449,6 +487,6 @@
   </dialog>
 
   <script src="/static/vendor/hls.min.js"></script>
-  <script src="/static/app.js?v=135"></script>
+  <script src="/static/app.js?v=163"></script>
 </body>
 </html>

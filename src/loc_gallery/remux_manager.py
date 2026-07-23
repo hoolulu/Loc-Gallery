@@ -173,6 +173,11 @@ def _finish_remuxed_file(
     refresh_video_item_stat(job.library_id, job.video_id)
     clear_path_pending(source)
     seed_direct_playback_plan(source)
+    item = get_by_id(job.library_id, job.video_id)
+    if item:
+        from loc_gallery.format_index import set_format_kind
+
+        set_format_kind(job.library_id, job.video_id, item.mtime, item.size, None)
 
 
 def _remux_and_finalize(

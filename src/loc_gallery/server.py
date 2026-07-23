@@ -70,9 +70,16 @@ from loc_gallery.history_store import (
     save_position,
 )
 from loc_gallery import hls_manager
+from loc_gallery.format_index import (
+    enqueue_missing_format_probe,
+    filter_items_by_format,
+    get_format_status,
+    shutdown_format_index,
+    start_format_index_background,
+)
 from loc_gallery.media_probe import (
     can_remux_from_plan,
-    get_format_badge,
+    get_format_badge_for_item,
     get_format_badges,
     get_playback_plan,
     schedule_probe_for_ids,
@@ -96,7 +103,7 @@ from loc_gallery.library_store import (
     update_library,
 )
 from loc_gallery.scanner import (
-    get_all, get_by_id, get_categories, get_folder_tree, get_version, refresh_all_libraries,
+    get_all, get_by_id, get_categories, get_folder_tree, get_version,
     refresh_cache, upsert_video_from_path,
 )
 from loc_gallery.settings_store import load_settings, save_settings
@@ -211,6 +218,7 @@ class SettingsUpdate(BaseModel):
     html5_resume_playback: bool | None = None
     html5_wheel_seek_sec: int | None = None
     thumb_progress_bar: str | None = None  # auto | always | never
+    ui_theme: str | None = None  # dark | light
     scope: str | None = None  # global | library
 
 
@@ -376,18 +384,39 @@ async def lifespan(app: FastAPI):
             _on_library_changed(library_id)
 
     set_stable_callback(_stable_cb)
-    refresh_all_libraries()
+    active_id = get_active_library_id()
+    refresh_cache(active_id)
     for lib in list_libraries():
-        set_thread_library(lib.id)
-        _prune_user_data(lib.id)
-    init_manager()
+        if lib.id == active_id:
+            set_thread_library(lib.id)
+            _prune_user_data(lib.id)
+    init_manager(sync_videos=False)
     register_progress_callback(lambda: _broadcast("progress", get_active_library_id()))
-
     _start_watchers()
+
+    def _startup_background() -> None:
+        from loc_gallery.thumb_manager import complete_startup_sync
+
+        for lib in list_libraries():
+            if lib.id == active_id:
+                continue
+            refresh_cache(lib.id)
+        for lib in list_libraries():
+            if lib.id == active_id:
+                continue
+            set_thread_library(lib.id)
+            _prune_user_data(lib.id)
+        complete_startup_sync()
+        for lib in list_libraries():
+            start_format_index_background(lib.id)
+        _broadcast("progress", active_id)
+
+    threading.Thread(target=_startup_background, daemon=True, name="startup-bg").start()
 
     yield
 
     set_stable_callback(None)
+    shutdown_format_index()
     shutdown_manager()
     hls_manager.shutdown()
     _stop_watchers()
@@ -432,7 +461,9 @@ def _video_to_dict(library_id: str, v) -> dict:
         "playCount": hist.get("play_count") if hist else None,
         "playPosition": hist.get("position_sec") if hist else None,
         "playDuration": hist.get("duration_sec") if hist else None,
-        "formatBadge": get_format_badge(Path(v.path)),
+        "formatBadge": get_format_badge_for_item(
+            library_id, v.id, v.mtime, v.size, Path(v.path),
+        ),
     }
 
 
@@ -445,6 +476,7 @@ def _filter_videos_list(
     sort: str = "mtime_desc",
     favorites: bool = False,
     history: bool = False,
+    format: str | None = None,
 ) -> list:
     if favorites and history:
         raise HTTPException(400, "不能同时筛选收藏与最近播放")
@@ -462,16 +494,19 @@ def _filter_videos_list(
         if category and folder is None and not q:
             folder_filter = ""
         items = _filter_videos(library_id, category, folder_filter, q, sort)
-        return items
 
-    if q:
-        query = q.lower().strip()
-        items = [
-            v for v in items
-            if query in v.title.lower()
-            or query in v.filename.lower()
-            or query in v.category.lower()
-        ]
+    if favorites or history:
+        if q:
+            query = q.lower().strip()
+            items = [
+                v for v in items
+                if query in v.title.lower()
+                or query in v.filename.lower()
+                or query in v.category.lower()
+            ]
+
+    if format and format not in ("", "all"):
+        items = filter_items_by_format(items, format, library_id)
     return items
 
 
@@ -641,6 +676,7 @@ async def api_videos(
     page_size: int = 32,
     favorites: bool = False,
     history: bool = False,
+    format: str | None = None,
     library_id: str = Depends(resolve_library_id),
 ):
     items = _filter_videos_list(
@@ -651,6 +687,7 @@ async def api_videos(
         sort=sort,
         favorites=favorites,
         history=history,
+        format=format,
     )
     total = len(items)
 
@@ -665,8 +702,6 @@ async def api_videos(
         start = (page - 1) * page_size
         page_items = items[start:start + page_size]
         effective_size = page_size
-
-    schedule_probe_for_ids([v.id for v in page_items[:64]], library_id)
 
     return {
         "items": [_video_to_dict(library_id, v) for v in page_items],
@@ -691,11 +726,20 @@ async def api_play_badges(
         item = get_by_id(library_id, vid)
         if item:
             paths[vid] = Path(item.path)
-    badges = get_format_badges(paths)
-    missing = [vid for vid in id_list if vid not in badges]
-    if missing:
-        schedule_probe_for_ids(missing[:64], library_id)
+    badges = get_format_badges(paths, library_id)
     return {"badges": badges}
+
+
+@app.get("/api/format/status")
+async def api_format_status(library_id: str = Depends(resolve_library_id)):
+    return get_format_status(library_id)
+
+
+@app.post("/api/format/scan")
+async def api_format_scan(library_id: str = Depends(resolve_library_id)):
+    """触发后台格式索引补全（异步，不阻塞前台）。"""
+    queued = enqueue_missing_format_probe(library_id)
+    return {"ok": True, "queued": queued, **get_format_status(library_id)}
 
 
 @app.get("/api/videos/{video_id}")
@@ -809,8 +853,8 @@ async def api_thumb(video_id: str, library_id: str = Depends(resolve_library_id)
         thumb,
         media_type="image/jpeg",
         headers={
-            "Cache-Control": "no-store, no-cache, must-revalidate",
-            "Pragma": "no-cache",
+            # URL 带 ?v= 版本号，文件变更后地址也变；允许浏览器长期缓存本地小图
+            "Cache-Control": "public, max-age=31536000, immutable",
         },
     )
 

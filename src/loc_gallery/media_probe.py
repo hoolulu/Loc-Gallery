@@ -119,6 +119,7 @@ def _disk_cache_get(key: str, mtime: float, size: int) -> dict | None:
 
 
 def _disk_cache_put(key: str, mtime: float, size: int, plan: dict) -> None:
+    kind = classify_format_plan(plan) or ""
     with _plan_lock:
         store = _load_disk_cache()
         store[key] = {
@@ -126,6 +127,7 @@ def _disk_cache_put(key: str, mtime: float, size: int, plan: dict) -> None:
             "size": size,
             "v": _PLAN_VERSION,
             "policy": _hls_policy_tag(),
+            "format_kind": kind,
             "plan": {k: v for k, v in plan.items() if k != "cached"},
             "at": time.time(),
         }
@@ -339,6 +341,22 @@ def probe_video_codec(path: Path) -> str:
         return "unknown"
 
 
+_kind_cache: dict[str, tuple[float, int, str | None]] = {}  # legacy; unused
+
+
+def _peek_cached_plan_entry(path: Path, mtime: float, size: int) -> dict | None:
+    """按索引中的 mtime/size 读播放计划缓存，避免逐文件 stat。"""
+    key = str(path.resolve())
+    with _plan_lock:
+        cached = _plan_cache.get(key)
+        if cached and cached[0] == mtime and cached[1] == size:
+            plan = dict(cached[2])
+            if plan.get("_policy") == _hls_policy_tag():
+                plan.pop("_policy", None)
+                return plan
+    return _disk_cache_get(key, mtime, size)
+
+
 def _peek_cached_plan(path: Path) -> dict | None:
     """仅读内存/磁盘缓存，不触发 ffprobe。"""
     if not path.is_file():
@@ -378,25 +396,92 @@ def can_remux_from_plan(plan: dict) -> tuple[bool, str]:
     return True, ""
 
 
-def get_format_badge(path: Path) -> str | None:
-    """已分析过的格式角标；未缓存则返回 None。"""
-    plan = _peek_cached_plan(path)
+def classify_format_plan(plan: dict | None) -> str | None:
+    """格式分类（角标/筛选共用）；标准直连返回 None。"""
     if not plan:
         return None
+    mode = plan.get("mode")
+    if mode in ("error", "pending"):
+        return None
+    if mode == "unsupported":
+        return "unsupported"
+
     if can_remux_from_plan(plan)[0]:
         return "remuxable"
-    kind = (plan.get("structure") or {}).get("kind")
-    mdat_count = int((plan.get("structure") or {}).get("mdat_count") or 0)
-    if plan.get("disguised") or kind in ("fragmented", "disguised_mpegts") or mdat_count > 3:
-        return "non_standard"
+
+    structure = plan.get("structure") or {}
+    kind = structure.get("kind")
+    mdat_count = int(structure.get("mdat_count") or 0)
+
+    if plan.get("disguised") or kind in ("disguised_mpegts", "disguised_h264"):
+        return "disguised"
+
+    if plan.get("transcode"):
+        return "transcode"
+
+    if kind == "fragmented" and mdat_count > 3 and mode == "hls":
+        return "interleaved"
+
+    if kind == "moov_end":
+        return "moov_end"
+
+    reason = plan.get("reason") or ""
+    if mode == "hls" and "大文件" in reason:
+        return "large"
+
+    if mode == "external":
+        return "fragmented"
+
+    if mode == "hls":
+        return "hls"
+
     return None
 
 
-def get_format_badges(paths: dict[str, Path]) -> dict[str, str]:
-    """批量读取角标（仅缓存命中）。"""
+def get_format_badge_for_item(
+    library_id: str,
+    video_id: str,
+    mtime: float,
+    size: int,
+    path: Path | None = None,
+) -> str | None:
+    """从格式索引读角标；索引未命中时只读已有播放计划缓存，不触发探测。"""
+    from loc_gallery.format_index import get_format_kind_for_item
+
+    kind = get_format_kind_for_item(library_id, video_id, mtime, size)
+    if kind:
+        return kind
+    if path is None:
+        return None
+    plan = _peek_cached_plan_entry(path, mtime, size)
+    return classify_format_plan(plan)
+
+
+def get_format_badge(path: Path) -> str | None:
+    """已分析过的格式角标；未缓存则返回 None（兼容旧调用）。"""
+    plan = _peek_cached_plan(path)
+    if not plan:
+        try:
+            st = path.stat()
+        except OSError:
+            return None
+        plan = _peek_cached_plan_entry(path, st.st_mtime, st.st_size)
+    return classify_format_plan(plan)
+
+
+def get_format_badges(paths: dict[str, Path], library_id: str | None = None) -> dict[str, str]:
+    """批量读取角标（仅索引/缓存命中）。"""
+    from loc_gallery.format_index import get_format_kind_for_item
+    from loc_gallery.scanner import get_by_id
+
+    lid = library_id or current_library_id()
     out: dict[str, str] = {}
     for vid, path in paths.items():
-        badge = get_format_badge(path)
+        item = get_by_id(lid, vid)
+        if item:
+            badge = get_format_badge_for_item(lid, vid, item.mtime, item.size, path)
+        else:
+            badge = get_format_badge(path)
         if badge:
             out[vid] = badge
     return out
@@ -483,37 +568,13 @@ def get_playback_plan(path: Path) -> dict:
 
 
 def schedule_probe_for_ids(video_ids: list[str], library_id: str | None = None) -> int:
-    """后台预分析播放策略并写入 playback_plans.json。"""
+    """后台预分析播放策略（单队列、限速），写入 playback_plans + format_index。"""
+    from loc_gallery.format_index import enqueue_format_probe
+
     if not video_ids:
         return 0
-    from loc_gallery.scanner import get_by_id
-
     lid = library_id or current_library_id()
-    paths: list[Path] = []
-    for vid in video_ids:
-        item = get_by_id(lid, vid)
-        if item:
-            p = Path(item.path)
-            if is_ready_for_processing(p):
-                paths.append(p)
-    if not paths:
-        return 0
-    threading.Thread(
-        target=_probe_paths_worker,
-        args=(lid, paths),
-        daemon=True,
-        name="playback-probe",
-    ).start()
-    return len(paths)
-
-
-def _probe_paths_worker(library_id: str, paths: list[Path]) -> None:
-    set_thread_library(library_id)
-    for path in paths:
-        try:
-            get_playback_plan(path)
-        except Exception:
-            pass
+    return enqueue_format_probe(lid, video_ids)
 
 
 def _plan_non_native_container(path: Path, ext: str, sniff: str) -> dict:

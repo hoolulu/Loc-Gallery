@@ -45,6 +45,7 @@ _DEFAULTS = {
     "html5_playlist_autoplay": HTML5_PLAYLIST_AUTOPLAY,
     "html5_resume_playback": HTML5_RESUME_PLAYBACK,
     "html5_wheel_seek_sec": HTML5_WHEEL_SEEK_SEC,
+    "ui_theme": "dark",
 }
 
 _LIBRARY_OVERRIDE_KEYS = {
