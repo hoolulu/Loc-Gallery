@@ -1070,6 +1070,16 @@ body {
 .player-video.is-playing {
   opacity: 1;
 }
+#html5-player:focus,
+#html5-player:focus-visible,
+.player-video:focus,
+.player-video:focus-visible {
+  outline: none;
+}
+#player-stage:focus,
+#player-stage:focus-visible {
+  outline: none;
+}
 @media (min-width: 1024px) {
   .player-playlist-wrap { max-height: none; }
   .player-stage { min-height: calc(100vh - 12rem); }
