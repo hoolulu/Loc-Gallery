@@ -5,6 +5,7 @@ import os
 import subprocess
 import threading
 import time
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -74,6 +75,7 @@ from loc_gallery.format_index import (
     enqueue_missing_format_probe,
     filter_items_by_format,
     get_format_status,
+    rebuild_format_index_from_plans,
     shutdown_format_index,
     start_format_index_background,
 )
@@ -107,6 +109,7 @@ from loc_gallery.scanner import (
     refresh_cache, upsert_video_from_path,
 )
 from loc_gallery.settings_store import load_settings, save_settings
+from loc_gallery.service_ctl import schedule_service_restart
 from loc_gallery.thumb_manager import (
     Priority,
     cleanup_orphans,
@@ -117,6 +120,11 @@ from loc_gallery.thumb_manager import (
     get_thumb_version,
     get_video_thumb_status,
     get_video_thumb_error,
+    get_video_duration_sec,
+    get_durations_for_ids,
+    enqueue_duration_probe,
+    enqueue_missing_durations,
+    start_duration_probe_background,
     get_worker_health,
     init_manager,
     is_paused,
@@ -174,18 +182,6 @@ class CategorySortRequest(BaseModel):
     sort_mode: str
 
 
-class SettingsUpdate(BaseModel):
-    thumb_position: float | None = None
-    thumb_random_min: float | None = None
-    thumb_random_max: float | None = None
-    thumb_workers: int | None = None
-    thumb_idle_scan: bool | None = None
-    default_page_size: int | None = None
-    potplayer_path: str | None = None
-    player_mode: str | None = None
-    history_retention_days: int | None = None
-
-
 class FavoriteToggleRequest(BaseModel):
     id: str
 
@@ -217,6 +213,9 @@ class SettingsUpdate(BaseModel):
     html5_playlist_autoplay: bool | None = None
     html5_resume_playback: bool | None = None
     html5_wheel_seek_sec: int | None = None
+    html5_modern_codecs_direct: bool | None = None
+    html5_player_prev_key: str | None = None
+    html5_player_next_key: str | None = None
     thumb_progress_bar: str | None = None  # auto | always | never
     ui_theme: str | None = None  # dark | light
     scope: str | None = None  # global | library
@@ -409,6 +408,7 @@ async def lifespan(app: FastAPI):
         complete_startup_sync()
         for lib in list_libraries():
             start_format_index_background(lib.id)
+            start_duration_probe_background(lib.id)
         _broadcast("progress", active_id)
 
     threading.Thread(target=_startup_background, daemon=True, name="startup-bg").start()
@@ -423,6 +423,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Loc Gallery", lifespan=lifespan)
+_SERVER_BOOT_ID = uuid.uuid4().hex
 app.mount("/static", StaticFiles(directory=str(WEB_ROOT / "static")), name="static")
 app.mount(
     "/demo",
@@ -442,6 +443,9 @@ def _video_to_dict(library_id: str, v) -> dict:
     fav_at = None
     if is_favorite(library_id, v.id):
         fav_at = get_added_at(library_id, v.id)
+    duration = get_video_duration_sec(v.id, mtime=v.mtime, size=v.size)
+    if not duration and hist:
+        duration = hist.get("duration_sec")
     return {
         "id": v.id,
         "title": v.title,
@@ -461,6 +465,7 @@ def _video_to_dict(library_id: str, v) -> dict:
         "playCount": hist.get("play_count") if hist else None,
         "playPosition": hist.get("position_sec") if hist else None,
         "playDuration": hist.get("duration_sec") if hist else None,
+        "durationSec": duration,
         "formatBadge": get_format_badge_for_item(
             library_id, v.id, v.mtime, v.size, Path(v.path),
         ),
@@ -703,8 +708,13 @@ async def api_videos(
         page_items = items[start:start + page_size]
         effective_size = page_size
 
+    page_dicts = [_video_to_dict(library_id, v) for v in page_items]
+    missing_dur = [d["id"] for d in page_dicts if not d.get("durationSec")]
+    if missing_dur:
+        enqueue_duration_probe(library_id, missing_dur)
+
     return {
-        "items": [_video_to_dict(library_id, v) for v in page_items],
+        "items": page_dicts,
         "total": total,
         "page": page,
         "pageSize": effective_size,
@@ -728,6 +738,20 @@ async def api_play_badges(
             paths[vid] = Path(item.path)
     badges = get_format_badges(paths, library_id)
     return {"badges": badges}
+
+
+@app.get("/api/durations")
+async def api_durations(
+    ids: str = "",
+    library_id: str = Depends(resolve_library_id),
+):
+    """批量读取已缓存时长；缺失项会排队后台探测。"""
+    id_list = [x.strip() for x in ids.split(",") if x.strip()][:128]
+    durations = get_durations_for_ids(library_id, id_list)
+    missing = [vid for vid in id_list if vid not in durations]
+    if missing:
+        enqueue_duration_probe(library_id, missing)
+    return {"durations": durations}
 
 
 @app.get("/api/format/status")
@@ -1108,6 +1132,9 @@ async def api_rescan(library_id: str = Depends(resolve_library_id)):
     sync_index_with_videos()
     cleanup_orphans()
     _prune_user_data(library_id)
+    rebuild_format_index_from_plans(library_id)
+    enqueue_missing_format_probe(library_id)
+    enqueue_missing_durations(library_id)
     _broadcast("progress", library_id)
     return {"version": get_version(library_id), "count": len(get_all(library_id))}
 
@@ -1161,6 +1188,12 @@ async def api_thumb_cleanup(library_id: str = Depends(resolve_library_id)):
     return {"removed": removed}
 
 
+@app.get("/api/health")
+async def api_health():
+    """轻量健康检查（供重启轮询，不依赖库上下文）。"""
+    return {"ok": True, "boot_id": _SERVER_BOOT_ID}
+
+
 @app.get("/api/settings")
 async def api_get_settings(
     library_id: str = Depends(resolve_library_id),
@@ -1194,6 +1227,14 @@ async def api_save_settings(body: SettingsUpdate, library_id: str = Depends(reso
     elif not saved.get("thumb_idle_scan") and old_idle:
         stop_idle_scan_background()
     return saved
+
+
+@app.post("/api/service/restart")
+async def api_service_restart():
+    """重启后台服务（不打开新浏览器标签）。"""
+    if not schedule_service_restart():
+        return {"ok": True, "queued": False, "message": "重启已在进行中", "boot_id": _SERVER_BOOT_ID}
+    return {"ok": True, "queued": True, "boot_id": _SERVER_BOOT_ID}
 
 
 @app.get("/api/events")

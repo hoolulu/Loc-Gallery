@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import json
 import os
+import queue
 import random
 import shutil
 import subprocess
@@ -69,6 +70,10 @@ _last_reconcile_at = 0.0
 _RECONCILE_INTERVAL = 20.0
 _last_notify = 0.0
 _idle_scan_thread: threading.Thread | None = None
+_duration_queue: queue.Queue[tuple[str, str]] = queue.Queue()
+_duration_pending: set[tuple[str, str]] = set()
+_duration_worker: threading.Thread | None = None
+_DURATION_PROBE_INTERVAL = 0.4
 _ffmpeg_bin: str | None = None
 _ffprobe_bin: str | None = None
 _last_capture_error: str = ""
@@ -443,6 +448,8 @@ def complete_startup_sync() -> None:
     _rebuild_status_cache()
     if get_setting("thumb_idle_scan"):
         start_idle_scan_background()
+    for lib in list_libraries():
+        start_duration_probe_background(lib.id)
     _notify_progress()
 
 
@@ -969,21 +976,139 @@ def _get_duration(video_path: str, file_size: int = 0, *, fast_only: bool = Fals
     return None
 
 
-def _cached_duration(item: VideoItem) -> float | None:
+def get_video_duration_sec(
+    video_id: str,
+    *,
+    mtime: float | None = None,
+    size: int | None = None,
+) -> float | None:
+    """从缩略图索引读取已缓存时长；不触发 ffprobe。"""
     with _lock:
-        entry = _idx().get(item.id)
+        entry = _idx().get(video_id)
     if not entry:
+        return None
+    if mtime is not None and entry.get("mtime") != mtime:
+        return None
+    if size is not None and entry.get("size") != size:
         return None
     dur = entry.get("duration_sec")
     if dur is None:
         return None
-    if entry.get("mtime") == item.mtime and entry.get("size") == item.size:
-        try:
-            val = float(dur)
-            return val if val > 3 else None
-        except (TypeError, ValueError):
-            return None
-    return None
+    try:
+        val = float(dur)
+        return val if val > 3 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _cached_duration(item: VideoItem) -> float | None:
+    return get_video_duration_sec(item.id, mtime=item.mtime, size=item.size)
+
+
+def needs_duration_probe(item: VideoItem) -> bool:
+    if get_video_duration_sec(item.id, mtime=item.mtime, size=item.size):
+        return False
+    return _video_is_processable(item)
+
+
+def probe_and_cache_duration(item: VideoItem) -> float | None:
+    """探测并缓存视频时长；已缓存则直接返回。"""
+    if not _video_is_processable(item):
+        return None
+    cached = get_video_duration_sec(item.id, mtime=item.mtime, size=item.size)
+    if cached:
+        return cached
+    use_mpegts = _has_png_header(item.path)
+    try:
+        return _resolve_duration(item, use_mpegts)
+    except Exception:
+        return None
+
+
+def get_durations_for_ids(library_id: str, video_ids: list[str]) -> dict[str, float]:
+    set_thread_library(library_id)
+    out: dict[str, float] = {}
+    for vid in video_ids:
+        item = get_by_id(library_id, vid)
+        if not item:
+            continue
+        dur = get_video_duration_sec(item.id, mtime=item.mtime, size=item.size)
+        if dur:
+            out[vid] = dur
+    return out
+
+
+def enqueue_duration_probe(library_id: str, video_ids: list[str]) -> int:
+    if not video_ids:
+        return 0
+    added = 0
+    with _lock:
+        for vid in video_ids:
+            item = get_by_id(library_id, vid)
+            if not item or not needs_duration_probe(item):
+                continue
+            key = (library_id, vid)
+            if key in _duration_pending:
+                continue
+            _duration_pending.add(key)
+            _duration_queue.put(key)
+            added += 1
+    if added:
+        _ensure_duration_worker()
+    return added
+
+
+def enqueue_missing_durations(library_id: str, *, limit: int = 0) -> int:
+    set_thread_library(library_id)
+    missing: list[str] = []
+    for v in get_all(library_id):
+        if not needs_duration_probe(v):
+            continue
+        missing.append(v.id)
+        if limit and len(missing) >= limit:
+            break
+    return enqueue_duration_probe(library_id, missing)
+
+
+def _ensure_duration_worker() -> None:
+    global _duration_worker
+    if _duration_worker and _duration_worker.is_alive():
+        return
+
+    def _run() -> None:
+        while not _stop_worker:
+            try:
+                library_id, video_id = _duration_queue.get(timeout=1.5)
+            except queue.Empty:
+                continue
+            try:
+                set_thread_library(library_id)
+                item = get_by_id(library_id, video_id)
+                if item and is_ready_for_processing(Path(item.path)):
+                    probe_and_cache_duration(item)
+                time.sleep(_DURATION_PROBE_INTERVAL)
+            except Exception:
+                pass
+            finally:
+                with _lock:
+                    _duration_pending.discard((library_id, video_id))
+                _duration_queue.task_done()
+
+    _duration_worker = threading.Thread(target=_run, daemon=True, name="duration-probe")
+    _duration_worker.start()
+
+
+def start_duration_probe_background(library_id: str) -> None:
+    """后台补全缺失的视频时长（不阻塞首屏）。"""
+    def _run() -> None:
+        time.sleep(1.5)
+        enqueue_missing_durations(library_id)
+
+    threading.Thread(
+        target=_run,
+        daemon=True,
+        name=f"duration-index-{library_id}",
+    ).start()
 
 
 def _remember_duration(item: VideoItem, duration: float) -> None:
@@ -1177,6 +1302,8 @@ def _process_one(library_id: str, video_id: str) -> None:
             status=STATUS_READY,
             error=None,
         )
+        if needs_duration_probe(item):
+            enqueue_duration_probe(library_id, [video_id])
         return
 
     with _lock:

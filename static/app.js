@@ -199,6 +199,8 @@
     libraries: [],
     playlistSort: "page",
     playlistAutoplay: true,
+    playerPrevKey: ".",
+    playerNextKey: "/",
     playlistItems: [],
     playlistLoadedThrough: 0,
     playlistTotalPages: 1,
@@ -409,7 +411,12 @@
     const spaceAbove = rect.top - pad;
     const spaceBelow = vh - rect.bottom - pad;
 
-    if (spaceRight >= tipRect.width) {
+    const inPlaylist = !!anchor.closest(".player-playlist");
+
+    if (inPlaylist && spaceLeft >= tipRect.width) {
+      left = rect.left - tipRect.width - pad;
+      top = rect.top + rect.height / 2 - tipRect.height / 2;
+    } else if (spaceRight >= tipRect.width) {
       left = rect.right + pad;
       top = rect.top + rect.height / 2 - tipRect.height / 2;
     } else if (spaceLeft >= tipRect.width) {
@@ -482,8 +489,19 @@
     return `<div class="path-tip-file" title="${esc(name)}">${esc(short)}</div>`;
   }
 
+  function pathTipAnchorItemId(anchor) {
+    if (!anchor) return null;
+    if (anchor.id?.startsWith("thumb-")) return anchor.id.slice(6);
+    return anchor.dataset?.id || null;
+  }
+
   function pathTipExtras(item) {
     const parts = [];
+    const dur = formatDuration(videoDurationSec(item));
+    if (dur) parts.push(`时长 ${dur}`);
+    const badgeMeta = FORMAT_BADGE_META[item.formatBadge];
+    if (badgeMeta?.label) parts.push(badgeMeta.label);
+    if (item.size) parts.push(formatSize(item.size));
     if (item.favorited && item.favoritedAt) {
       parts.push(`收藏于 ${formatTs(item.favoritedAt)}`);
     } else if (item.favorited) {
@@ -652,10 +670,10 @@
     tip.title = item.path;
     const latest = getItemById(item.id) || item;
     const bust = thumbCacheKey(latest);
-    const badge = thumbFormatBadgeHtml(latest);
+    const overlays = thumbOverlaysHtml(latest);
     const preview = latest.thumbReady
-      ? `<div class="path-tip-preview"><img src="${libThumbUrl(latest.id, bust)}" alt="" decoding="async">${badge}</div>`
-      : `<div class="path-tip-preview path-tip-preview--empty">暂无缩略图${badge}</div>`;
+      ? `<div class="path-tip-preview"><img src="${libThumbUrl(latest.id, bust)}" alt="" decoding="async">${overlays}</div>`
+      : `<div class="path-tip-preview path-tip-preview--empty">暂无缩略图${overlays}</div>`;
     tip.innerHTML = `
       ${preview}
       <div class="path-tip-body">
@@ -682,9 +700,23 @@
     }, 220);
   }
 
-  function bindPathTip(wrap, item) {
-    wrap.addEventListener("mouseenter", () => schedulePathTip(wrap, item));
-    wrap.addEventListener("mouseleave", hidePathTip);
+  function bindPathTip(anchor, item) {
+    if (!anchor || anchor.dataset.pathTipBound) return;
+    anchor.dataset.pathTipBound = "1";
+    anchor.addEventListener("mouseenter", () => {
+      const latest = getItemById(item.id) || item;
+      schedulePathTip(anchor, latest);
+    });
+    anchor.addEventListener("mouseleave", (e) => {
+      if (!anchor.contains(e.relatedTarget)) hidePathTip();
+    });
+  }
+
+  function bindPlaylistPathTips() {
+    $("#player-playlist")?.querySelectorAll(".player-pl-item").forEach(btn => {
+      const item = getPlaylistItems().find(v => v.id === btn.dataset.id);
+      if (item) bindPathTip(btn, item);
+    });
   }
 
   async function api(path, opts) {
@@ -775,6 +807,9 @@
     hls_large_h264: false,
     hls_moov_end_h264: false,
     html5_fragmented_mp4: "external",
+    html5_modern_codecs_direct: true,
+    html5_player_prev_key: ".",
+    html5_player_next_key: "/",
     html5_playlist_autoplay: true,
     html5_resume_playback: true,
     html5_wheel_seek_sec: 5,
@@ -838,6 +873,185 @@
     const n = parseInt(raw, 10);
     if (!Number.isFinite(n) || n <= 0) return 0;
     return Math.min(120, Math.max(1, n));
+  }
+
+  function normalizePlayerHotkey(raw, fallback) {
+    const s = String(raw ?? "").trim();
+    if (!s) return fallback;
+    const aliases = {
+      Period: ".",
+      Slash: "/",
+      Comma: ",",
+      BracketLeft: "[",
+      BracketRight: "]",
+    };
+    if (aliases[s]) return aliases[s];
+    return s.length === 1 ? s : s.slice(0, 1);
+  }
+
+  function keyEventMatchesHotkey(e, hotkey) {
+    const hk = normalizePlayerHotkey(hotkey, "");
+    if (!hk) return false;
+    if (e.key === hk) return true;
+    if (hk === "." && e.key === "Period") return true;
+    if (hk === "/" && e.key === "Slash") return true;
+    if (hk === "," && e.key === "Comma") return true;
+    return false;
+  }
+
+  function applyPlayerHotkeySettings(s) {
+    state.playerPrevKey = normalizePlayerHotkey(
+      s?.html5_player_prev_key,
+      SETTINGS_DEFAULTS.html5_player_prev_key,
+    );
+    state.playerNextKey = normalizePlayerHotkey(
+      s?.html5_player_next_key,
+      SETTINGS_DEFAULTS.html5_player_next_key,
+    );
+    syncPlayerNavHint();
+  }
+
+  function syncPlayerNavHint() {
+    const prev = state.playerPrevKey || SETTINGS_DEFAULTS.html5_player_prev_key;
+    const next = state.playerNextKey || SETTINGS_DEFAULTS.html5_player_next_key;
+    const hint = $("#player-nav-hint");
+    if (hint) hint.textContent = `${prev} 上一个  ${next} 下一个`;
+    const prevBtn = $("#btn-player-prev");
+    const nextBtn = $("#btn-player-next");
+    if (prevBtn) prevBtn.title = `上一个（${prev}）`;
+    if (nextBtn) nextBtn.title = `下一个（${next}）`;
+  }
+
+  function resolveSettingsPageSize(pageSize) {
+    const ps = pageSize ?? -1;
+    if (ps === 0 || ps === "0") return { mode: "all", custom: "" };
+    if (ps === -1 || ps === "auto") return { mode: "auto", custom: "" };
+    return { mode: "custom", custom: String(ps) };
+  }
+
+  function syncSettingsPageSizeUi() {
+    const mode = $("#set-page-size-mode")?.value || "auto";
+    const custom = $("#set-page-size-custom");
+    if (custom) custom.classList.toggle("hidden", mode !== "custom");
+  }
+
+  function readSettingsPageSize() {
+    const mode = $("#set-page-size-mode")?.value || "auto";
+    if (mode === "auto") return -1;
+    if (mode === "all") return 0;
+    const n = parseInt($("#set-page-size-custom")?.value, 10);
+    return Number.isFinite(n) && n > 0 ? n : 32;
+  }
+
+  function fillSettingsPageSize(pageSize) {
+    const { mode, custom } = resolveSettingsPageSize(pageSize);
+    const modeEl = $("#set-page-size-mode");
+    const customEl = $("#set-page-size-custom");
+    if (modeEl) modeEl.value = mode;
+    if (customEl) customEl.value = custom;
+    syncSettingsPageSizeUi();
+  }
+
+  function setRestartOverlayMode(on) {
+    $("#play-overlay-close")?.classList.toggle("hidden", on);
+    $("#play-overlay-potplayer")?.closest(".play-overlay-actions")?.classList.toggle("hidden", on);
+    $("#play-overlay-format")?.classList.add("hidden");
+    $("#play-overlay-video-title")?.classList.toggle("hidden", on);
+    if (on) {
+      const titleEl = $("#play-overlay-video-title");
+      if (titleEl) titleEl.textContent = "";
+    }
+  }
+
+  async function probeServiceHealth() {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 4000);
+      const res = await fetch("/api/health", { cache: "no-store", signal: ctrl.signal });
+      clearTimeout(timer);
+      if (!res.ok) return { up: false, bootId: null };
+      const data = await res.json().catch(() => null);
+      return { up: !!data?.ok, bootId: data?.boot_id || null };
+    } catch (_) {
+      return { up: false, bootId: null };
+    }
+  }
+
+  async function waitForServiceRestart(oldBootId, onProgress, maxMs = 120000) {
+    const start = Date.now();
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    const elapsedSec = () => Math.floor((Date.now() - start) / 1000);
+
+    onProgress?.("正在停止旧服务…", 15, elapsedSec());
+    const downDeadline = start + 60000;
+    while (Date.now() < downDeadline) {
+      const h = await probeServiceHealth();
+      if (!h.up) break;
+      if (oldBootId && h.bootId && h.bootId !== oldBootId) {
+        onProgress?.("服务已恢复，正在刷新页面…", 100, elapsedSec());
+        await sleep(400);
+        return true;
+      }
+      onProgress?.("正在停止旧服务…", 15 + Math.min(20, elapsedSec()), elapsedSec());
+      await sleep(500);
+    }
+
+    onProgress?.("正在启动新服务…", 45, elapsedSec());
+    const upDeadline = start + maxMs;
+    while (Date.now() < upDeadline) {
+      const sec = elapsedSec();
+      let progress = 45 + Math.min(50, Math.floor(sec * 2));
+      const h = await probeServiceHealth();
+      if (h.up && oldBootId && h.bootId && h.bootId !== oldBootId) {
+        onProgress?.("服务已恢复，正在刷新页面…", 100, sec);
+        await sleep(400);
+        return true;
+      }
+      const detail = sec < 8 ? "正在启动新服务…" : sec < 20 ? "等待服务就绪…" : "仍在等待（首次启动可能较慢）…";
+      onProgress?.(detail, progress, sec);
+      await sleep(700);
+    }
+    throw new Error("服务重启超时。可尝试手动运行 python restart.py，或查看 data/logs/server.log / restart.log");
+  }
+
+  async function restartServiceFromSettings() {
+    if (!confirm("确定重启服务？重启期间页面会自动刷新，不会打开新标签。")) return;
+    const btn = $("#btn-restart-service");
+    $("#settings-dialog")?.close();
+    setRestartOverlayMode(true);
+    showPlayOverlay("正在重启服务", "正在发送重启请求…", { indeterminate: true });
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "重启中…";
+    }
+    try {
+      const before = await probeServiceHealth();
+      const res = await fetch("/api/service/restart", { method: "POST" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || err.message || `HTTP ${res.status}`);
+      }
+      const data = await res.json().catch(() => ({}));
+      const oldBootId = data.boot_id || before.bootId;
+      if (!oldBootId) throw new Error("无法获取服务标识，请手动运行 python restart.py");
+      if (data.queued === false) {
+        updatePlayOverlay("正在重启服务", data.message || "重启已在进行中…", { indeterminate: true });
+      } else {
+        updatePlayOverlay("正在重启服务", "重启请求已发送，旧服务即将停止…", { progress: 8 });
+      }
+      await waitForServiceRestart(oldBootId, (detail, progress) => {
+        updatePlayOverlay("正在重启服务", detail, { progress });
+      });
+      location.reload();
+    } catch (err) {
+      hidePlayOverlay();
+      setRestartOverlayMode(false);
+      alert("重启失败：" + (err.message || String(err)) + "\n\n可手动运行 python restart.py 或查看 data/logs/restart.log");
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "重启服务";
+      }
+    }
   }
 
   function wheelSeekStepSec() {
@@ -979,18 +1193,22 @@
     state.thumbProgressBar = normalizeThumbProgressBar(s.thumb_progress_bar);
     setVal("set-ui-theme", resolveTheme(s));
     applyTheme(resolveTheme(s), { persistLocal: true });
-    setVal("set-page-size", String(s.default_page_size === -1 ? -1 : (s.default_page_size ?? -1)));
+    fillSettingsPageSize(s.default_page_size);
     setVal("set-potplayer", s.potplayer_path || "");
     setVal("set-history-days", s.history_retention_days ?? 180);
     setVal("set-hls-large-h264", String(!!s.hls_large_h264));
     setVal("set-hls-moov-end-h264", String(!!s.hls_moov_end_h264));
     setVal("set-html5-fragmented-mp4", s.html5_fragmented_mp4 || "external");
+    setVal("set-html5-modern-codecs-direct", String(s.html5_modern_codecs_direct !== false));
     setVal("set-html5-playlist-autoplay", String(s.html5_playlist_autoplay !== false));
     setVal("set-html5-resume-playback", String(s.html5_resume_playback !== false));
     setVal("set-html5-wheel-seek-sec", String(normalizeWheelSeekSec(s.html5_wheel_seek_sec ?? SETTINGS_DEFAULTS.html5_wheel_seek_sec)));
     state.playlistAutoplay = s.html5_playlist_autoplay !== false;
     state.resumePlayback = s.html5_resume_playback !== false;
     state.wheelSeekSec = normalizeWheelSeekSec(s.html5_wheel_seek_sec ?? SETTINGS_DEFAULTS.html5_wheel_seek_sec);
+    applyPlayerHotkeySettings(s);
+    setVal("set-html5-player-prev-key", state.playerPrevKey);
+    setVal("set-html5-player-next-key", state.playerNextKey);
     document.querySelectorAll('input[name="player-mode"]').forEach(r => {
       r.checked = r.value === state.playerMode;
     });
@@ -1859,7 +2077,7 @@
   }
 
   const FORMAT_FILTER_LABELS = {
-    remuxable: "可修复",
+    remuxable: "多段交错·可修复",
     transcode: "需转码",
     hls: "HLS 边切",
     interleaved: "多段交错",
@@ -1923,8 +2141,8 @@
 
   const FORMAT_BADGE_META = {
     remuxable: {
-      label: "可修复",
-      title: "碎片化 H.264 MP4，可流复制修复为标准格式",
+      label: "多段交错·可修复",
+      title: "多段 mdat 交错的 H.264 MP4，可流复制修复为标准格式（不重新编码）",
       cls: "thumb-format-badge--remuxable",
     },
     transcode: {
@@ -1939,7 +2157,7 @@
     },
     interleaved: {
       label: "多段交错",
-      title: "多段 mdat 交错 MP4，边切边播",
+      title: "多段 mdat 交错（AV1/HEVC/VP9 等）；播放方式随设置自动选择直连或转码",
       cls: "thumb-format-badge--interleaved",
     },
     disguised: {
@@ -1971,6 +2189,58 @@
 
   const VIDEO_FILE_EXT_RE = /\.(mp4|m4v|mov|wmv|avi|mkv|webm|ts|m2ts|flv|mpg|mpeg)$/i;
 
+  function formatDuration(sec) {
+    if (sec == null || !Number.isFinite(sec) || sec <= 0) return "";
+    const total = Math.round(sec);
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    if (h > 0) {
+      return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+    }
+    return `${m}:${String(s).padStart(2, "0")}`;
+  }
+
+  function videoDurationSec(v) {
+    const d = v?.durationSec ?? v?.playDuration;
+    return d != null && Number.isFinite(d) && d > 0 ? d : null;
+  }
+
+  function thumbDurationHtml(v) {
+    const label = formatDuration(videoDurationSec(v));
+    if (!label) return "";
+    return `<span class="thumb-duration">${esc(label)}</span>`;
+  }
+
+  function thumbOverlaysHtml(v) {
+    return `${thumbFormatBadgeHtml(v)}${thumbDurationHtml(v)}`;
+  }
+
+  function thumbOverlaysEnabled(wrap, opts = null) {
+    if (opts && opts.showOverlays === false) return false;
+    return !wrap?.classList?.contains("player-pl-thumb");
+  }
+
+  function patchThumbOverlays(wrap, v) {
+    if (!wrap || !v || !thumbOverlaysEnabled(wrap)) return;
+    const badgeHtml = thumbFormatBadgeHtml(v);
+    let badge = wrap.querySelector(".thumb-format-badge");
+    if (badgeHtml) {
+      if (badge) badge.outerHTML = badgeHtml;
+      else wrap.insertAdjacentHTML("beforeend", badgeHtml);
+    } else if (badge) {
+      badge.remove();
+    }
+    const durHtml = thumbDurationHtml(v);
+    let dur = wrap.querySelector(".thumb-duration");
+    if (durHtml) {
+      if (dur) dur.outerHTML = durHtml;
+      else wrap.insertAdjacentHTML("beforeend", durHtml);
+    } else if (dur) {
+      dur.remove();
+    }
+  }
+
   function refreshGalleryStatus() {
     const { totalPages, page, total } = getPaged();
     $("#status").textContent = statusLabel(total, page, totalPages);
@@ -1985,43 +2255,112 @@
     return `<span class="thumb-format-badge ${meta.cls}" title="${esc(meta.title)}">${esc(meta.label)}</span>`;
   }
 
-  function renderThumbHtml(v, index = 99) {
-    const badge = thumbFormatBadgeHtml(v);
+  function renderThumbHtml(v, index = 99, opts = null) {
+    const wrap = opts?.wrap || null;
+    const overlays = thumbOverlaysEnabled(wrap, opts) ? thumbOverlaysHtml(v) : "";
     if (v.thumbReady) {
       const bust = thumbCacheKey(v);
       const loadAttr = index < 6 ? 'loading="eager"' : 'loading="lazy"';
-      return `<img src="${libThumbUrl(v.id, bust)}" alt="${esc(v.title)}" ${loadAttr} decoding="async">${badge}`;
+      return `<img src="${libThumbUrl(v.id, bust)}" alt="${esc(v.title)}" ${loadAttr} decoding="async">${overlays}`;
     }
     if (v.thumbStatus === "failed") {
       const hint = v.thumbError || "缩略图失败";
       let label = "缩略图失败";
       if (hint.includes("图片")) label = "非视频文件";
       else if (hint.includes("分辨率")) label = "占位文件";
-      return `<div class="thumb-placeholder failed" title="${esc(hint)}">${esc(label)}</div>${badge}`;
+      return `<div class="thumb-placeholder failed" title="${esc(hint)}">${esc(label)}</div>${overlays}`;
     }
     if (v.thumbStatus === "generating") {
-      return `<div class="thumb-placeholder">生成中...</div>${badge}`;
+      return `<div class="thumb-placeholder">生成中...</div>${overlays}`;
     }
     if (v.thumbStatus === "queued") {
-      return `<div class="thumb-placeholder">排队中...</div>${badge}`;
+      return `<div class="thumb-placeholder">排队中...</div>${overlays}`;
     }
-    return `<div class="thumb-placeholder">等待中...</div>${badge}`;
+    return `<div class="thumb-placeholder">等待中...</div>${overlays}`;
   }
 
   let formatBadgePollTimer = null;
+  let durationPollTimer = null;
+
+  function pageItemsMissingDuration(items = state.pageItems) {
+    return items.filter(v =>
+      !videoDurationSec(v) && VIDEO_FILE_EXT_RE.test(v.filename || v.title || "")
+    );
+  }
+
+  function patchGridDurations() {
+    state.pageItems.forEach(v => {
+      const wrap = document.getElementById(`thumb-${v.id}`);
+      if (wrap) patchThumbOverlays(wrap, v);
+    });
+    patchPlaylistMeta();
+  }
+
+  function playlistMetaSubline(v) {
+    const dur = formatDuration(videoDurationSec(v));
+    const name = v.filename || "";
+    if (dur) {
+      return `<span class="player-pl-dur">${esc(dur)}</span><span class="player-pl-sep"> · </span><span class="player-pl-file">${esc(name)}</span>`;
+    }
+    return `<span class="player-pl-file">${esc(name)}</span>`;
+  }
+
+  function patchPlaylistMeta() {
+    state.playlistItems?.forEach(v => {
+      const row = document.querySelector(`.player-pl-item[data-id="${CSS.escape(v.id)}"]`);
+      const sub = row?.querySelector(".player-pl-sub");
+      if (sub) sub.innerHTML = playlistMetaSubline(v);
+    });
+  }
+
+  function scheduleDurationPoll() {
+    clearTimeout(durationPollTimer);
+    if (!pageItemsMissingDuration().length) return;
+    let left = 15;
+    const tick = async () => {
+      const need = pageItemsMissingDuration();
+      if (!need.length || left <= 0) return;
+      left -= 1;
+      const ids = need.map(v => v.id).slice(0, 64);
+      try {
+        const data = await api(`/api/durations?ids=${ids.join(",")}`);
+        let changed = false;
+        const applyDur = (item, sec) => {
+          if (!item || item.durationSec === sec) return;
+          item.durationSec = sec;
+          changed = true;
+        };
+        Object.entries(data.durations || {}).forEach(([id, sec]) => {
+          const n = Number(sec);
+          if (!Number.isFinite(n) || n <= 0) return;
+          applyDur(state.pageItems.find(v => v.id === id), n);
+          applyDur(state.playlistItems?.find(v => v.id === id), n);
+        });
+        if (changed) {
+          patchGridDurations();
+          if (pathTipAnchor) {
+            const tipId = pathTipAnchorItemId(pathTipAnchor);
+            const tipItem = tipId ? getItemById(tipId) : null;
+            if (tipItem && videoDurationSec(tipItem)) {
+              showPathTip(pathTipAnchor, tipItem);
+            }
+          }
+        }
+        if (pageItemsMissingDuration().length && left > 0) {
+          durationPollTimer = setTimeout(tick, 2000);
+        }
+      } catch (_) {
+        if (left > 0) durationPollTimer = setTimeout(tick, 2000);
+      }
+    };
+    durationPollTimer = setTimeout(tick, 600);
+  }
 
   function patchCardFormatBadge(id) {
     const item = getItemById(id);
     const wrap = document.getElementById(`thumb-${id}`);
     if (!item || !wrap) return;
-    let badge = wrap.querySelector(".thumb-format-badge");
-    const html = thumbFormatBadgeHtml(item);
-    if (html) {
-      if (badge) badge.outerHTML = html;
-      else wrap.insertAdjacentHTML("beforeend", html);
-    } else if (badge) {
-      badge.remove();
-    }
+    patchThumbOverlays(wrap, item);
   }
 
   function markCardRemuxed(id) {
@@ -2040,14 +2379,7 @@
     state.pageItems.forEach(v => {
       const wrap = document.getElementById(`thumb-${v.id}`);
       if (!wrap) return;
-      let badge = wrap.querySelector(".thumb-format-badge");
-      const html = thumbFormatBadgeHtml(v);
-      if (html) {
-        if (badge) badge.outerHTML = html;
-        else wrap.insertAdjacentHTML("beforeend", html);
-      } else if (badge) {
-        badge.remove();
-      }
+      patchThumbOverlays(wrap, v);
     });
   }
 
@@ -2107,13 +2439,14 @@
         }
         if (v.title) img.alt = v.title;
         bindThumbImgError(img, v);
+        patchThumbOverlays(wrap, v);
         wrap.dataset.thumbSig = sig;
         wrap.closest(".card")?.classList.toggle("card-failed", false);
         return;
       }
     }
 
-    wrap.innerHTML = renderThumbHtml(v);
+    wrap.innerHTML = renderThumbHtml(v, 99, { wrap });
     const newImg = wrap.querySelector("img");
     if (newImg) {
       newImg.dataset.thumbV = String(thumbCacheKey(v));
@@ -2334,6 +2667,7 @@
       renderPlayerPlaylist();
       highlightPlayingCard();
       scheduleFormatBadgePoll();
+      scheduleDurationPoll();
       markGridJustLoaded();
       if (state.pageSize === "auto") {
         lastAutoPageSize = getEffectivePageSize();
@@ -2372,6 +2706,7 @@
     renderPlayerPlaylist();
     highlightPlayingCard();
     scheduleFormatBadgePoll();
+    scheduleDurationPoll();
     markGridJustLoaded();
     if (state.pageSize === "auto") {
       lastAutoPageSize = getEffectivePageSize();
@@ -2763,6 +3098,7 @@
       state.resumePlayback = s.html5_resume_playback !== false;
       state.wheelSeekSec = normalizeWheelSeekSec(s.html5_wheel_seek_sec ?? SETTINGS_DEFAULTS.html5_wheel_seek_sec);
       state.thumbProgressBar = normalizeThumbProgressBar(s.thumb_progress_bar);
+      applyPlayerHotkeySettings(s);
       const theme = resolveTheme(s);
       applyTheme(theme, { persistLocal: true });
       return s;
@@ -2788,10 +3124,10 @@
   function playlistItemRowHtml(v) {
     return `
       <button type="button" class="player-pl-item w-full ${v.id === state.playingId ? "active" : ""}" data-id="${escAttr(v.id)}">
-        <div class="player-pl-thumb">${renderThumbHtml(v)}</div>
+        <div class="player-pl-thumb">${renderThumbHtml(v, 99, { showOverlays: false })}</div>
         <div class="player-pl-meta min-w-0">
-          <p class="truncate text-xs font-medium">${esc(v.title || v.filename)}</p>
-          <p class="truncate text-[10px] text-muted">${esc(v.filename)}</p>
+          <p class="player-pl-title truncate text-sm font-medium">${esc(v.title || v.filename)}</p>
+          <p class="player-pl-sub truncate text-xs text-muted">${playlistMetaSubline(v)}</p>
         </div>
       </button>`;
   }
@@ -2907,6 +3243,7 @@
     });
     if (scrollToActive) scrollPlaylistToActive();
     else el.scrollTop = savedScrollTop;
+    bindPlaylistPathTips();
     bindPlaylistInfiniteScroll();
   }
 
@@ -3440,6 +3777,9 @@
       return { text: `边切边播${codec ? ` · ${codec}` : ""}`, cls: "fmt-large" };
     }
     if (info.mode === "direct") {
+      if (info.experimental_direct) {
+        return { text: `实验直连${codec ? ` · ${codec}` : ""}`, cls: "fmt-experimental" };
+      }
       const std =
         info.structure?.kind === "standard" ||
         (info.reason && /H\.264 MP4|直接播放/.test(info.reason));
@@ -3471,6 +3811,7 @@
 
   function playStageLabel(info) {
     if (!info) return "";
+    if (info.experimental_direct) return "实验直连";
     if (info.mode === "hls" && info.transcode) return "AV1/HEVC 转码";
     if (info.mode === "hls") return "碎片化切片";
     if (info.structure?.kind === "moov_end") return "拉取索引";
@@ -3501,6 +3842,7 @@
     state.playingId = item.id;
     state.playerViewOpen = true;
     syncGalleryLayout();
+    mountVideoToPlayer();
     const title = item.title || item.filename || item.id;
     setPlayerHeaderTitle(title);
     const pathEl = $("#player-path");
@@ -3544,8 +3886,51 @@
     pendingPlayId = null;
     recordPlayHistory(item.id);
     if (video) bindPlaybackProgressSaver(video, item.id);
+    updateMediaSession(item);
     prefetchPlaylistIfNeeded();
     prefetchAdjacentPlayInfo(1);
+  }
+
+  function updateMediaSession(item) {
+    if (!navigator.mediaSession || !item) return;
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: item.title || item.filename || "视频",
+        artist: item.category || "Loc Gallery",
+        album: "Loc Gallery",
+      });
+      navigator.mediaSession.setActionHandler("previoustrack", () => {
+        void playAdjacentVideo(-1);
+      });
+      navigator.mediaSession.setActionHandler("nexttrack", () => {
+        void playAdjacentVideo(1);
+      });
+    } catch (_) { /* ignore */ }
+  }
+
+  function clearMediaSession() {
+    if (!navigator.mediaSession) return;
+    try {
+      navigator.mediaSession.metadata = null;
+      navigator.mediaSession.setActionHandler("previoustrack", null);
+      navigator.mediaSession.setActionHandler("nexttrack", null);
+    } catch (_) { /* ignore */ }
+  }
+
+  function handlePlayerNavKey(e) {
+    if (!state.playerViewOpen || e.target.matches("input, select, textarea")) return false;
+    if (e.ctrlKey || e.metaKey || e.altKey) return false;
+    if (keyEventMatchesHotkey(e, state.playerPrevKey)) {
+      e.preventDefault();
+      void playAdjacentVideo(-1);
+      return true;
+    }
+    if (keyEventMatchesHotkey(e, state.playerNextKey)) {
+      e.preventDefault();
+      void playAdjacentVideo(1);
+      return true;
+    }
+    return false;
   }
 
   function videoHasPicture(video) {
@@ -3901,7 +4286,13 @@
         return;
       }
 
-      await startDirectStream(id, base, session, info);
+      try {
+        await startDirectStream(id, base, session, info);
+      } catch (directErr) {
+        if (!info.experimental_direct) throw directErr;
+        updatePlayOverlay("直连失败", "改用服务端转码…", { indeterminate: true, item: base, info });
+        await startWebHlsPlayback(id, base, session, { ...info, mode: "hls", transcode: true });
+      }
     } catch (err) {
       if (await abortIfStale(session)) return;
       pendingPlayId = null;
@@ -4113,6 +4504,7 @@
     state.playerViewOpen = false;
     hidePlayerPreparing();
     resetVideoDisplay(video);
+    clearMediaSession();
     parkVideoEngine();
     syncGalleryLayout();
     state.playingId = null;
@@ -4141,6 +4533,7 @@
     if (next) {
       const prefetched = takeCachedPlayInfo(next.id);
       await playVideo(next.id, { prefetchedInfo: prefetched });
+      updateMediaSession(next);
     }
   }
 
@@ -4527,19 +4920,24 @@
           thumb_workers: workers,
           thumb_idle_scan: $("#set-idle-scan")?.value === "true",
           thumb_progress_bar: normalizeThumbProgressBar($("#set-thumb-progress-bar")?.value),
-          default_page_size: (() => {
-            const raw = $("#set-page-size")?.value;
-            if (raw === "-1") return -1;
-            return parseInt(raw, 10);
-          })(),
+          default_page_size: readSettingsPageSize(),
           potplayer_path: $("#set-potplayer")?.value || "",
           player_mode: document.querySelector('input[name="player-mode"]:checked')?.value || SETTINGS_DEFAULTS.player_mode,
           hls_large_h264: $("#set-hls-large-h264")?.value === "true",
           hls_moov_end_h264: $("#set-hls-moov-end-h264")?.value === "true",
           html5_fragmented_mp4: $("#set-html5-fragmented-mp4")?.value || "external",
+          html5_modern_codecs_direct: $("#set-html5-modern-codecs-direct")?.value === "true",
           html5_playlist_autoplay: $("#set-html5-playlist-autoplay")?.value === "true",
           html5_resume_playback: $("#set-html5-resume-playback")?.value === "true",
           html5_wheel_seek_sec: normalizeWheelSeekSec($("#set-html5-wheel-seek-sec")?.value),
+          html5_player_prev_key: normalizePlayerHotkey(
+            $("#set-html5-player-prev-key")?.value,
+            SETTINGS_DEFAULTS.html5_player_prev_key,
+          ),
+          html5_player_next_key: normalizePlayerHotkey(
+            $("#set-html5-player-next-key")?.value,
+            SETTINGS_DEFAULTS.html5_player_next_key,
+          ),
           history_retention_days: historyDays,
           ui_theme: normalizeTheme($("#set-ui-theme")?.value),
           scope: "global",
@@ -4550,6 +4948,10 @@
       state.resumePlayback = $("#set-html5-resume-playback")?.value === "true";
       state.wheelSeekSec = normalizeWheelSeekSec($("#set-html5-wheel-seek-sec")?.value);
       state.thumbProgressBar = normalizeThumbProgressBar($("#set-thumb-progress-bar")?.value);
+      applyPlayerHotkeySettings({
+        html5_player_prev_key: $("#set-html5-player-prev-key")?.value,
+        html5_player_next_key: $("#set-html5-player-next-key")?.value,
+      });
       applyTheme($("#set-ui-theme")?.value || state.theme, { persistLocal: true });
       $("#settings-dialog")?.close();
       loadProgress();
@@ -4678,6 +5080,8 @@
     await loadCategories();
     await loadVideos({ forceRebuild: true });
     await loadProgress();
+    scheduleFormatBadgePoll();
+    scheduleDurationPoll();
   });
 
   $("#btn-pause").addEventListener("click", async () => {
@@ -4867,6 +5271,9 @@
     }
   });
 
+  $("#set-page-size-mode")?.addEventListener("change", syncSettingsPageSizeUi);
+  $("#btn-restart-service")?.addEventListener("click", () => { void restartServiceFromSettings(); });
+
   $("#rename-dialog").addEventListener("close", async (e) => {
     if (e.target.returnValue !== "save" || !renameTargetId) return;
     try {
@@ -4957,10 +5364,14 @@
       void cancelPlayback();
       return;
     }
+    if (handlePlayerNavKey(e)) return;
+    const nextHotkey = normalizePlayerHotkey(state.playerNextKey, SETTINGS_DEFAULTS.html5_player_next_key);
     if (e.key === "/" && document.activeElement !== $("#search")) {
+      if (state.playerViewOpen && nextHotkey === "/") return;
       e.preventDefault();
       $("#search").focus();
     }
+    if (state.playerViewOpen) return;
     if (e.key === "ArrowLeft" && !e.target.matches("input, select, textarea")) {
       goToPage(state.page - 1);
     }
@@ -4974,6 +5385,7 @@
   syncGalleryLayout();
   parkVideoEngine();
   bindPlayerStageWheelSeek();
+  applyPlayerHotkeySettings(SETTINGS_DEFAULTS);
   loadState();
   syncPlaylistSortSelect();
   parseUrl();

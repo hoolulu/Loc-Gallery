@@ -23,7 +23,7 @@ _HLS_TRANSCODE_VIDEO = {"av1", "hevc", "h265", "vp9"}
 _IMAGE_CODECS = {"png", "mjpeg", "jpeg", "apng", "gif", "bmp", "webp"}
 _BROWSER_NATIVE_EXTENSIONS = {".mp4", ".m4v", ".mov"}
 _WEB_DIRECT_EXTENSIONS = {".webm", ".ogv"}
-_PLAN_VERSION = 15
+_PLAN_VERSION = 17
 _H264_NAL_SIGS = (
     b"\x00\x00\x00\x01\x67", b"\x00\x00\x00\x01\x68", b"\x00\x00\x00\x01\x65",
     b"\x00\x00\x01\x67", b"\x00\x00\x01\x68",
@@ -97,9 +97,36 @@ def _hls_policy_tag() -> str:
     large = bool(get_setting("hls_large_h264"))
     moov = bool(get_setting("hls_moov_end_h264"))
     frag = str(get_setting("html5_fragmented_mp4") or "external").strip().lower()
+    modern = bool(get_setting("html5_modern_codecs_direct"))
     if frag not in ("external", "hls"):
         frag = "external"
-    return f"v{_PLAN_VERSION}:{int(large)}{int(moov)}:{frag}"
+    return f"v{_PLAN_VERSION}:{int(large)}{int(moov)}:{frag}:{int(modern)}"
+
+
+def _modern_codecs_direct_enabled() -> bool:
+    return bool(get_setting("html5_modern_codecs_direct"))
+
+
+def _plan_modern_codec_direct(
+    codec: str,
+    *,
+    structure: dict | None = None,
+    container: str | None = None,
+) -> dict:
+    label = (codec or "unknown").upper()
+    container_hint = f" {container}" if container else ""
+    plan = {
+        "mode": "direct",
+        "transcode": False,
+        "reason": f"{label}{container_hint}，实验性浏览器直连（失败将自动转码）",
+        "codec": codec,
+        "experimental_direct": True,
+    }
+    if structure is not None:
+        plan["structure"] = structure
+    if container:
+        plan["container"] = container
+    return plan
 
 
 def _disk_cache_get(key: str, mtime: float, size: int) -> dict | None:
@@ -396,6 +423,13 @@ def can_remux_from_plan(plan: dict) -> tuple[bool, str]:
     return True, ""
 
 
+def _is_interleaved_structure(plan: dict) -> bool:
+    structure = plan.get("structure") or {}
+    kind = structure.get("kind")
+    mdat_count = int(structure.get("mdat_count") or 0)
+    return kind == "fragmented" and mdat_count > 3
+
+
 def classify_format_plan(plan: dict | None) -> str | None:
     """格式分类（角标/筛选共用）；标准直连返回 None。"""
     if not plan:
@@ -412,15 +446,16 @@ def classify_format_plan(plan: dict | None) -> str | None:
     structure = plan.get("structure") or {}
     kind = structure.get("kind")
     mdat_count = int(structure.get("mdat_count") or 0)
+    interleaved = _is_interleaved_structure(plan)
 
     if plan.get("disguised") or kind in ("disguised_mpegts", "disguised_h264"):
         return "disguised"
 
+    if interleaved:
+        return "interleaved"
+
     if plan.get("transcode"):
         return "transcode"
-
-    if kind == "fragmented" and mdat_count > 3 and mode == "hls":
-        return "interleaved"
 
     if kind == "moov_end":
         return "moov_end"
@@ -600,6 +635,8 @@ def _plan_non_native_container(path: Path, ext: str, sniff: str) -> dict:
         }
 
     if codec in _HLS_TRANSCODE_VIDEO:
+        if _modern_codecs_direct_enabled():
+            return _plan_modern_codec_direct(codec, container=label)
         return {
             "mode": "hls",
             "transcode": True,
@@ -662,6 +699,8 @@ def _build_playback_plan(path: Path) -> dict:
                     "container": sniff,
                 }
             if codec in _HLS_TRANSCODE_VIDEO:
+                if _modern_codecs_direct_enabled():
+                    return _plan_modern_codec_direct(codec, container=ext[1:].upper())
                 return {
                     "mode": "hls",
                     "transcode": True,
@@ -696,6 +735,8 @@ def _build_playback_plan(path: Path) -> dict:
     kind = structure["kind"]
 
     if codec in _HLS_TRANSCODE_VIDEO:
+        if _modern_codecs_direct_enabled():
+            return _plan_modern_codec_direct(codec, structure=structure, container=sniff)
         return {
             "mode": "hls",
             "transcode": True,

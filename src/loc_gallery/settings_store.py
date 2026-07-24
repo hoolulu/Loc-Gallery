@@ -14,6 +14,9 @@ from loc_gallery.config import (
     HTML5_PLAYLIST_AUTOPLAY,
     HTML5_RESUME_PLAYBACK,
     HTML5_WHEEL_SEEK_SEC,
+    HTML5_MODERN_CODECS_DIRECT,
+    HTML5_PLAYER_PREV_KEY,
+    HTML5_PLAYER_NEXT_KEY,
     PLAYER_MODE,
     SETTINGS_FILE,
     THUMB_IDLE_SCAN,
@@ -45,6 +48,9 @@ _DEFAULTS = {
     "html5_playlist_autoplay": HTML5_PLAYLIST_AUTOPLAY,
     "html5_resume_playback": HTML5_RESUME_PLAYBACK,
     "html5_wheel_seek_sec": HTML5_WHEEL_SEEK_SEC,
+    "html5_modern_codecs_direct": HTML5_MODERN_CODECS_DIRECT,
+    "html5_player_prev_key": HTML5_PLAYER_PREV_KEY,
+    "html5_player_next_key": HTML5_PLAYER_NEXT_KEY,
     "ui_theme": "dark",
 }
 
@@ -65,6 +71,9 @@ _LIBRARY_OVERRIDE_KEYS = {
     "html5_playlist_autoplay",
     "html5_resume_playback",
     "html5_wheel_seek_sec",
+    "html5_modern_codecs_direct",
+    "html5_player_prev_key",
+    "html5_player_next_key",
 }
 
 

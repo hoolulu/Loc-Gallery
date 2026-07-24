@@ -50,10 +50,13 @@ def port_in_use(port: int = PORT) -> bool:
         return s.connect_ex((HOST, port)) == 0
 
 
-def kill_pid(pid: int) -> None:
+def kill_pid(pid: int, *, tree: bool = False) -> None:
     if sys.platform == "win32":
+        args = ["taskkill", "/PID", str(pid), "/F"]
+        if tree:
+            args.append("/T")
         subprocess.run(
-            ["taskkill", "/PID", str(pid), "/F", "/T"],
+            args,
             capture_output=True, text=True,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
@@ -80,7 +83,7 @@ def kill_port_listeners(port: int = PORT) -> None:
         if parts and parts[-1].isdigit():
             pids.add(int(parts[-1]))
     for pid in pids:
-        kill_pid(pid)
+        kill_pid(pid, tree=True)
 
 
 def stop_service() -> None:

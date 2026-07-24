@@ -123,6 +123,7 @@ def get_format_kind_for_item(
 def filter_items_by_format(items, fmt: str, library_id: str) -> list:
     if not fmt or fmt == "all":
         return items
+    interleaved_kinds = {"interleaved", "remuxable"}
     index = _load_index(library_id)
     out = []
     for v in items:
@@ -134,6 +135,9 @@ def filter_items_by_format(items, fmt: str, library_id: str) -> list:
             continue
         if fmt == "non_standard":
             out.append(v)
+        elif fmt == "interleaved":
+            if kind in interleaved_kinds:
+                out.append(v)
         elif kind == fmt:
             out.append(v)
     return out
@@ -179,11 +183,11 @@ def rebuild_format_index_from_plans(library_id: str) -> int:
                 continue
             if entry.get("mtime") != v.mtime or entry.get("size") != v.size:
                 continue
-            kind = entry.get("format_kind")
-            if not kind:
-                plan = entry.get("plan")
-                if isinstance(plan, dict):
-                    kind = classify_format_plan(plan) or ""
+            plan = entry.get("plan")
+            if isinstance(plan, dict):
+                kind = classify_format_plan(plan) or ""
+            else:
+                kind = entry.get("format_kind") or ""
             if kind is None:
                 kind = ""
             prev = index.get(v.id)

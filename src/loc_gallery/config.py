@@ -29,6 +29,9 @@ HTML5_FRAGMENTED_MP4 = "external"
 HTML5_PLAYLIST_AUTOPLAY = True  # HTML5 播放页列表播完是否自动下一集
 HTML5_RESUME_PLAYBACK = True  # HTML5 是否记忆播放位置并续播
 HTML5_WHEEL_SEEK_SEC = 5  # 播放画面区滚轮每次快进/快退秒数（0=关闭）
+HTML5_MODERN_CODECS_DIRECT = True  # AV1/HEVC/VP9 在 MP4/WebM 中尝试浏览器直连（实验）
+HTML5_PLAYER_PREV_KEY = "."  # 播放页上一个
+HTML5_PLAYER_NEXT_KEY = "/"  # 播放页下一个
 
 PORT = 3456
 HOST = "127.0.0.1"
