@@ -1396,10 +1396,16 @@ async def api_thumb_cleanup(library_id: str = Depends(resolve_library_id)):
 
 
 @app.post("/api/thumb/{video_id}/candidates")
-async def api_thumb_candidates(video_id: str, library_id: str = Depends(resolve_library_id)):
-    """Generate 5 candidate thumbnails for manual selection."""
+async def api_thumb_candidates(
+    video_id: str,
+    req: Request,
+    library_id: str = Depends(resolve_library_id),
+):
+    """Generate candidate thumbnails for manual selection. Query param jitter=true for randomized positions."""
+    raw = req.query_params.get("jitter", "").lower()
+    jitter = raw in ("1", "true", "yes")
     try:
-        cands = generate_thumb_candidates(video_id, library_id)
+        cands = generate_thumb_candidates(video_id, library_id, jitter=jitter)
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
     version = str(time.time())

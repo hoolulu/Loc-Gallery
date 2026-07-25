@@ -1026,8 +1026,8 @@ def batch_regenerate_with_candidates(video_ids: list[str], auto_select: bool = T
             count += 1
             continue
 
-        # Auto-select mode: Laplacian candidate scoring
-        cands = _generate_thumb_candidates(item, count=cand_count)
+        # Auto-select mode: Laplacian candidate scoring with jittered positions for variety
+        cands = _generate_thumb_candidates(item, count=cand_count, jitter=True)
         # Pick best by Laplacian variance (sharpness)
         best = None
         best_score = -1.0
@@ -1554,18 +1554,25 @@ def _generate_thumb_file(
 THUMB_CANDIDATE_POSITIONS = [0.1, 0.25, 0.4, 0.55, 0.7, 0.85]
 
 
-def _candidate_positions(count: int) -> list[float]:
-    """Evenly spaced positions in [0.1, 0.85] for N candidates."""
+def _candidate_positions(count: int, jitter: bool = False) -> list[float]:
+    """Evenly spaced positions in [0.1, 0.85] for N candidates. When jitter=True, add ±4% random offset per position."""
     if count < 2:
         return [0.5]
+    positions: list[float] = []
     start, end = 0.1, 0.85
     step = (end - start) / (count - 1)
-    return [round(start + i * step, 4) for i in range(count)]
+    for i in range(count):
+        pos = round(start + i * step, 4)
+        if jitter:
+            offset = round((random.random() - 0.5) * 0.08, 4)
+            pos = round(max(0.05, min(0.95, pos + offset)), 4)
+        positions.append(pos)
+    return positions
 
 
-def _generate_thumb_candidates(item: VideoItem, count: int = 6) -> list[dict]:
+def _generate_thumb_candidates(item: VideoItem, count: int = 6, jitter: bool = False) -> list[dict]:
     """Generate N candidate thumbnails at evenly spaced positions. Returns [{pos, file}...]."""
-    positions = _candidate_positions(count)
+    positions = _candidate_positions(count, jitter=jitter)
     results = []
     for i, pos in enumerate(positions):
         cand_path = _tdir() / f"{item.id}_c{i}.jpg"
@@ -1585,7 +1592,7 @@ def _generate_thumb_candidates(item: VideoItem, count: int = 6) -> list[dict]:
 
 
 def generate_thumb_candidates(
-    video_id: str, library_id: str | None = None
+    video_id: str, library_id: str | None = None, jitter: bool = False
 ) -> list[dict]:
     """Generate candidate thumbnails (count from settings) and return their info. Cleans old candidates first."""
     lid = _lid(library_id)
@@ -1604,7 +1611,7 @@ def generate_thumb_candidates(
         except OSError:
             pass
 
-    cands = _generate_thumb_candidates(item, count=cand_count)
+    cands = _generate_thumb_candidates(item, count=cand_count, jitter=jitter)
     return cands
 
 
