@@ -1923,6 +1923,26 @@
 
     renderPickerGrid(candidates);
 
+    // "换一组" button: regenerate with jittered positions
+    $("#thumb-picker-reroll").onclick = async () => {
+      hint.textContent = "重新生成中…";
+      grid.innerHTML = "";
+      try {
+        const res = await api(`/api/thumb/${encodeURIComponent(videoId)}/candidates?jitter=1`, {
+          method: "POST",
+        });
+        const newCands = res.candidates || [];
+        if (newCands.length) {
+          hint.textContent = "点击选择一张作为缩略图";
+          renderPickerGrid(newCands);
+        } else {
+          hint.textContent = "该视频无法生成缩略图，请点击取消";
+        }
+      } catch {
+        hint.textContent = "重新生成失败，请点击取消";
+      }
+    };
+
     dlg.querySelector("button[value='cancel']")?.addEventListener("click", () => {
       dlg.close();
     });
