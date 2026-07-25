@@ -1902,21 +1902,30 @@
         dlg.close();
       } catch (pickErr) {
         // Regenerate candidates and retry
+        el.classList.remove("selected");
         hint.textContent = "重新生成中…";
         grid.innerHTML = "";
-        try {
-          const retry = await api(`/api/thumb/${encodeURIComponent(videoId)}/candidates`, {
-            method: "POST",
-          });
-          const retryCands = retry.candidates || [];
-          if (retryCands.length) {
-            hint.textContent = "已重新生成，请重新选择";
-            renderPickerGrid(retryCands);
-          } else {
-            hint.textContent = "该视频无法生成缩略图，请点击取消";
+
+        let retryCands = [];
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            const retry = await api(`/api/thumb/${encodeURIComponent(videoId)}/candidates`, {
+              method: "POST",
+            });
+            retryCands = retry.candidates || [];
+            if (retryCands.length) break;
+          } catch {}
+          if (attempt < 3 && !retryCands.length) {
+            hint.textContent = "正在重试生成…";
           }
-        } catch {
-          hint.textContent = "重新生成失败，请点击取消";
+        }
+
+        if (retryCands.length) {
+          hint.textContent = "已重新生成，请重新选择";
+          renderPickerGrid(retryCands);
+        } else {
+          dlg.close();
+          showToast("无法生成缩略图");
         }
       }
     };
@@ -1927,19 +1936,27 @@
     $("#thumb-picker-reroll").onclick = async () => {
       hint.textContent = "重新生成中…";
       grid.innerHTML = "";
-      try {
-        const res = await api(`/api/thumb/${encodeURIComponent(videoId)}/candidates?jitter=1`, {
-          method: "POST",
-        });
-        const newCands = res.candidates || [];
-        if (newCands.length) {
-          hint.textContent = "点击选择一张作为缩略图";
-          renderPickerGrid(newCands);
-        } else {
-          hint.textContent = "该视频无法生成缩略图，请点击取消";
+
+      let newCands = [];
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const res = await api(`/api/thumb/${encodeURIComponent(videoId)}/candidates?jitter=1`, {
+            method: "POST",
+          });
+          newCands = res.candidates || [];
+          if (newCands.length) break;
+        } catch {}
+        if (attempt < 3 && !newCands.length) {
+          hint.textContent = "正在重试生成…";
         }
-      } catch {
-        hint.textContent = "重新生成失败，请点击取消";
+      }
+
+      if (newCands.length) {
+        hint.textContent = "点击选择一张作为缩略图";
+        renderPickerGrid(newCands);
+      } else {
+        dlg.close();
+        showToast("无法生成缩略图");
       }
     };
 

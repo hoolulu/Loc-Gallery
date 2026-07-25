@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
+import uuid
 
 from PIL import Image, ImageFilter, ImageStat
 
@@ -1463,10 +1464,12 @@ def _thumb_seek_points(duration: float, position: float) -> list[float]:
 
 
 def _capture_timeout(seek: float, size: int) -> int:
+    if seek <= 10:
+        return 8
     if seek <= 30:
-        return 18
+        return 15
     if seek <= 180:
-        return 35
+        return 30
     if seek <= 600:
         return 50
     return 65 if size <= FFPROBE_MAX_SIZE else 80
@@ -1474,7 +1477,7 @@ def _capture_timeout(seek: float, size: int) -> int:
 
 def _try_capture_thumb(item: VideoItem, seek: float, output: Path, use_mpegts: bool) -> bool:
     global _last_capture_error, _last_capture_seek
-    wip = output.parent / f"{output.stem}_wip.jpg"
+    wip = output.parent / f"{output.stem}_wip_{uuid.uuid4().hex[:8]}.jpg"
     wip.unlink(missing_ok=True)
     cmd = [ffmpeg_path(), "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
            "-probesize", "8M", "-analyzeduration", "5M"]
@@ -1548,6 +1551,13 @@ def _generate_thumb_file(
     for use_mpegts in modes:
         if _capture_by_position(use_mpegts):
             return True
+
+    # Transient failure (ffmpeg timeout, resource contention) — one retry
+    time.sleep(0.5)
+    for use_mpegts in modes:
+        if _capture_by_position(use_mpegts):
+            return True
+
     return False
 
 
@@ -1565,7 +1575,7 @@ def _candidate_positions(count: int, jitter: bool = False) -> list[float]:
         pos = round(start + i * step, 4)
         if jitter:
             offset = round((random.random() - 0.5) * 0.08, 4)
-            pos = round(max(0.05, min(0.95, pos + offset)), 4)
+            pos = round(max(0.08, min(0.88, pos + offset)), 4)
         positions.append(pos)
     return positions
 
@@ -1603,13 +1613,14 @@ def generate_thumb_candidates(
     from loc_gallery.settings_store import get_setting
     cand_count = max(3, min(12, int(get_setting("thumb_candidate_count", lid) or 6)))
 
-    # Clean old candidate files
+    # Clean old candidate files + stale wip files
     tdir = _tdir(lid)
-    for p in tdir.glob(f"{video_id}_c*.jpg"):
-        try:
-            p.unlink(missing_ok=True)
-        except OSError:
-            pass
+    for pattern in (f"{video_id}_c*.jpg", f"{video_id}_wip*.jpg"):
+        for p in tdir.glob(pattern):
+            try:
+                p.unlink(missing_ok=True)
+            except OSError:
+                pass
 
     cands = _generate_thumb_candidates(item, count=cand_count, jitter=jitter)
     return cands
