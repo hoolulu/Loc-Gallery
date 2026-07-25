@@ -132,22 +132,29 @@
   }
 
   function getEffectivePageSize() {
-    if (state.pageSize !== "auto") return state.pageSize;
-    const measured = measureRenderedGridColumns();
-    return computeAutoPageSize(measured || undefined);
+    if (state.pageSize === "auto") {
+      const measured = measureRenderedGridColumns();
+      return computeAutoPageSize(measured || undefined);
+    }
+    if (state.pageSize === 0) return 0;
+    return Number(state.pageSize) || 40;
   }
 
   function syncPageSizeControls() {
-    const isAuto = state.pageSize === "auto";
-    const isAll = state.pageSize === 0;
-    $("#btn-page-size-auto")?.classList.toggle("active", isAuto);
+    const ps = state.pageSize;
+    const isAuto = ps === "auto";
+    const isAll = ps === 0 || ps === "0";
+    const isPre40 = Number(ps) === 40;
+    const isPre80 = Number(ps) === 80;
+    $("#btn-page-size-40")?.classList.toggle("active", isPre40);
+    $("#btn-page-size-80")?.classList.toggle("active", isPre80);
     $("#btn-page-size-all")?.classList.toggle("active", isAll);
     const input = $("#page-size-custom");
     if (!input) return;
-    const custom = !isAuto && !isAll && Number(state.pageSize) > 0;
+    const custom = !isAuto && !isAll && !isPre40 && !isPre80 && Number(ps) > 0;
     input.classList.toggle("page-size-input-active", custom);
-    if (isAuto || isAll) input.value = "";
-    else if (custom) input.value = String(state.pageSize);
+    if (custom) input.value = String(ps);
+    else input.value = "";
   }
 
   function scheduleAutoPageSizeCheck() {
@@ -177,7 +184,7 @@
     formatFilter: "",
     formatIndexStatus: null,
     page: 1,
-    pageSize: "auto",
+    pageSize: 40,
     categorySortMode: "custom",
     expandedCategories: new Set(),
     folderTrees: {},
@@ -195,6 +202,11 @@
     playSession: 0,
     activeSliceVideoId: null,
     viewMode: "browse",
+    albumId: "",
+    albums: [],
+    currentAlbum: null,
+    albumFormPendingIds: [],
+    albumCtxTarget: null,
     libraryId: "",
     libraries: [],
     playlistSort: "page",
@@ -217,6 +229,9 @@
   let thumbProgressManualExpand = false;
   let thumbProgressUserDismissed = false;
   let lastThumbProgressGlobal = null;
+  let lastDurationStatus = null;
+  let durationStatusSupported = true;
+  let durationStatusTimer = null;
   let searchTimer = null;
   let thumbRetryTimers = {};
   let progressTimer = null;
@@ -351,8 +366,9 @@
       if (saved.formatFilter) state.formatFilter = saved.formatFilter;
       if (saved.pageSize !== undefined) {
         const ps = saved.pageSize;
-        if (ps === "auto") state.pageSize = "auto";
-        else state.pageSize = ps === 28 ? 32 : ps === 56 ? 64 : ps;
+        if (ps === "auto") state.pageSize = 40;
+        else if (ps === "all" || ps === 0 || ps === "0") state.pageSize = 0;
+        else state.pageSize = Number(ps) || 40;
       }
       if (saved.libraryId !== undefined) state.libraryId = saved.libraryId;
       if (saved.playlistSort) state.playlistSort = saved.playlistSort;
@@ -496,22 +512,29 @@
   }
 
   function pathTipExtras(item) {
-    const parts = [];
+    const techParts = [];
     const dur = formatDuration(videoDurationSec(item));
-    if (dur) parts.push(`时长 ${dur}`);
+    if (dur) techParts.push(`时长 ${dur}`);
     const badgeMeta = FORMAT_BADGE_META[item.formatBadge];
-    if (badgeMeta?.label) parts.push(badgeMeta.label);
-    if (item.size) parts.push(formatSize(item.size));
+    if (badgeMeta?.label) techParts.push(badgeMeta.label);
+    if (item.size) techParts.push(formatSize(item.size));
+    if (item.mtime) techParts.push(`修改于 ${formatTs(item.mtime)}`);
+
+    const userParts = [];
     if (item.favorited && item.favoritedAt) {
-      parts.push(`收藏于 ${formatTs(item.favoritedAt)}`);
+      userParts.push(`收藏于 ${formatTs(item.favoritedAt)}`);
     } else if (item.favorited) {
-      parts.push("已收藏");
+      userParts.push("已收藏");
     }
     if (item.playedAt) {
       const n = item.playCount || 1;
-      parts.push(`最近播放 ${formatTs(item.playedAt)} · 累计 ${n} 次`);
+      userParts.push(`最近播放 ${formatTs(item.playedAt)} · 累计 ${n} 次`);
     }
-    return parts.map(t => `<div class="path-tip-meta">${esc(t)}</div>`).join("");
+
+    const lines = [];
+    if (techParts.length) lines.push(`<div class="path-tip-meta">${techParts.map(t => `<span class="path-tip-chip">${esc(t)}</span>`).join("")}</div>`);
+    if (userParts.length) lines.push(`<div class="path-tip-meta">${userParts.map(t => `<span class="path-tip-chip">${esc(t)}</span>`).join("")}</div>`);
+    return lines.join("");
   }
 
   function computePageThumbStats(items) {
@@ -571,6 +594,7 @@
       return;
     }
     syncThumbProgressUi();
+    void loadProgress();
     scheduleLoadProgress(500);
     pageThumbWorkTimer = setTimeout(() => {
       if (reqId !== videosLoadSeq) return;
@@ -775,6 +799,9 @@
       state.query = "";
       state.page = 1;
       state.viewMode = "browse";
+      state.albumId = "";
+      state.currentAlbum = null;
+      state.albums = [];
       $("#search").value = "";
     }
     renderLibrarySwitcher();
@@ -782,11 +809,14 @@
     await loadPlayerSettings();
     updatePotplayerPathVisibility();
     await loadCategories();
-    await loadVideos({ forceRebuild: true });
+    if (state.viewMode === "albums") {
+      await loadAlbums();
+    } else {
+      await loadVideos({ forceRebuild: true });
+    }
     loadProgress();
-    updateUrl();
-    saveState();
-    connectSSE(true);
+    updateUrl(true);
+    saveState();    connectSSE(true);
   }
 
   function currentLibraryAlias() {
@@ -797,11 +827,12 @@
   const SETTINGS_DEFAULTS = {
     player_mode: "html5",
     thumb_position: 0.6,
-    thumb_random_min: 0.5,
-    thumb_random_max: 0.8,
     thumb_workers: 3,
     thumb_idle_scan: false,
-    default_page_size: -1,
+    thumb_candidate_count: 6,
+  thumb_auto_select_best: false,
+  thumb_batch_auto_select: true,
+    default_page_size: 40,
     potplayer_path: "",
     history_retention_days: 180,
     hls_large_h264: false,
@@ -923,24 +954,28 @@
   }
 
   function resolveSettingsPageSize(pageSize) {
-    const ps = pageSize ?? -1;
-    if (ps === 0 || ps === "0") return { mode: "all", custom: "" };
+    const ps = pageSize ?? 40;
+    if (ps === 0 || ps === "0" || ps === "all") return { mode: "all", custom: "" };
+    const n = parseInt(ps, 10);
+    if (n === 40 || n === 80) return { mode: String(n), custom: "" };
     if (ps === -1 || ps === "auto") return { mode: "auto", custom: "" };
     return { mode: "custom", custom: String(ps) };
   }
 
   function syncSettingsPageSizeUi() {
-    const mode = $("#set-page-size-mode")?.value || "auto";
+    const mode = $("#set-page-size-mode")?.value || "40";
     const custom = $("#set-page-size-custom");
     if (custom) custom.classList.toggle("hidden", mode !== "custom");
   }
 
   function readSettingsPageSize() {
-    const mode = $("#set-page-size-mode")?.value || "auto";
-    if (mode === "auto") return -1;
+    const mode = $("#set-page-size-mode")?.value || "40";
     if (mode === "all") return 0;
-    const n = parseInt($("#set-page-size-custom")?.value, 10);
-    return Number.isFinite(n) && n > 0 ? n : 32;
+    if (mode === "auto") return -1;
+    const n = parseInt(mode, 10);
+    if (n === 40 || n === 80) return n;
+    const custom = parseInt($("#set-page-size-custom")?.value, 10);
+    return Number.isFinite(custom) && custom > 0 ? custom : 40;
   }
 
   function fillSettingsPageSize(pageSize) {
@@ -1098,6 +1133,146 @@
     return notReady === 0;
   }
 
+  function isDurationProgressIdle(st) {
+    return !isDurationWorkActive(st);
+  }
+
+  function pageMissingDurationCount(items = state.pageItems) {
+    return items.filter(v =>
+      !videoDurationSec(v) && VIDEO_FILE_EXT_RE.test(v.filename || v.title || "")
+    ).length;
+  }
+
+  function isDurationWorkActive(st = lastDurationStatus) {
+    if (st) {
+      if ((st.pending ?? 0) > 0) return true;
+      if ((st.queued ?? 0) > 0) return true;
+      if ((st.probing ?? 0) > 0) return true;
+      return false;
+    }
+    if (durationStatusSupported === false) return pageMissingDurationCount() > 0;
+    return false;
+  }
+
+  function buildFallbackDurationStatus() {
+    const total = state.pageItems.length;
+    const missing = pageMissingDurationCount();
+    const cached = Math.max(0, total - missing);
+    return {
+      fallback: true,
+      total,
+      cached,
+      pending: missing,
+      queued: missing,
+      probing: 0,
+      skipped: 0,
+      percent: total ? round((cached / total) * 100, 1) : 100,
+      ready: missing === 0,
+    };
+  }
+
+  function round(n, d = 0) {
+    const p = 10 ** d;
+    return Math.round(n * p) / p;
+  }
+
+  async function refreshDurationStatus() {
+    try {
+      const st = await api("/api/duration/status");
+      durationStatusSupported = true;
+      lastDurationStatus = st;
+      updateDurationProgressUI(st);
+      updateProgressBarVisibility(lastThumbProgressGlobal, st);
+      return st;
+    } catch (err) {
+      const msg = String(err?.message || err);
+      if (msg.includes("404") || msg.includes("Not Found")) {
+        durationStatusSupported = false;
+      }
+      const missing = pageMissingDurationCount();
+      if (missing > 0 || !durationStatusSupported) {
+        const st = buildFallbackDurationStatus();
+        lastDurationStatus = st;
+        updateDurationProgressUI(st);
+        updateProgressBarVisibility(lastThumbProgressGlobal, st);
+        return st;
+      }
+      lastDurationStatus = null;
+      updateDurationProgressUI(null);
+      updateProgressBarVisibility(lastThumbProgressGlobal, null);
+      return null;
+    }
+  }
+
+  function startDurationStatusPolling() {
+    clearTimeout(durationStatusTimer);
+    const tick = async () => {
+      await refreshDurationStatus();
+      const active = isDurationWorkActive(lastDurationStatus);
+      durationStatusTimer = setTimeout(tick, active ? 3000 : 20000);
+    };
+    durationStatusTimer = setTimeout(tick, 800);
+  }
+
+  function formatDurationProgressText(st) {
+    if (!st) return "时长探测: 加载中…";
+    if (st.fallback) {
+      const base = `当前页时长补全 ${st.cached}/${st.total} (${st.percent ?? 0}%)`;
+      return durationStatusSupported === false
+        ? `${base} · 服务需重启后可见全库进度`
+        : base;
+    }
+    const remaining = Math.max(0, st.remaining ?? st.pending ?? 0);
+    const workersTotal = st.workers_total ?? st.worker_count ?? 2;
+    const workersActive = st.workers_active ?? st.probing ?? 0;
+    const rate = Number(st.rate_per_min) || 0;
+    let detail = ` | 剩余 ${remaining}`;
+    if (rate > 0) {
+      detail += ` · 约 ${rate} 个/分钟`;
+      const etaMin = Math.ceil(remaining / rate);
+      if (etaMin > 0 && etaMin < 9999) detail += ` · 预计 ${etaMin} 分钟`;
+    }
+    detail += ` · ffprobe ${workersTotal} 路并行`;
+    if (workersActive > 0) {
+      detail += `（${workersActive} 路 ffprobe 运行中）`;
+    } else if (remaining > 0 && st.worker_alive !== false) {
+      detail += `（线程间歇，大文件可能单次需数十秒）`;
+    }
+    const workerPart = st.worker_alive === false && remaining > 0
+      ? " · 探测线程未运行，正在尝试恢复"
+      : "";
+    const skipPart = st.skipped ? ` · 跳过 ${st.skipped}（下载中/不可处理）` : "";
+    return `时长探测 ${st.cached ?? 0}/${st.total ?? 0} (${st.percent ?? 0}%)${detail}${workerPart}${skipPart}`;
+  }
+
+  function updateDurationProgressUI(st) {
+    const wrap = $("#duration-progress-wrap");
+    const text = $("#duration-progress-text");
+    const fill = $("#duration-progress-fill");
+    const chip = $("#duration-status-chip");
+    if (!wrap || !text || !fill) return;
+    const busy = isDurationWorkActive(st);
+    wrap.classList.toggle("hidden", !busy);
+    if (chip) chip.classList.remove("hidden");
+    chip?.classList.toggle("duration-status-chip--idle", !busy);
+    if (!busy) {
+      chip?.classList.add("hidden");
+      return;
+    }
+    text.textContent = formatDurationProgressText(st);
+    fill.style.width = `${Math.max(0, Math.min(100, st?.percent ?? 0))}%`;
+    const hint = $("#duration-progress-hint");
+    if (hint) {
+      hint.textContent = st?.fallback
+        ? "当前仅显示本页进度。请运行 python restart.py 加载新版服务后，可查看全库时长探测进度。"
+        : "后台用 ffprobe 逐条探测（默认 2 路并行，大文件单次可能较慢）；结果写入缩略图索引，已有播放记录会先复用。";
+    }
+    text.title = "服务启动或点「刷新」后会自动排队；当前页缺失时也会优先补全。结果写入缩略图索引，卡片左下角显示。";
+    if (chip) {
+      chip.title = `${formatDurationProgressText(st)} · 点击展开详情`;
+    }
+  }
+
   function refreshPageThumbProgressUi() {
     if (isPageThumbActive()) {
       syncThumbProgressUi();
@@ -1133,13 +1308,15 @@
     thumbProgressManualExpand = false;
   }
 
-  function updateProgressBarVisibility(global) {
+  function updateProgressBarVisibility(global, durationSt = lastDurationStatus) {
     const mode = normalizeThumbProgressBar(state.thumbProgressBar);
-    const idle = isThumbProgressIdle(global);
+    const thumbIdle = isThumbProgressIdle(global);
+    const durationBusy = !isDurationProgressIdle(durationSt);
+    const idle = thumbIdle && !durationBusy;
 
     let showBar;
     if (mode === "always") showBar = true;
-    else if (mode === "never") showBar = false;
+    else if (mode === "never") showBar = durationBusy;
     else if (!idle) showBar = !thumbProgressUserDismissed;
     else showBar = thumbProgressManualExpand;
 
@@ -1152,7 +1329,7 @@
     chip.classList.toggle("hidden", !showChip);
     chip.classList.toggle("thumb-status-chip--expanded", showChip && showBar);
     chip.setAttribute("aria-expanded", showChip && showBar ? "true" : "false");
-    if (!idle && thumbProgressUserDismissed) {
+    if (!thumbIdle && thumbProgressUserDismissed) {
       chip.title = "缩略图生成中，点击展开进度";
     } else if (showBar) {
       chip.title = "点击收起缩略图进度";
@@ -1162,19 +1339,22 @@
     dot.classList.remove("thumb-status-dot--ok", "thumb-status-dot--busy", "thumb-status-dot--fail");
     if (!showChip) return;
     const failCount = global?.failed ?? 0;
-    const busy = !idle;
+    const busy = !thumbIdle;
     if (failCount > 0) dot.classList.add("thumb-status-dot--fail");
     else if (busy) dot.classList.add("thumb-status-dot--busy");
     else dot.classList.add("thumb-status-dot--ok");
+
+    updateDurationProgressUI(durationSt);
   }
 
   function toggleThumbProgressBar() {
     const mode = normalizeThumbProgressBar(state.thumbProgressBar);
     if (mode !== "auto") return;
-    const idle = isThumbProgressIdle(lastThumbProgressGlobal);
-    if (!idle) thumbProgressUserDismissed = !thumbProgressUserDismissed;
+    const thumbIdle = isThumbProgressIdle(lastThumbProgressGlobal);
+    const durationBusy = !isDurationProgressIdle(lastDurationStatus);
+    if (!thumbIdle || durationBusy) thumbProgressUserDismissed = !thumbProgressUserDismissed;
     else thumbProgressManualExpand = !thumbProgressManualExpand;
-    updateProgressBarVisibility(lastThumbProgressGlobal);
+    updateProgressBarVisibility(lastThumbProgressGlobal, lastDurationStatus);
   }
 
   function fillSettingsForm(raw) {
@@ -1185,11 +1365,12 @@
       if (el) el.value = val ?? "";
     };
     setVal("set-position", s.thumb_position);
-    setVal("set-random-min", s.thumb_random_min);
-    setVal("set-random-max", s.thumb_random_max);
     setVal("set-workers", s.thumb_workers);
     setVal("set-idle-scan", String(!!s.thumb_idle_scan));
     setVal("set-thumb-progress-bar", normalizeThumbProgressBar(s.thumb_progress_bar));
+    setVal("set-candidate-count", s.thumb_candidate_count ?? 6);
+    setVal("set-auto-select-best", String(!!(s.thumb_auto_select_best ?? SETTINGS_DEFAULTS.thumb_auto_select_best)));
+    setVal("set-batch-auto-select", String(!!(s.thumb_batch_auto_select ?? SETTINGS_DEFAULTS.thumb_batch_auto_select)));
     state.thumbProgressBar = normalizeThumbProgressBar(s.thumb_progress_bar);
     setVal("set-ui-theme", resolveTheme(s));
     applyTheme(resolveTheme(s), { persistLocal: true });
@@ -1300,6 +1481,85 @@
       .replace(/</g, "&lt;");
   }
 
+  function dismissToast(el) {
+    if (!el || el.classList.contains("hide")) return;
+    clearTimeout(el._toastTimer);
+    el.classList.remove("show");
+    el.classList.add("hide");
+    setTimeout(() => el.remove(), 280);
+  }
+
+  function showToast(message, { type = "info", duration = 3200 } = {}) {
+    const stack = $("#toast-stack");
+    if (!stack || !message) return;
+    const icon = type === "success" ? "✓" : type === "error" ? "!" : "ℹ";
+    const el = document.createElement("div");
+    el.className = `toast toast--${type}`;
+    el.setAttribute("role", type === "error" ? "alert" : "status");
+    el.innerHTML = `<span class="toast-icon" aria-hidden="true">${icon}</span><span class="toast-text">${esc(message)}</span>`;
+    el.addEventListener("click", () => dismissToast(el));
+    stack.appendChild(el);
+    requestAnimationFrame(() => el.classList.add("show"));
+    el._toastTimer = setTimeout(() => dismissToast(el), duration);
+  }
+
+  function itemDisplayTitle(itemOrId) {
+    const item = typeof itemOrId === "string" ? getItemById(itemOrId) : itemOrId;
+    if (!item) return "视频";
+    const t = (item.title || "").trim();
+    const raw = t || item.filename || "视频";
+    return raw.length > 32 ? `${raw.slice(0, 32)}…` : raw;
+  }
+
+  function albumDisplayName(albumId) {
+    const found = state.albums.find(a => a.id === albumId);
+    if (found?.name) return found.name;
+    if (state.currentAlbum?.id === albumId && state.currentAlbum?.name) {
+      return state.currentAlbum.name;
+    }
+    return "专辑";
+  }
+
+  function formatNameList(names, max = 2) {
+    const uniq = [...new Set((names || []).filter(Boolean))];
+    if (!uniq.length) return "";
+    if (uniq.length <= max) return uniq.map(n => `「${n}」`).join("、");
+    return `「${uniq[0]}」等 ${uniq.length} 个`;
+  }
+
+  function summarizeAlbumPickerOps(ops, videoCount) {
+    const addedAlbums = [];
+    const removedAlbums = [];
+    let addedVideos = 0;
+    let removedVideos = 0;
+    ops.forEach(op => {
+      const name = albumDisplayName(op.albumId);
+      if (op.add?.length) {
+        addedVideos += op.add.length;
+        addedAlbums.push(name);
+      }
+      if (op.remove?.length) {
+        removedVideos += op.remove.length;
+        removedAlbums.push(name);
+      }
+    });
+    const parts = [];
+    const nLabel = videoCount === 1 ? `「${itemDisplayTitle(ops[0]?.add?.[0] || ops[0]?.remove?.[0])}」` : `${videoCount} 个视频`;
+    if (addedVideos) {
+      if (videoCount === 1 && addedAlbums.length === 1 && !removedVideos) {
+        return `已将${nLabel}加入专辑${formatNameList(addedAlbums, 1)}`;
+      }
+      parts.push(`已加入${formatNameList(addedAlbums)}（${addedVideos} 项）`);
+    }
+    if (removedVideos) {
+      if (videoCount === 1 && removedAlbums.length === 1 && !addedVideos) {
+        return `已将${nLabel}从专辑${formatNameList(removedAlbums, 1)}移出`;
+      }
+      parts.push(`已从${formatNameList(removedAlbums)}移出（${removedVideos} 项）`);
+    }
+    return parts.join(" · ");
+  }
+
   function highlight(text, query) {
     if (!query) return esc(text);
     const idx = text.toLowerCase().indexOf(query.toLowerCase());
@@ -1331,9 +1591,7 @@
 
     const pageText = pageSize === 0
       ? `全部 ${total} 个`
-      : state.pageSize === "auto"
-        ? `第 ${page} / ${totalPages} 页 · 本页 ${pageSize}`
-        : `第 ${page} / ${totalPages} 页`;
+      : `第 ${page} / ${totalPages} 页`;
 
     $("#page-info").textContent = pageText;
     $("#page-info-bottom").textContent = pageText;
@@ -1513,7 +1771,13 @@
   }
 
   function selectCategory(category, folder = "") {
-    if (state.viewMode !== "browse") {
+    if (isAlbumView()) {
+      state.viewMode = "browse";
+      state.albumId = "";
+      state.currentAlbum = null;
+      updateViewModeButtons();
+      updateGalleryPanels();
+    } else if (state.viewMode !== "browse") {
       state.viewMode = "browse";
       updateViewModeButtons();
     }
@@ -1526,14 +1790,169 @@
     loadVideos({ forceRebuild: true });
   }
 
-  async function regenerateRandomThumbs(ids) {
+  async function switchThumbCandidate(videoId, { forceManual = false, label = "" } = {}) {
+    const dlg = document.getElementById("thumb-picker-dialog");
+    const grid = $("#thumb-picker-grid");
+    const hint = dlg?.querySelector(".hint");
+    const subtitle = $("#thumb-picker-subtitle");
+
+    // Auto-select mode: generate candidates, pick best, don't show dialog
+    if (state.thumbAutoSelectBest && !forceManual) {
+      let candidates = [];
+      try {
+        const result = await api(`/api/thumb/${encodeURIComponent(videoId)}/candidates`, {
+          method: "POST",
+        });
+        candidates = result.candidates || [];
+      } catch (err) {
+        alert("生成候选缩略图失败: " + err.message);
+        return;
+      }
+      if (!candidates.length) {
+        alert("未能生成候选缩略图");
+        return;
+      }
+      // candidates are sorted by Laplacian score descending, pick first
+      try {
+        const best = candidates[0];
+        const pickResult = await api(`/api/thumb/${encodeURIComponent(videoId)}/pick`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ index: best.index }),
+        });
+        if (pickResult.version) {
+          state.thumbBust[videoId] = pickResult.version;
+        }
+        lastThumbRefreshAt = 0;
+        void refreshVisibleThumbs();
+        scheduleThumbRefresh(videoId);
+        showToast(`已自动选择最优缩略图（${Math.round(best.pos * 100)}% 位置）`);
+      } catch (_) { /* ignore */ }
+      return;
+    }
+
+    // Manual mode: show picker dialog
+    if (!dlg || !grid || !hint) return;
+
+    // Set subtitle (title + progress for batch mode)
+    if (subtitle) {
+      if (label) {
+        subtitle.textContent = label;
+        subtitle.classList.remove("hidden");
+      } else {
+        subtitle.classList.add("hidden");
+      }
+    }
+
+    // Generate candidates in background first, only show dialog on success
+    let candidates = [];
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const result = await api(`/api/thumb/${encodeURIComponent(videoId)}/candidates`, {
+          method: "POST",
+        });
+        candidates = result.candidates || [];
+        if (candidates.length) break;
+      } catch (_) { /* retry */ }
+      // Only show progress feedback for retries (not the first attempt)
+      if (attempt > 1) showToast("重新生成候选缩略图…");
+    }
+
+    if (!candidates.length) {
+      showToast("无法生成缩略图");
+      return;
+    }
+
+    hint.textContent = "点击选择一张作为缩略图";
+    dlg.showModal();
+    let picked = false;
+
+    function renderPickerGrid(cands) {
+      const t = Date.now();
+      grid.innerHTML = cands.map((c) => `
+        <div class="thumb-picker-item" data-index="${c.index}" data-pos="${Math.round(c.pos * 100)}">
+          <img src="/api/thumb/${encodeURIComponent(videoId)}/candidate/${c.index}?v=${t}"
+               alt="候选 ${Math.round(c.pos * 100)}%"
+               loading="eager" decoding="async">
+          <div class="thumb-picker-label">${Math.round(c.pos * 100)}%</div>
+        </div>
+      `).join("");
+      grid.querySelectorAll(".thumb-picker-item").forEach(el => {
+        el.addEventListener("click", () => selectItem(el));
+      });
+    }
+
+    const selectItem = async (el) => {
+      if (picked) return;
+      const index = parseInt(el.dataset.index, 10);
+      el.classList.add("selected");
+      hint.textContent = "正在应用…";
+
+      try {
+        const result = await api(`/api/thumb/${encodeURIComponent(videoId)}/pick`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ index }),
+        });
+        if (result.version) {
+          state.thumbBust[videoId] = result.version;
+        }
+        picked = true;
+        refreshThumbById(videoId);
+        dlg.close();
+      } catch (pickErr) {
+        // Regenerate candidates and retry
+        hint.textContent = "重新生成中…";
+        grid.innerHTML = "";
+        try {
+          const retry = await api(`/api/thumb/${encodeURIComponent(videoId)}/candidates`, {
+            method: "POST",
+          });
+          const retryCands = retry.candidates || [];
+          if (retryCands.length) {
+            hint.textContent = "已重新生成，请重新选择";
+            renderPickerGrid(retryCands);
+          } else {
+            hint.textContent = "该视频无法生成缩略图，请点击取消";
+          }
+        } catch {
+          hint.textContent = "重新生成失败，请点击取消";
+        }
+      }
+    };
+
+    renderPickerGrid(candidates);
+
+    dlg.querySelector("button[value='cancel']")?.addEventListener("click", () => {
+      dlg.close();
+    });
+
+    await new Promise(r => dlg.addEventListener("close", r, { once: true }));
+  }
+
+  async function batchRegenerateThumbs(ids) {
     if (!ids.length) return;
+
+    // Manual batch: sequential picking, one video at a time
+    if (!state.thumbBatchAutoSelect) {
+      for (let i = 0; i < ids.length; i++) {
+        const title = itemDisplayTitle(ids[i]);
+        const progress = `${i + 1}/${ids.length}`;
+        await switchThumbCandidate(ids[i], {
+          forceManual: true,
+          label: `${progress}  ·  ${title}`,
+        });
+      }
+      return;
+    }
+
+    // Auto batch: use Laplacian candidate scoring
     try {
-      markThumbsRegenerating(ids, "random");
-      const result = await api("/api/thumb/regenerate", {
+      markThumbsRegenerating(ids, "batch");
+      const result = await api("/api/thumb/batch-regenerate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids, thumb_random: true }),
+        body: JSON.stringify({ ids, auto_select: state.thumbBatchAutoSelect }),
       });
       if (result.versions) {
         Object.entries(result.versions).forEach(([id, ver]) => {
@@ -1543,15 +1962,17 @@
       lastThumbRefreshAt = 0;
       void refreshVisibleThumbs();
       scheduleLoadProgress(300);
-      ids.forEach(id => scheduleThumbRefresh(id));
     } catch (err) {
-      alert("重新生成失败: " + err.message);
+      alert("批量换缩略图失败: " + err.message);
     }
   }
 
   function updateViewModeButtons() {
     $$(".view-mode-btn").forEach(btn => {
-      btn.classList.toggle("active", btn.dataset.view === state.viewMode);
+      const v = btn.dataset.view;
+      let active = v === state.viewMode;
+      if (v === "albums" && isAlbumDetailView()) active = true;
+      btn.classList.toggle("active", active);
     });
   }
 
@@ -1565,6 +1986,8 @@
 
   function goHome() {
     state.viewMode = "browse";
+    state.albumId = "";
+    state.currentAlbum = null;
     state.category = "";
     state.folder = "";
     state.query = "";
@@ -1572,28 +1995,49 @@
     const search = $("#search");
     if (search) search.value = "";
     updateViewModeButtons();
+    updateGalleryPanels();
     saveState();
     loadCategories();
     loadVideos({ forceRebuild: true });
   }
 
-  function setViewMode(mode) {
+  function setViewMode(mode, opts = {}) {
     const prev = state.viewMode;
     if (mode === "browse") {
       state.viewMode = "browse";
+      state.albumId = "";
+      state.currentAlbum = null;
+    } else if (mode === "albums") {
+      state.viewMode = "albums";
+      state.albumId = "";
+      state.currentAlbum = null;
     } else {
       state.viewMode = mode;
+      state.albumId = "";
+      state.currentAlbum = null;
       if (prev !== mode) {
         state.category = "";
         state.folder = "";
       }
     }
-    if (prev === state.viewMode) return;
+    if (mode === "album-detail" && opts.albumId) {
+      state.viewMode = "album-detail";
+      state.albumId = opts.albumId;
+    }
+    if (prev === state.viewMode && mode !== "album-detail") return;
     state.page = 1;
     updateViewModeButtons();
+    updateGalleryPanels();
     saveState();
     loadCategories();
-    loadVideos({ forceRebuild: true });
+    if (isAlbumListView()) {
+      updateUrl(true);
+      void loadAlbums();
+    } else if (isAlbumDetailView() && opts.albumId) {
+      void openAlbumDetail(opts.albumId);
+    } else {
+      loadVideos({ forceRebuild: true });
+    }
   }
 
   function statusLabel(total, page, totalPages) {
@@ -1603,11 +2047,13 @@
       }
       if (state.viewMode === "favorites") return "暂无收藏";
       if (state.viewMode === "history") return "暂无最近播放";
+      if (isAlbumDetailView()) return "专辑内暂无视频";
       return "0 个视频";
     }
     let prefix = `${total} 个视频`;
     if (state.viewMode === "favorites") prefix = `${total} 个收藏`;
     else if (state.viewMode === "history") prefix = `${total} 条最近播放`;
+    else if (isAlbumDetailView()) prefix = `${total} 个视频`;
     if (state.formatFilter) prefix += ` · 筛选: ${formatFilterLabel(state.formatFilter)}${formatIndexHint()}`;
     const fixedHere = state.pageItems.filter(v => v.remuxedOnPage).length;
     if (state.formatFilter === "remuxable" && fixedHere > 0) {
@@ -1622,9 +2068,572 @@
       msg = "没有符合该格式的视频（后台正在分析未检测项，可稍后再试）";
     } else if (state.viewMode === "favorites") msg = "暂无收藏";
     else if (state.viewMode === "history") msg = "暂无最近播放";
+    else if (isAlbumDetailView()) msg = "专辑内暂无视频";
     $("#empty").textContent = msg;
     $("#empty").classList.toggle("hidden", total > 0);
     $("#grid").classList.toggle("hidden", total === 0);
+  }
+
+  function isAlbumListView() {
+    return state.viewMode === "albums";
+  }
+
+  function isAlbumDetailView() {
+    return state.viewMode === "album-detail";
+  }
+
+  function isAlbumView() {
+    return isAlbumListView() || isAlbumDetailView();
+  }
+
+  function updateAlbumToolbar() {
+    const bar = $("#album-toolbar-actions");
+    if (!bar) return;
+    const list = isAlbumListView();
+    const detail = isAlbumDetailView();
+    bar.classList.toggle("hidden", !isAlbumView());
+    $("#btn-albums-back")?.classList.toggle("hidden", !detail);
+    $("#btn-album-create")?.classList.toggle("hidden", !list);
+    $("#btn-album-play-all")?.classList.toggle("hidden", !detail);
+    $("#btn-album-edit")?.classList.toggle("hidden", !detail);
+    const pageGen = !isAlbumView() && state.pageItems.length > 0;
+    $("#btn-album-from-page")?.classList.toggle("hidden", !pageGen);
+    $("#sort")?.classList.toggle("hidden", list);
+    $("#format-filter")?.classList.toggle("hidden", list);
+    document.querySelector(".page-size-controls")?.classList.toggle("hidden", list);
+    document.querySelector(".toolbar-right .pagination")?.classList.toggle("hidden", list);
+  }
+
+  function updateGalleryPanels() {
+    const list = isAlbumListView();
+    $("#albums-view")?.classList.toggle("hidden", !list);
+    $("#folder-panel")?.classList.toggle("hidden", !state.category);
+    if (list) {
+      $("#grid")?.classList.add("hidden");
+      $("#empty")?.classList.add("hidden");
+      $("#pagination-bottom")?.classList.add("hidden");
+    } else {
+      $("#grid")?.classList.remove("hidden");
+    }
+    updateAlbumToolbar();
+  }
+
+  function albumCoverHtml(album) {
+    const coverId = album?.cover_video_id;
+    if (coverId) {
+      return `<img src="${libThumbUrl(coverId)}" alt="" loading="lazy" decoding="async">`;
+    }
+    return `<div class="album-cover-placeholder" aria-hidden="true">📁</div>`;
+  }
+
+  function albumApiErrorMessage(err) {
+    const msg = err?.message || String(err);
+    if (msg === "Not Found" || /not found/i.test(msg)) {
+      return "专辑 API 不可用，请在设置中重启服务，或运行 restart.py 后再试";
+    }
+    return msg;
+  }
+
+  async function loadAlbums() {
+    updateGalleryPanels();
+    try {
+      const data = await api("/api/albums");
+      state.albums = data.items || [];
+    } catch (err) {
+      const text = `加载失败: ${albumApiErrorMessage(err)}`;
+      $("#albums-empty").textContent = text;
+      $("#albums-empty").classList.remove("hidden");
+      $("#album-grid").innerHTML = "";
+      if (!isAlbumListView()) alert(`加载专辑列表失败: ${albumApiErrorMessage(err)}`);
+      return;
+    }
+    renderAlbumsGrid();
+  }
+
+  function albumDurationLabel(album) {
+    const sec = album.total_duration_sec;
+    if (sec != null && Number.isFinite(sec) && sec > 0) {
+      return formatDuration(sec);
+    }
+    return "";
+  }
+
+  function renderAlbumsGrid() {
+    const grid = $("#album-grid");
+    const empty = $("#albums-empty");
+    if (!grid || !empty) return;
+    if (!state.albums.length) {
+      grid.innerHTML = "";
+      empty.textContent = "暂无专辑，点击「新建专辑」开始整理视频";
+      empty.classList.remove("hidden");
+      $("#status").textContent = "0 个专辑";
+      return;
+    }
+    empty.classList.add("hidden");
+    grid.innerHTML = state.albums.map(a => {
+      const desc = (a.description || "").trim();
+      const updatedAt = a.updated_at ? formatTs(a.updated_at) : "";
+      return `<div class="album-card" data-id="${escAttr(a.id)}">
+        <div class="album-cover">
+          ${albumCoverHtml(a)}
+          <div class="album-cover-gradient"></div>
+          <div class="album-cover-overlay">
+            <button type="button" class="album-play-btn" data-play-all="${escAttr(a.id)}" title="播放全部" aria-label="播放全部">▶</button>
+          </div>
+        </div>
+        <div class="album-card-body">
+          <div class="album-card-name" title="${escAttr(a.name)}">${esc(a.name)}</div>
+          ${desc ? `<div class="album-card-desc">${esc(desc)}</div>` : ""}
+          <div class="album-card-stats">
+            <span><span class="stat-icon">📹</span>${a.video_count || 0} 个视频</span>
+          </div>
+          ${updatedAt ? `<div class="album-card-date">更新于 ${updatedAt}</div>` : ""}
+        </div>
+      </div>`;
+    }).join("");
+    // 卡片点击 → 进入详情
+    grid.querySelectorAll(".album-card").forEach(card => {
+      card.addEventListener("click", (e) => {
+        if (e.target.closest(".album-play-btn")) return;
+        openAlbumDetail(card.dataset.id);
+      });
+      card.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showAlbumCtxMenu(e.clientX, e.clientY, card.dataset.id);
+      });
+    });
+    // 播放全部按钮 → 直接播放
+    grid.querySelectorAll(".album-play-btn").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        playAlbumById(btn.dataset.playAll);
+      });
+    });
+    $("#status").textContent = `${state.albums.length} 个专辑`;
+  }
+
+  async function openAlbumDetail(albumId) {
+    if (!albumId) return;
+    state.viewMode = "album-detail";
+    state.albumId = albumId;
+    state.category = "";
+    state.folder = "";
+    state.page = 1;
+    updateViewModeButtons();
+    updateGalleryPanels();
+    saveState();
+    try {
+      state.currentAlbum = await api(`/api/albums/${encodeURIComponent(albumId)}`);
+    } catch (err) {
+      alert("加载专辑失败: " + err.message);
+      state.viewMode = "albums";
+      state.albumId = "";
+      state.currentAlbum = null;
+      updateViewModeButtons();
+      updateGalleryPanels();
+      await loadAlbums();
+      return;
+    }
+    updateBreadcrumb();
+    updateUrl(true);
+    await loadVideos({ forceRebuild: true });
+  }
+
+  function backToAlbumsList() {
+    state.viewMode = "albums";
+    state.albumId = "";
+    state.currentAlbum = null;
+    state.page = 1;
+    updateViewModeButtons();
+    updateGalleryPanels();
+    updateBreadcrumb();
+    saveState();
+    updateUrl(true);
+    void loadAlbums();
+  }
+
+  async function refreshCurrentAlbumMeta() {
+    if (!state.albumId) return;
+    try {
+      state.currentAlbum = await api(`/api/albums/${encodeURIComponent(state.albumId)}`);
+      updateBreadcrumb();
+    } catch (_) { /* ignore */ }
+  }
+
+  function openAlbumFormDialog({ mode = "create", album = null, pendingIds = [] } = {}) {
+    const dlg = $("#album-form-dialog");
+    const title = $("#album-form-title");
+    const hint = $("#album-form-hint");
+    const nameInput = $("#album-form-name");
+    const descInput = $("#album-form-desc");
+    const delWrap = $("#album-form-delete-wrap");
+    if (!dlg || !nameInput) return;
+    dlg.dataset.mode = mode;
+    dlg.dataset.albumId = album?.id || "";
+    state.albumFormPendingIds = pendingIds || [];
+    if (mode === "edit" && album) {
+      title.textContent = "编辑专辑";
+      hint.textContent = "修改名称或描述；删除专辑不会删除视频文件。";
+      nameInput.value = album.name || "";
+      descInput.value = album.description || "";
+      delWrap?.classList.remove("hidden");
+    } else {
+      title.textContent = pendingIds.length ? "新建专辑并加入视频" : "新建专辑";
+      hint.textContent = pendingIds.length
+        ? `将 ${pendingIds.length} 个视频加入新专辑（仅当前视频库）。`
+        : "专辑仅对当前视频库有效，视频可归属多个专辑。";
+      nameInput.value = "";
+      descInput.value = "";
+      delWrap?.classList.add("hidden");
+    }
+    dlg.showModal();
+    nameInput.focus();
+  }
+
+  async function submitAlbumForm(value) {
+    const dlg = $("#album-form-dialog");
+    if (!dlg || value !== "save") return;
+    const mode = dlg.dataset.mode || "create";
+    const albumId = dlg.dataset.albumId || "";
+    const name = ($("#album-form-name")?.value || "").trim();
+    const description = ($("#album-form-desc")?.value || "").trim();
+    if (!name) {
+      showToast("请输入专辑名称", { type: "info" });
+      dlg.showModal();
+      return;
+    }
+    let pending = [];
+    try {
+      if (mode === "edit" && albumId) {
+        await api(`/api/albums/${encodeURIComponent(albumId)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, description }),
+        });
+        if (isAlbumDetailView() && state.albumId === albumId) {
+          await refreshCurrentAlbumMeta();
+        } else if (isAlbumListView()) {
+          await loadAlbums();
+        }
+        showToast(`专辑已更新：「${name}」`, { type: "success" });
+      } else {
+        const r = await api("/api/albums", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, description }),
+        });
+        const newId = r.album?.id;
+        pending = [...(state.albumFormPendingIds || [])];
+        state.albumFormPendingIds = [];
+        if (newId && pending.length) {
+          await api(`/api/albums/${encodeURIComponent(newId)}/videos`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids: pending }),
+          });
+          applyAlbumIdsToItems(pending, newId, true);
+          syncCardAlbums();
+          pending.forEach(id => {
+            if (state.playerViewOpen && state.playingId === id) {
+              updatePlayerAlbumButton(getItemById(id));
+            }
+          });
+        }
+        if (isAlbumListView()) {
+          await loadAlbums();
+        } else if (isAlbumDetailView()) {
+          await refreshCurrentAlbumMeta();
+          await loadVideos({ forceRebuild: true });
+        } else if (pending.length) {
+          await loadVideos();
+        }
+        if (pending.length) {
+          showToast(`已创建专辑「${name}」并加入 ${pending.length} 个视频`, { type: "success" });
+        } else {
+          showToast(`已创建专辑「${name}」`, { type: "success" });
+        }
+      }
+    } catch (err) {
+      showToast("保存专辑失败: " + albumApiErrorMessage(err), { type: "error", duration: 4500 });
+      dlg.showModal();
+    }
+  }
+
+  async function deleteAlbumById(albumId) {
+    const album = state.albums.find(a => a.id === albumId)
+      || (state.currentAlbum?.id === albumId ? state.currentAlbum : null);
+    const name = album?.name || "该专辑";
+    if (!confirm(`确定删除专辑「${name}」？视频文件不会删除。`)) return;
+    try {
+      await api(`/api/albums/${encodeURIComponent(albumId)}`, { method: "DELETE" });
+      if (isAlbumDetailView() && state.albumId === albumId) {
+        backToAlbumsList();
+      } else if (isAlbumListView()) {
+        await loadAlbums();
+      }
+      showToast(`已删除专辑「${name}」`, { type: "success" });
+    } catch (err) {
+      showToast("删除失败: " + albumApiErrorMessage(err), { type: "error", duration: 4500 });
+    }
+  }
+
+  async function deleteCurrentAlbum() {
+    const albumId = state.albumId || $("#album-form-dialog")?.dataset.albumId;
+    if (!albumId) return;
+    $("#album-form-dialog")?.close();
+    await deleteAlbumById(albumId);
+  }
+
+  async function editAlbumById(albumId) {
+    try {
+      const album = await api(`/api/albums/${encodeURIComponent(albumId)}`);
+      openAlbumFormDialog({ mode: "edit", album });
+    } catch (err) {
+      alert("加载专辑失败: " + albumApiErrorMessage(err));
+    }
+  }
+
+  async function playAlbumById(albumId) {
+    try {
+      const album = await api(`/api/albums/${encodeURIComponent(albumId)}`);
+      const ids = album.video_ids || [];
+      if (!ids.length) {
+        showToast("专辑内暂无视频", { type: "info" });
+        return;
+      }
+      await openAlbumDetail(albumId);
+      await playVideo(ids[0]);
+    } catch (err) {
+      alert("播放失败: " + albumApiErrorMessage(err));
+    }
+  }
+
+  function showAlbumCtxMenu(x, y, albumId) {
+    hideCtxMenu();
+    state.albumCtxTarget = albumId;
+    const album = state.albums.find(a => a.id === albumId);
+    const playBtn = $("#album-ctx-menu")?.querySelector('[data-action="album-play-all"]');
+    if (playBtn) {
+      const n = album?.video_count || 0;
+      playBtn.classList.toggle("hidden", n <= 0);
+      playBtn.disabled = n <= 0;
+    }
+    const menu = $("#album-ctx-menu");
+    if (!menu) return;
+    menu.classList.remove("hidden");
+    menu.style.visibility = "hidden";
+    menu.style.left = `${x}px`;
+    menu.style.top = `${y}px`;
+    requestAnimationFrame(() => {
+      const rect = menu.getBoundingClientRect();
+      const pad = 8;
+      let left = x;
+      let top = y;
+      if (left + rect.width > window.innerWidth - pad) {
+        left = Math.max(pad, window.innerWidth - rect.width - pad);
+      }
+      if (top + rect.height > window.innerHeight - pad) {
+        top = Math.max(pad, window.innerHeight - rect.height - pad);
+      }
+      menu.style.left = `${left}px`;
+      menu.style.top = `${top}px`;
+      menu.style.visibility = "";
+    });
+  }
+
+  function hideAlbumCtxMenu() {
+    $("#album-ctx-menu")?.classList.add("hidden");
+    state.albumCtxTarget = null;
+  }
+
+  function applyAlbumIdsToItems(videoIds, albumId, add) {
+    videoIds.forEach(id => {
+      const item = getItemById(id);
+      if (!item) return;
+      const set = new Set(item.albumIds || []);
+      if (add) set.add(albumId);
+      else set.delete(albumId);
+      item.albumIds = [...set];
+    });
+  }
+
+  function videoInAnyAlbum(item) {
+    return Array.isArray(item?.albumIds) && item.albumIds.length > 0;
+  }
+
+  function updateCardAlbum(card, item) {
+    if (!card) return;
+    card.classList.toggle("in-album", videoInAnyAlbum(item));
+    const badge = card.querySelector(".card-album-badge");
+    if (badge) {
+      const n = item?.albumIds?.length || 0;
+      badge.classList.toggle("on", n > 0);
+      badge.title = n > 0 ? `已在 ${n} 个专辑` : "加入专辑";
+      badge.setAttribute("aria-label", badge.title);
+    }
+  }
+
+  function cardAlbumBadgeHtml(v) {
+    const albumOn = (v.albumIds?.length || 0) > 0 ? "on" : "";
+    const n = v.albumIds?.length || 0;
+    const albumTitle = albumOn ? `已在 ${n} 个专辑` : "加入专辑";
+    return `<button type="button" class="card-album-badge ${albumOn}" data-id="${escAttr(v.id)}" title="${escAttr(albumTitle)}" aria-label="${escAttr(albumTitle)}">
+      <svg class="card-album-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path fill="currentColor" d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
+      </svg>
+    </button>`;
+  }
+
+  function syncCardAlbums() {
+    state.pageItems.forEach(v => {
+      const card = document.querySelector(`.card[data-id="${CSS.escape(v.id)}"]`);
+      if (card) updateCardAlbum(card, v);
+    });
+  }
+
+  function updatePlayerAlbumButton(itemOrId) {
+    const btn = $("#btn-player-album");
+    if (!btn) return;
+    const id = typeof itemOrId === "string" ? itemOrId : itemOrId?.id;
+    const item = typeof itemOrId === "object" && itemOrId ? itemOrId : (id ? getItemById(id) : null);
+    const n = item?.albumIds?.length || 0;
+    const inAlbum = n > 0;
+    btn.classList.toggle("on", inAlbum);
+    btn.textContent = inAlbum ? `📁 ${n} 个专辑` : "📁 加入专辑";
+    btn.title = inAlbum ? `已在 ${n} 个专辑，点击管理` : "加入专辑";
+    btn.setAttribute("aria-label", btn.title);
+    btn.setAttribute("aria-pressed", inAlbum ? "true" : "false");
+  }
+
+  async function openAlbumPicker(videoIds) {
+    const ids = [...new Set((videoIds || []).filter(Boolean))];
+    if (!ids.length) return;
+    const dlg = $("#album-picker-dialog");
+    const list = $("#album-picker-list");
+    if (!dlg || !list) return;
+    $("#album-picker-hint").textContent = ids.length === 1
+      ? "勾选要加入的专辑，取消勾选将从专辑移除。"
+      : `为 ${ids.length} 个视频选择专辑归属。`;
+    let albums = [];
+    try {
+      const data = await api("/api/albums");
+      albums = data.items || [];
+      state.albums = albums;
+    } catch (err) {
+      alert("加载专辑列表失败: " + albumApiErrorMessage(err));
+      return;
+    }
+    const membership = (albumId) => {
+      const hits = ids.filter(id => {
+        const item = getItemById(id);
+        return (item?.albumIds || []).includes(albumId);
+      });
+      return { all: hits.length === ids.length, some: hits.length > 0 && hits.length < ids.length };
+    };
+    if (!albums.length) {
+      list.innerHTML = `<p class="hint">还没有专辑，可先新建。</p>`;
+    } else {
+      list.innerHTML = albums.map(a => {
+        const m = membership(a.id);
+        const checked = m.all ? "checked" : "";
+        const ind = m.some ? ' data-indeterminate="1"' : "";
+        return `<label class="album-picker-item">
+          <input type="checkbox" value="${escAttr(a.id)}" ${checked}${ind}>
+          <span class="album-picker-name">${esc(a.name)}</span>
+          <span class="album-picker-count">${a.video_count || 0} 个视频</span>
+        </label>`;
+      }).join("");
+      list.querySelectorAll('input[data-indeterminate="1"]').forEach(inp => {
+        inp.indeterminate = true;
+      });
+    }
+    dlg.dataset.videoIds = ids.join(",");
+    dlg.showModal();
+  }
+
+  async function submitAlbumPicker(value) {
+    const dlg = $("#album-picker-dialog");
+    if (!dlg || value !== "save") return;
+    const ids = (dlg.dataset.videoIds || "").split(",").filter(Boolean);
+    if (!ids.length) return;
+    const boxes = [...dlg.querySelectorAll("#album-picker-list input[type=checkbox]")];
+    const ops = [];
+    boxes.forEach(box => {
+      const albumId = box.value;
+      const want = box.checked;
+      const haveAll = ids.every(id => (getItemById(id)?.albumIds || []).includes(albumId));
+      const haveSome = ids.some(id => (getItemById(id)?.albumIds || []).includes(albumId));
+      if (want && !haveAll) {
+        const missing = ids.filter(id => !(getItemById(id)?.albumIds || []).includes(albumId));
+        if (missing.length) ops.push({ albumId, add: missing });
+      } else if (!want && haveSome) {
+        const present = ids.filter(id => (getItemById(id)?.albumIds || []).includes(albumId));
+        if (present.length) ops.push({ albumId, remove: present });
+      }
+    });
+    try {
+      for (const op of ops) {
+        if (op.add?.length) {
+          await api(`/api/albums/${encodeURIComponent(op.albumId)}/videos`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids: op.add }),
+          });
+          op.add.forEach(id => applyAlbumIdsToItems([id], op.albumId, true));
+        }
+        if (op.remove?.length) {
+          await api(`/api/albums/${encodeURIComponent(op.albumId)}/videos/remove`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids: op.remove }),
+          });
+          op.remove.forEach(id => applyAlbumIdsToItems([id], op.albumId, false));
+        }
+      }
+      syncCardAlbums();
+      ids.forEach(id => {
+        if (state.playerViewOpen && state.playingId === id) {
+          updatePlayerAlbumButton(getItemById(id));
+        }
+      });
+      if (isAlbumDetailView()) {
+        await refreshCurrentAlbumMeta();
+        await loadVideos({ forceRebuild: true });
+      } else if (isAlbumListView()) {
+        await loadAlbums();
+      }
+      if (ops.length) {
+        const msg = summarizeAlbumPickerOps(ops, ids.length);
+        showToast(msg, { type: "success" });
+      } else {
+        showToast("专辑归属未变更", { type: "info" });
+      }
+    } catch (err) {
+      showToast("更新专辑归属失败: " + albumApiErrorMessage(err), { type: "error", duration: 4500 });
+    }
+  }
+
+  async function setAlbumCover(videoId) {
+    if (!state.albumId) return;
+    try {
+      await api(`/api/albums/${encodeURIComponent(state.albumId)}/cover`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ video_id: videoId }),
+      });
+      await refreshCurrentAlbumMeta();
+      if (isAlbumListView()) await loadAlbums();
+      const albumName = state.currentAlbum?.name || albumDisplayName(state.albumId);
+      showToast(`已将「${itemDisplayTitle(videoId)}」设为专辑「${albumName}」封面`, { type: "success" });
+    } catch (err) {
+      showToast("设置封面失败: " + err.message, { type: "error", duration: 4500 });
+    }
+  }
+
+  async function playAlbumAll() {
+    if (!isAlbumDetailView() || !state.pageItems.length) return;
+    await playVideo(state.pageItems[0].id);
   }
 
   function updateBreadcrumb() {
@@ -1637,6 +2646,22 @@
     if (state.viewMode === "history") {
       el.textContent = "最近播放";
       el.classList.remove("hidden");
+      return;
+    }
+    if (isAlbumListView()) {
+      el.textContent = "我的专辑";
+      el.classList.remove("hidden");
+      return;
+    }
+    if (isAlbumDetailView()) {
+      const name = state.currentAlbum?.name || "专辑";
+      const count = state.currentAlbum?.video_count ?? state.total;
+      const dur = formatDuration(state.currentAlbum?.total_duration_sec);
+      let meta = `${count || 0} 个视频`;
+      if (dur) meta += ` · ${dur}`;
+      el.innerHTML = `<button type="button" class="breadcrumb-link" id="breadcrumb-albums">我的专辑</button><span class="sep">/</span>${esc(name)} <span class="breadcrumb-meta">${esc(meta)}</span>`;
+      el.classList.remove("hidden");
+      $("#breadcrumb-albums")?.addEventListener("click", backToAlbumsList);
       return;
     }
     if (!state.category || state.query) {
@@ -1785,6 +2810,7 @@
     return [
       state.libraryId,
       state.viewMode,
+      state.albumId,
       state.category,
       state.folder,
       state.query,
@@ -1801,6 +2827,7 @@
     const params = new URLSearchParams();
     if (state.viewMode === "favorites") params.set("favorites", "1");
     else if (state.viewMode === "history") params.set("history", "1");
+    else if (isAlbumDetailView() && state.albumId) params.set("album_id", state.albumId);
     else {
       if (state.category) params.set("category", state.category);
       if (state.category && !state.query) params.set("folder", state.folder || "");
@@ -1995,8 +3022,7 @@
   function thumbCacheKey(v) {
     if (state.thumbBust[v.id]) return state.thumbBust[v.id];
     if (v.thumbVersion) return v.thumbVersion;
-    if (v.thumbReady) return `s${v.size}_${v.mtime}`;
-    return "";
+    return null;
   }
 
   function thumbSig(v) {
@@ -2028,6 +3054,7 @@
     const params = new URLSearchParams();
     if (state.viewMode === "favorites") params.set("favorites", "1");
     else if (state.viewMode === "history") params.set("history", "1");
+    else if (isAlbumDetailView() && state.albumId) params.set("album_id", state.albumId);
     else {
       if (state.category) params.set("category", state.category);
       if (state.category && !state.query) params.set("folder", state.folder || "");
@@ -2258,11 +3285,10 @@
   function renderThumbHtml(v, index = 99, opts = null) {
     const wrap = opts?.wrap || null;
     const overlays = thumbOverlaysEnabled(wrap, opts) ? thumbOverlaysHtml(v) : "";
-    if (v.thumbReady) {
-      const bust = thumbCacheKey(v);
-      const loadAttr = index < 6 ? 'loading="eager"' : 'loading="lazy"';
-      return `<img src="${libThumbUrl(v.id, bust)}" alt="${esc(v.title)}" ${loadAttr} decoding="async">${overlays}`;
-    }
+    // All cards visible in grid view — load eagerly, decode async
+    const loadAttr = 'loading="eager" decoding="async"';
+    // Always try to load the thumbnail image. If the file exists on disk,
+    // the server returns it instantly. Only show placeholder for confirmed failures.
     if (v.thumbStatus === "failed") {
       const hint = v.thumbError || "缩略图失败";
       let label = "缩略图失败";
@@ -2270,13 +3296,11 @@
       else if (hint.includes("分辨率")) label = "占位文件";
       return `<div class="thumb-placeholder failed" title="${esc(hint)}">${esc(label)}</div>${overlays}`;
     }
-    if (v.thumbStatus === "generating") {
-      return `<div class="thumb-placeholder">生成中...</div>${overlays}`;
-    }
-    if (v.thumbStatus === "queued") {
-      return `<div class="thumb-placeholder">排队中...</div>${overlays}`;
-    }
-    return `<div class="thumb-placeholder">等待中...</div>${overlays}`;
+    const bust = thumbCacheKey(v);
+    return `<img src="${libThumbUrl(v.id, bust)}"
+      alt="${esc(v.title)}" ${loadAttr} decoding="async"
+      onerror="this.style.display='none';var p=document.getElementById('ph-${v.id}');if(p)p.style.display=''">
+      <div id="ph-${v.id}" class="thumb-placeholder" style="display:none">等待中...</div>${overlays}`;
   }
 
   let formatBadgePollTimer = null;
@@ -2315,42 +3339,41 @@
 
   function scheduleDurationPoll() {
     clearTimeout(durationPollTimer);
-    if (!pageItemsMissingDuration().length) return;
-    let left = 15;
+    void refreshDurationStatus();
     const tick = async () => {
       const need = pageItemsMissingDuration();
-      if (!need.length || left <= 0) return;
-      left -= 1;
-      const ids = need.map(v => v.id).slice(0, 64);
-      try {
-        const data = await api(`/api/durations?ids=${ids.join(",")}`);
-        let changed = false;
-        const applyDur = (item, sec) => {
-          if (!item || item.durationSec === sec) return;
-          item.durationSec = sec;
-          changed = true;
-        };
-        Object.entries(data.durations || {}).forEach(([id, sec]) => {
-          const n = Number(sec);
-          if (!Number.isFinite(n) || n <= 0) return;
-          applyDur(state.pageItems.find(v => v.id === id), n);
-          applyDur(state.playlistItems?.find(v => v.id === id), n);
-        });
-        if (changed) {
-          patchGridDurations();
-          if (pathTipAnchor) {
-            const tipId = pathTipAnchorItemId(pathTipAnchor);
-            const tipItem = tipId ? getItemById(tipId) : null;
-            if (tipItem && videoDurationSec(tipItem)) {
-              showPathTip(pathTipAnchor, tipItem);
+      if (need.length) {
+        const ids = need.map(v => v.id).slice(0, 64);
+        try {
+          const data = await api(`/api/durations?ids=${ids.join(",")}`);
+          let changed = false;
+          const applyDur = (item, sec) => {
+            if (!item || item.durationSec === sec) return;
+            item.durationSec = sec;
+            changed = true;
+          };
+          Object.entries(data.durations || {}).forEach(([id, sec]) => {
+            const n = Number(sec);
+            if (!Number.isFinite(n) || n <= 0) return;
+            applyDur(state.pageItems.find(v => v.id === id), n);
+            applyDur(state.playlistItems?.find(v => v.id === id), n);
+          });
+          if (changed) {
+            patchGridDurations();
+            await refreshDurationStatus();
+            if (pathTipAnchor) {
+              const tipId = pathTipAnchorItemId(pathTipAnchor);
+              const tipItem = tipId ? getItemById(tipId) : null;
+              if (tipItem && videoDurationSec(tipItem)) {
+                showPathTip(pathTipAnchor, tipItem);
+              }
             }
           }
-        }
-        if (pageItemsMissingDuration().length && left > 0) {
-          durationPollTimer = setTimeout(tick, 2000);
-        }
-      } catch (_) {
-        if (left > 0) durationPollTimer = setTimeout(tick, 2000);
+        } catch (_) { /* ignore */ }
+      }
+
+      if (need.length || isDurationWorkActive(lastDurationStatus)) {
+        durationPollTimer = setTimeout(tick, 2000);
       }
     };
     durationPollTimer = setTimeout(tick, 600);
@@ -2505,8 +3528,13 @@
       if (state.viewMode === "favorites" && !r.favorited) {
         await loadVideos({ forceRebuild: true });
       }
+      const title = itemDisplayTitle(id);
+      showToast(
+        r.favorited ? `已收藏「${title}」` : `已取消收藏「${title}」`,
+        { type: r.favorited ? "success" : "info" }
+      );
     } catch (err) {
-      alert("收藏操作失败: " + err.message);
+      showToast("收藏操作失败: " + err.message, { type: "error", duration: 4500 });
     }
   }
 
@@ -2533,8 +3561,13 @@
         syncCardFavorites();
         clearSelection({ exitBatch: false });
       }
+      const n = ids.length;
+      showToast(
+        action === "add" ? `已收藏 ${n} 个视频` : `已取消收藏 ${n} 个视频`,
+        { type: action === "add" ? "success" : "info" }
+      );
     } catch (err) {
-      alert("批量收藏失败: " + err.message);
+      showToast("批量收藏失败: " + err.message, { type: "error", duration: 4500 });
     }
   }
 
@@ -2564,7 +3597,7 @@
   function bindCard(card, item) {
     const id = card.dataset.id;
     card.addEventListener("click", (e) => {
-      if (e.target.closest(".card-check") || e.target.closest(".card-fav")) return;
+      if (e.target.closest(".card-check") || e.target.closest(".card-fav") || e.target.closest(".card-album-badge")) return;
       if (state.manageMode || state.selected.size > 0) {
         const cb = card.querySelector(".card-check");
         cb.checked = !cb.checked;
@@ -2588,6 +3621,12 @@
       e.stopPropagation();
       toggleFavorite(id);
     });
+    const albumBtn = card.querySelector(".card-album-badge");
+    albumBtn?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openAlbumPicker([id]);
+    });
+    updateCardAlbum(card, item);
     bindPathTip(card.querySelector(".thumb-wrap"), item);
   }
 
@@ -2607,6 +3646,7 @@
         if (title.innerHTML !== html) title.innerHTML = html;
       }
       updateCardFavorite(card, v);
+      updateCardAlbum(card, v);
     });
   }
 
@@ -2622,6 +3662,11 @@
   let videosLoadSeq = 0;
 
   async function loadVideos({ forceRebuild = false, keepPlayerOpen = false } = {}) {
+    if (isAlbumListView()) {
+      await loadAlbums();
+      return;
+    }
+    updateGalleryPanels();
     if (!forceRebuild && !keepPlayerOpen && playbackInProgress()) return;
     if (state.playerViewOpen && !keepPlayerOpen) await hideHtml5Player();
     const params = buildVideosParams();
@@ -2630,6 +3675,7 @@
     clearTimeout(pageThumbWorkTimer);
     clearThumbRetryTimers();
     thumbRefreshSeq += 1;
+    lastThumbRefreshAt = 0;
     hidePathTip();
 
     let data;
@@ -2681,9 +3727,10 @@
       const selected = state.selected.has(v.id) ? "selected" : "";
       const failed = v.thumbStatus === "failed" ? "card-failed" : "";
       const favOn = v.favorited ? "on" : "";
+      const inAlbum = (v.albumIds?.length || 0) > 0 ? "in-album" : "";
       return `
-        <div class="card ${selected} ${failed}" data-id="${v.id}">
-          <div class="thumb-wrap" id="thumb-${v.id}">${renderThumbHtml(v, idx)}</div>
+        <div class="card ${selected} ${failed} ${inAlbum}" data-id="${v.id}">
+          <div class="thumb-wrap" id="thumb-${v.id}">${renderThumbHtml(v, idx)}${cardAlbumBadgeHtml(v)}</div>
           <button type="button" class="card-fav ${favOn}" data-id="${v.id}" title="${v.favorited ? "取消收藏" : "收藏"}" aria-label="${v.favorited ? "取消收藏" : "收藏"}">♥</button>
           <input type="checkbox" class="card-check" data-id="${v.id}" ${checked} aria-label="选择">
           <div class="card-title">${highlight(v.title, state.query)}</div>
@@ -2698,7 +3745,7 @@
 
     schedulePageThumbWork(reqId);
 
-    updateUrl();
+    updateUrl(true);
     saveState();
     updateSelectionBar();
     updatePageSelectAll();
@@ -2712,15 +3759,23 @@
       lastAutoPageSize = getEffectivePageSize();
       reconcileAutoPageSizeAfterRender();
     }
+    updateAlbumToolbar();
   }
 
-  function updateUrl() {
+  let _urlPushEnabled = false;
+  let _popstateDepth = 0;
+  function updateUrl(push) {
     const applyPlay = (params) => {
       if (state.playerViewOpen && state.playingId) {
         params.set("play", state.playingId);
       }
       const qs = params.toString();
-      history.replaceState(null, "", qs ? `/?${qs}` : "/");
+      const url = qs ? `/?${qs}` : "/";
+      if (push && _urlPushEnabled && _popstateDepth === 0) {
+        history.pushState(null, "", url);
+      } else {
+        history.replaceState(null, "", url);
+      }
     };
 
     if (state.viewMode === "favorites") {
@@ -2735,9 +3790,23 @@
       applyPlay(params);
       return;
     }
+    if (isAlbumListView()) {
+      const params = new URLSearchParams();
+      params.set("view", "albums");
+      applyPlay(params);
+      return;
+    }
+    if (isAlbumDetailView() && state.albumId) {
+      const params = new URLSearchParams();
+      params.set("view", "album");
+      params.set("album_id", state.albumId);
+      if (state.page > 1) params.set("page", state.page);
+      applyPlay(params);
+      return;
+    }
     if (isBrowseHome()) {
       const params = new URLSearchParams();
-      if (state.pageSize !== "auto" && state.pageSize !== 32 && state.pageSize !== 0) {
+      if (state.pageSize !== 0 && state.pageSize !== 40) {
         params.set("size", String(state.pageSize));
       }
       applyPlay(params);
@@ -2749,8 +3818,8 @@
     if (state.folder && !state.query) params.set("folder", state.folder);
     if (state.query) params.set("q", state.query);
     if (state.page > 1) params.set("page", state.page);
-    if (state.pageSize === "auto") params.set("size", "auto");
-    else if (state.pageSize !== 0) params.set("size", String(state.pageSize));
+    if (state.pageSize === "auto") state.pageSize = 40;
+    if (state.pageSize !== 0 && state.pageSize !== 40) params.set("size", String(state.pageSize));
     applyPlay(params);
   }
 
@@ -2761,12 +3830,29 @@
       state.viewMode = "favorites";
       state.category = "";
       state.folder = "";
+      state.albumId = "";
+      state.currentAlbum = null;
     } else if (view === "history") {
       state.viewMode = "history";
       state.category = "";
       state.folder = "";
+      state.albumId = "";
+      state.currentAlbum = null;
+    } else if (view === "albums") {
+      state.viewMode = "albums";
+      state.category = "";
+      state.folder = "";
+      state.albumId = "";
+      state.currentAlbum = null;
+    } else if (view === "album") {
+      state.viewMode = "album-detail";
+      state.category = "";
+      state.folder = "";
+      state.albumId = params.get("album_id") || "";
     } else {
       state.viewMode = "browse";
+      state.albumId = "";
+      state.currentAlbum = null;
     }
     if (params.has("lib")) state.libraryId = params.get("lib");
     if (params.has("category")) state.category = params.get("category");
@@ -2781,7 +3867,7 @@
     if (params.has("page")) state.page = parseInt(params.get("page"), 10) || 1;
     if (params.has("size")) {
       const s = params.get("size");
-      state.pageSize = s === "auto" ? "auto" : (parseInt(s, 10) || 32);
+      state.pageSize = s === "auto" ? 40 : (parseInt(s, 10) || 40);
     }
     if (params.has("play")) {
       state.pendingRestorePlayId = params.get("play");
@@ -2986,7 +4072,7 @@
 
   function scheduleLoadProgress(delay = 1200) {
     clearTimeout(progressDebounceTimer);
-    progressDebounceTimer = setTimeout(() => void loadProgress(), Math.max(delay, 1200));
+    progressDebounceTimer = setTimeout(() => void loadProgress(), Math.max(delay, 200));
   }
 
   function startProgressPolling(ms) {
@@ -3003,6 +4089,7 @@
     loadProgressInFlight = true;
     try {
       const global = await api("/api/thumb/status");
+      await refreshDurationStatus();
       const page = state.pageItems.length ? computePageThumbStats(state.pageItems) : null;
 
       const idleOn = !!global.idle_scan;
@@ -3070,17 +4157,18 @@
 
       const thumbWorkActive = ((global.generating ?? 0) > 0 || (global.queue_size ?? 0) > 0);
       const pagePending = pageThumbsPending(state.pageItems);
-      const allIdle = !thumbWorkActive && !pageThumbWork && !pagePending && !pageNeedsThumbs && failCount === 0;
+      const durationBusy = !isDurationProgressIdle(lastDurationStatus);
+      const allIdle = !thumbWorkActive && !pageThumbWork && !pagePending && !pageNeedsThumbs && failCount === 0 && !durationBusy;
       const nextPoll = allIdle ? 30000 : (idleOn ? 8000 : 12000);
       if (nextPoll !== progressPollMs) {
         startProgressPolling(nextPoll);
       }
 
       lastThumbProgressGlobal = global;
-      updateProgressBarVisibility(global);
+      updateProgressBarVisibility(global, lastDurationStatus);
     } catch (e) {
       $("#progress-text").textContent = "缩略图: 状态获取失败";
-      updateProgressBarVisibility(lastThumbProgressGlobal);
+      updateProgressBarVisibility(lastThumbProgressGlobal, lastDurationStatus);
     } finally {
       loadProgressInFlight = false;
       if (loadProgressPending) {
@@ -3098,6 +4186,8 @@
       state.resumePlayback = s.html5_resume_playback !== false;
       state.wheelSeekSec = normalizeWheelSeekSec(s.html5_wheel_seek_sec ?? SETTINGS_DEFAULTS.html5_wheel_seek_sec);
       state.thumbProgressBar = normalizeThumbProgressBar(s.thumb_progress_bar);
+      state.thumbAutoSelectBest = s.thumb_auto_select_best !== false;
+      state.thumbBatchAutoSelect = s.thumb_batch_auto_select !== false;
       applyPlayerHotkeySettings(s);
       const theme = resolveTheme(s);
       applyTheme(theme, { persistLocal: true });
@@ -3855,7 +4945,8 @@
       renderPlayerPlaylist(true, { scrollToActive });
       highlightPlayingCard();
       updatePlayerFavoriteButton(item);
-      updateUrl();
+      updatePlayerAlbumButton(item);
+      updateUrl(true);
       bindPlaylistInfiniteScroll();
     };
 
@@ -3867,6 +4958,7 @@
       if (scrollToActive) scrollPlaylistToActive();
       highlightPlayingCard();
       updatePlayerFavoriteButton(item);
+      updatePlayerAlbumButton(item);
       updateUrl();
       bindPlaylistInfiniteScroll();
       return;
@@ -4513,7 +5605,7 @@
     playlistScrollObserver?.disconnect();
     playlistScrollObserver = null;
     highlightPlayingCard();
-    updateUrl();
+    updateUrl(true);
     if (state.pageSize === "auto") scheduleAutoPageSizeCheck();
   }
 
@@ -4677,6 +5769,7 @@
     state.selected.clear();
     await loadCategories();
     await loadVideos({ forceRebuild: true, keepPlayerOpen: inPlayer });
+    if (isAlbumDetailView()) await refreshCurrentAlbumMeta();
     loadProgress();
 
     if (!inPlayer) return;
@@ -4748,10 +5841,24 @@
   }
 
   function showCtxMenu(x, y, id) {
+    hideAlbumCtxMenu();
     state.ctxTarget = id;
     const item = getItemById(id);
     const favBtn = $("#ctx-menu")?.querySelector('[data-action="fav-toggle"]');
     if (favBtn) favBtn.textContent = item?.favorited ? "取消收藏" : "加入收藏";
+    const albumBtn = $("#ctx-menu")?.querySelector('[data-action="album-add"]');
+    if (albumBtn) {
+      const n = item?.albumIds?.length || 0;
+      albumBtn.textContent = n > 0 ? `管理专辑归属（${n}）…` : "加入专辑…";
+    }
+    const coverBtn = $("#ctx-menu")?.querySelector('[data-action="album-cover"]');
+    if (coverBtn) {
+      const show = isAlbumDetailView() && state.albumId && (item?.albumIds || []).includes(state.albumId);
+      coverBtn.classList.toggle("hidden", !show);
+      const isCover = state.currentAlbum?.cover_video_id === id;
+      coverBtn.textContent = isCover ? "已是专辑封面" : "设为专辑封面";
+      coverBtn.disabled = isCover;
+    }
     const remuxBtn = $("#ctx-menu")?.querySelector('[data-action="remux"]');
     if (remuxBtn) {
       const show = item?.formatBadge === "remuxable" && !item?.remuxedOnPage;
@@ -4783,6 +5890,7 @@
     $("#ctx-menu").classList.add("hidden");
     state.ctxTarget = null;
     hidePathTip();
+    hideAlbumCtxMenu();
   }
 
   function setManageMode(on, { reload = true } = {}) {
@@ -4799,17 +5907,10 @@
   }
 
   function setPageSize(size) {
-    if (size === "auto") {
-      state.pageSize = "auto";
-    } else {
-      const n = Number(size);
-      if (!Number.isFinite(n) || n < 0) return;
-      state.pageSize = n === 0 ? 0 : Math.min(999, Math.max(1, Math.floor(n)));
-    }
+    const n = Number(size);
+    if (!Number.isFinite(n) || n < 0) return;
+    state.pageSize = n === 0 ? 0 : Math.min(999, Math.max(1, Math.floor(n)));
     state.page = 1;
-    if (state.pageSize === "auto") {
-      lastAutoPageSize = computeAutoPageSize(measureRenderedGridColumns() || undefined);
-    }
     syncPageSizeControls();
     saveState();
     loadVideos();
@@ -4880,18 +5981,8 @@
 
   async function saveSettings() {
     const pos = parseFloat($("#set-position")?.value);
-    const rMin = parseFloat($("#set-random-min")?.value);
-    const rMax = parseFloat($("#set-random-max")?.value);
     if (Number.isNaN(pos) || pos < 0.05 || pos > 0.95) {
       alert("截图位置需在 0.05 ~ 0.95 之间");
-      return;
-    }
-    if (Number.isNaN(rMin) || Number.isNaN(rMax) || rMin < 0.05 || rMax > 0.95) {
-      alert("随机范围需在 0.05 ~ 0.95 之间");
-      return;
-    }
-    if (rMin > rMax) {
-      alert("随机范围的最小值不能大于最大值");
       return;
     }
     const historyDays = parseInt($("#set-history-days")?.value, 10);
@@ -4902,6 +5993,11 @@
     const workers = parseInt($("#set-workers")?.value, 10);
     if (Number.isNaN(workers) || workers < 1 || workers > 8) {
       alert("并发线程数需在 1 ~ 8 之间");
+      return;
+    }
+    const candidateCount = parseInt($("#set-candidate-count")?.value, 10);
+    if (candidateCount != null && (isNaN(candidateCount) || candidateCount < 3 || candidateCount > 12)) {
+      alert("候选图数量需在 3 ~ 12 之间");
       return;
     }
     const wheelParsed = parseInt($("#set-html5-wheel-seek-sec")?.value, 10);
@@ -4915,11 +6011,12 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           thumb_position: pos,
-          thumb_random_min: rMin,
-          thumb_random_max: rMax,
           thumb_workers: workers,
           thumb_idle_scan: $("#set-idle-scan")?.value === "true",
           thumb_progress_bar: normalizeThumbProgressBar($("#set-thumb-progress-bar")?.value),
+          thumb_candidate_count: candidateCount || 6,
+          thumb_auto_select_best: $("#set-auto-select-best")?.value === "true",
+          thumb_batch_auto_select: $("#set-batch-auto-select")?.value === "true",
           default_page_size: readSettingsPageSize(),
           potplayer_path: $("#set-potplayer")?.value || "",
           player_mode: document.querySelector('input[name="player-mode"]:checked')?.value || SETTINGS_DEFAULTS.player_mode,
@@ -4948,6 +6045,8 @@
       state.resumePlayback = $("#set-html5-resume-playback")?.value === "true";
       state.wheelSeekSec = normalizeWheelSeekSec($("#set-html5-wheel-seek-sec")?.value);
       state.thumbProgressBar = normalizeThumbProgressBar($("#set-thumb-progress-bar")?.value);
+      state.thumbAutoSelectBest = $("#set-auto-select-best")?.value === "true";
+      state.thumbBatchAutoSelect = $("#set-batch-auto-select")?.value === "true";
       applyPlayerHotkeySettings({
         html5_player_prev_key: $("#set-html5-player-prev-key")?.value,
         html5_player_next_key: $("#set-html5-player-next-key")?.value,
@@ -4955,9 +6054,6 @@
       applyTheme($("#set-ui-theme")?.value || state.theme, { persistLocal: true });
       $("#settings-dialog")?.close();
       loadProgress();
-      if ($("#set-idle-scan")?.value === "true") {
-        alert("已开启全库后台补全，顶部进度条将显示详细进度。");
-      }
     } catch (err) {
       alert("保存失败: " + err.message);
     }
@@ -5036,7 +6132,8 @@
     loadVideos({ forceRebuild: true });
   });
 
-  $("#btn-page-size-auto")?.addEventListener("click", () => setPageSize("auto"));
+  $("#btn-page-size-40")?.addEventListener("click", () => setPageSize(40));
+  $("#btn-page-size-80")?.addEventListener("click", () => setPageSize(80));
   $("#btn-page-size-all")?.addEventListener("click", () => setPageSize(0));
   $("#page-size-custom")?.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
@@ -5101,9 +6198,72 @@
   });
   $("#btn-view-favorites")?.addEventListener("click", () => setViewMode("favorites"));
   $("#btn-view-history")?.addEventListener("click", () => setViewMode("history"));
+  $("#btn-view-albums")?.addEventListener("click", () => setViewMode("albums"));
 
-  $("#btn-sel-fav-add").addEventListener("click", () => batchFavoritesAction("add"));
-  $("#btn-sel-fav-remove").addEventListener("click", () => batchFavoritesAction("remove"));
+  $("#btn-album-create")?.addEventListener("click", () => openAlbumFormDialog());
+  $("#btn-albums-back")?.addEventListener("click", backToAlbumsList);
+  $("#btn-album-play-all")?.addEventListener("click", () => { void playAlbumAll(); });
+  $("#btn-album-edit")?.addEventListener("click", () => {
+    if (state.currentAlbum) openAlbumFormDialog({ mode: "edit", album: state.currentAlbum });
+  });
+  $("#btn-album-from-page")?.addEventListener("click", () => {
+    const ids = state.pageItems.map(v => v.id);
+    if (!ids.length) {
+      showToast("当前页没有可加入专辑的视频", { type: "info" });
+      return;
+    }
+    openAlbumFormDialog({ pendingIds: ids });
+  });
+
+  $("#album-form-dialog")?.addEventListener("close", (e) => {
+    void submitAlbumForm(e.target.returnValue);
+  });
+  $("#album-form-delete")?.addEventListener("click", () => { void deleteCurrentAlbum(); });
+
+  $("#album-picker-dialog")?.addEventListener("close", (e) => {
+    void submitAlbumPicker(e.target.returnValue);
+  });
+  $("#album-picker-new")?.addEventListener("click", () => {
+    const dlg = $("#album-picker-dialog");
+    const ids = (dlg?.dataset.videoIds || "").split(",").filter(Boolean);
+    dlg?.close("cancel");
+    requestAnimationFrame(() => openAlbumFormDialog({ pendingIds: ids }));
+  });
+
+  $("#album-ctx-menu")?.addEventListener("click", async (e) => {
+    const action = e.target.dataset.action;
+    const albumId = state.albumCtxTarget;
+    if (!action || !albumId) return;
+    hideAlbumCtxMenu();
+    if (action === "album-open") await openAlbumDetail(albumId);
+    else if (action === "album-play-all") await playAlbumById(albumId);
+    else if (action === "album-edit") await editAlbumById(albumId);
+    else if (action === "album-delete") await deleteAlbumById(albumId);
+  });
+
+  $("#btn-sel-album")?.addEventListener("click", () => {
+    const ids = [...state.selected];
+    if (!ids.length) {
+      showToast("请先选择要加入专辑的视频", { type: "info" });
+      return;
+    }
+    openAlbumPicker(ids);
+  });
+
+  $("#btn-sel-fav-add").addEventListener("click", () => {
+    if (!state.selected.size) {
+      showToast("请先选择要收藏的视频", { type: "info" });
+      return;
+    }
+    batchFavoritesAction("add");
+  });
+  $("#btn-sel-fav-remove").addEventListener("click", () => {
+    if (!state.selected.size) {
+      showToast("请先选择要取消收藏的视频", { type: "info" });
+      return;
+    }
+    batchFavoritesAction("remove");
+  });
 
   $("#btn-clear-history").addEventListener("click", async () => {
     if (!confirm("确定清空全部最近播放记录？此操作不可恢复。")) return;
@@ -5124,7 +6284,7 @@
 
   $("#btn-sel-regen").addEventListener("click", () => {
     const ids = [...state.selected];
-    if (ids.length) regenerateRandomThumbs(ids);
+    if (ids.length) batchRegenerateThumbs(ids);
   });
 
   $("#btn-sel-remux").addEventListener("click", () => { void batchRemuxSelected(); });
@@ -5190,6 +6350,9 @@
   $("#btn-player-favorite")?.addEventListener("click", () => {
     if (state.playingId) toggleFavorite(state.playingId);
   });
+  $("#btn-player-album")?.addEventListener("click", () => {
+    if (state.playingId) openAlbumPicker([state.playingId]);
+  });
   $("#nonstandard-btn-potplayer")?.addEventListener("click", () => resolveNonStandardDialog("potplayer"));
   $("#nonstandard-btn-remux")?.addEventListener("click", () => {
     const ctx = nonStandardDialogCtx;
@@ -5213,6 +6376,7 @@
     if (state.failedItems.length) showFailedDialog();
   });
   $("#thumb-status-chip")?.addEventListener("click", toggleThumbProgressBar);
+  $("#duration-status-chip")?.addEventListener("click", toggleThumbProgressBar);
   $("#btn-show-failed-list").addEventListener("click", showFailedDialog);
   $("#btn-retry-all-failed").addEventListener("click", retryAllFailed);
   $("#failed-dialog-close").addEventListener("click", () => $("#failed-dialog")?.close());
@@ -5271,6 +6435,24 @@
     }
   });
 
+  // Settings tabs
+  (function initSettingsTabs() {
+    const saved = localStorage.getItem("settings-active-tab") || "library";
+    const tabs = document.querySelectorAll(".settings-tab");
+    const panes = document.querySelectorAll(".settings-tab-pane");
+    tabs.forEach(t => t.classList.toggle("active", t.dataset.tab === saved));
+    panes.forEach(p => p.classList.toggle("settings-tab-pane--hidden", p.dataset.tabPane !== saved));
+    tabs.forEach(tab => {
+      tab.addEventListener("click", () => {
+        const target = tab.dataset.tab;
+        tabs.forEach(t => t.classList.remove("active"));
+        tab.classList.add("active");
+        panes.forEach(p => p.classList.toggle("settings-tab-pane--hidden", p.dataset.tabPane !== target));
+        localStorage.setItem("settings-active-tab", target);
+      });
+    });
+  })();
+
   $("#set-page-size-mode")?.addEventListener("change", syncSettingsPageSizeUi);
   $("#btn-restart-service")?.addEventListener("click", () => { void restartServiceFromSettings(); });
 
@@ -5308,7 +6490,7 @@
     hideCtxMenu();
     if (action === "play") playVideo(id);
     else if (action === "folder") await api(`/api/open-folder/${id}`, { method: "POST" });
-    else if (action === "regen-random") await regenerateRandomThumbs([id]);
+    else if (action === "regen-random") await switchThumbCandidate(id);
     else if (action === "remux") {
       const v = getItemById(id);
       await runVideoRemux(id, v || { id, title: id, filename: "", path: "" });
@@ -5318,6 +6500,10 @@
       if (v?.path) navigator.clipboard.writeText(v.path);
     } else if (action === "fav-toggle") {
       await toggleFavorite(id);
+    } else if (action === "album-add") {
+      await openAlbumPicker([id]);
+    } else if (action === "album-cover") {
+      await setAlbumCover(id);
     } else if (action === "rename") {
       openRenameDialog(id);
     } else if (action === "move") {
@@ -5392,9 +6578,7 @@
   $("#sort").value = state.sort;
   const formatFilterEl = $("#format-filter");
   if (formatFilterEl) formatFilterEl.value = state.formatFilter || "";
-  if (state.pageSize === "auto") {
-    lastAutoPageSize = computeAutoPageSize();
-  }
+  if (state.pageSize === "auto") state.pageSize = 40;
   syncPageSizeControls();
 
   const galleryViewEl = $("#gallery-view");
@@ -5406,16 +6590,49 @@
 
   loadLibraries().then(() => loadPlayerSettings()).then(() => updatePotplayerPathVisibility());
   updateViewModeButtons();
+  updateGalleryPanels();
   loadProgress();
   startProgressPolling(12000);
+  startDurationStatusPolling();
   loadCategories().then(() => {
     if (state.formatFilter) {
       void requestFormatScan();
       startFormatScanPoll();
     }
-    loadVideos({ forceRebuild: true }).then(() => {
-      void tryRestorePlayback();
+    const boot = () => {
       refreshPageThumbProgressUi();
+      void tryRestorePlayback();
+    };
+    if (isAlbumListView()) {
+      loadAlbums().then(boot);
+    } else if (isAlbumDetailView() && state.albumId) {
+      refreshCurrentAlbumMeta()
+        .then(() => loadVideos({ forceRebuild: true }))
+        .then(boot);
+    } else {
+      loadVideos({ forceRebuild: true }).then(boot);
+    }
+  });
+  // 浏览器前进/后退支持
+  _urlPushEnabled = true;
+  window.addEventListener("popstate", () => {
+    _popstateDepth++;
+    parseUrl();
+    updateViewModeButtons();
+    updateGalleryPanels();
+    updateBreadcrumb();
+    let promise;
+    if (isAlbumListView()) {
+      promise = loadAlbums();
+    } else if (isAlbumDetailView() && state.albumId) {
+      promise = openAlbumDetail(state.albumId);
+    } else if (state.viewMode === "favorites" || state.viewMode === "history") {
+      promise = loadVideos({ forceRebuild: true });
+    } else {
+      promise = loadCategories().then(() => loadVideos({ forceRebuild: true }));
+    }
+    promise.finally(() => {
+      _popstateDepth--;
     });
   });
   connectSSE();

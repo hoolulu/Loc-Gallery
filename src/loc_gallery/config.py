@@ -60,11 +60,14 @@ def detect_potplayer_path() -> str:
     return ""
 
 THUMB_POSITION = 0.6
-THUMB_RANDOM_MIN = 0.5
-THUMB_RANDOM_MAX = 0.8
+THUMB_RANDOM_MIN = 0.5  # legacy, no longer used
+THUMB_RANDOM_MAX = 0.8  # legacy, no longer used
 THUMB_WORKERS = 3
 THUMB_IDLE_SCAN = False
 THUMB_PROGRESS_BAR = "auto"  # auto | always | never
+THUMB_CANDIDATE_COUNT = 6    # 3-12
+THUMB_AUTO_SELECT_BEST = False  # auto-pick best in single picker
+THUMB_BATCH_AUTO_SELECT = True  # auto-pick best in batch mode
 DEFAULT_PAGE_SIZE = 32
 HISTORY_RETENTION_DAYS = 180
 
@@ -107,6 +110,10 @@ def history_file(library_id: str) -> Path:
 
 def category_meta_file(library_id: str) -> Path:
     return library_data_dir(library_id) / "category_meta.json"
+
+
+def albums_file(library_id: str) -> Path:
+    return library_data_dir(library_id) / "albums.json"
 
 
 def library_settings_file(library_id: str) -> Path:

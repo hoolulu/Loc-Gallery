@@ -4,8 +4,19 @@
   "thumb_random_max": 0.8,
   "thumb_workers": 3,
   "thumb_idle_scan": false,
+  "thumb_progress_bar": "auto",
   "default_page_size": 32,
   "potplayer_path": "",
   "player_mode": "html5",
-  "history_retention_days": 180
+  "history_retention_days": 180,
+  "hls_large_h264": false,
+  "hls_moov_end_h264": false,
+  "html5_fragmented_mp4": "external",
+  "html5_playlist_autoplay": true,
+  "html5_resume_playback": true,
+  "html5_wheel_seek_sec": 5,
+  "html5_modern_codecs_direct": true,
+  "html5_player_prev_key": ".",
+  "html5_player_next_key": "/",
+  "ui_theme": "dark"
 }

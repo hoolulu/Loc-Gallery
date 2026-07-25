@@ -2,9 +2,9 @@
 
 **本地视频画廊 Web 服务 — 双击启动，浏览器里浏览、搜索、播放你的整个视频库**
 
-> **当前版本：4.5.0** · 播放体验、设置页与服务重启优化
+> **当前版本：4.6.0（主分支）** · 我的专辑、格式筛选、时长探测、白天模式
 
-扫描本机视频目录，自动生成缩略图网格，支持分类筛选、收藏、播放记录、内嵌 HLS 播放与外部播放器。专为 Windows 本地大库设计：新视频拷入即索引，下载中的文件不误报失败，外部删除自动同步收藏与历史。
+扫描本机视频目录，自动生成缩略图网格，支持分类筛选、收藏、播放记录、**我的专辑**、内嵌 HLS 播放与外部播放器。专为 Windows 本地大库设计：新视频拷入即索引，下载中的文件不误报失败，外部删除自动同步收藏、历史与专辑归属。
 
 **默认访问地址：** `http://127.0.0.1:3456`
 
@@ -14,12 +14,15 @@
 
 <table width="100%">
 <tr><td style="white-space: nowrap; width: 1%;"><b>🖱 一键启动</b></td><td>双击 <code>restart.py</code> → 自动停旧进程、起服务、打开浏览器</td></tr>
-<tr><td style="white-space: nowrap;"><b>📚 多视频库</b></td><td>顶栏「选择视频库」切换多个本地文件夹；收藏、历史、缩略图、HLS 缓存按库隔离；设置中统一管理</td></tr>
+<tr><td style="white-space: nowrap;"><b>📚 多视频库</b></td><td>顶栏「选择视频库」切换多个本地文件夹；收藏、历史、<strong>专辑</strong>、缩略图、HLS 缓存按库隔离；设置中统一管理</td></tr>
 <tr><td style="white-space: nowrap;"><b>📂 本地视频库</b></td><td>递归扫描各库根目录，按一级子目录作为「分类」展示</td></tr>
 <tr><td style="white-space: nowrap;"><b>🖼 智能缩略图</b></td><td>按需生成当前页；下载/写入中的文件等待稳定后再处理，不误报失败</td></tr>
 <tr><td style="white-space: nowrap;"><b>📺 剧集连播</b></td><td>播放列表支持文件名自然排序；HTML5 模式按列表顺序自动播下一集</td></tr>
 <tr><td style="white-space: nowrap;"><b>▶ 可靠播放</b></td><td>HTML5 小块流式直传（省硬盘）；HLS copy / 转码；续播与连播可设置；PotPlayer 自动探测</td></tr>
 <tr><td style="white-space: nowrap;"><b>♥ 收藏 & 历史</b></td><td>卡片收藏、最近播放、播放次数与<strong>续播进度</strong>；外部删文件后列表自动清理</td></tr>
+<tr><td style="white-space: nowrap;"><b>📁 我的专辑</b></td><td>自定义专辑合集，视频可多专辑归属；本页生成专辑、播放全部、播放器内加入专辑</td></tr>
+<tr><td style="white-space: nowrap;"><b>🏷 格式筛选</b></td><td>按可修复/需转码/HLS/碎片化等筛选；卡片角标；碎片化 MP4 可一键修复</td></tr>
+<tr><td style="white-space: nowrap;"><b>⏱ 视频时长</b></td><td>卡片显示时长；后台 ffprobe 探测并写入索引，顶栏可查看进度</td></tr>
 <tr><td style="white-space: nowrap;"><b>🔄 实时同步</b></td><td>文件监听 + SSE 推送；新视频自动索引、排队缩略图与播放策略探测</td></tr>
 </table>
 
@@ -28,9 +31,10 @@
 <tr><td style="white-space: nowrap;">双击 <code>restart.py</code></td><td>启动 / 重启服务</td></tr>
 <tr><td>顶栏「♥ 我的收藏」</td><td>只看已收藏视频</td></tr>
 <tr><td>顶栏「⏱ 最近播放」</td><td>按播放时间倒序浏览</td></tr>
+<tr><td>顶栏「📁 我的专辑」</td><td>专辑列表与详情；右键/批量/播放器「加入专辑」</td></tr>
 <tr><td>顶栏「刷新」</td><td>强制重扫视频库</td></tr>
-<tr><td>卡片悬停 → ♥</td><td>收藏 / 取消收藏</td></tr>
-<tr><td>「批量」模式</td><td>多选删除、移动、批量收藏</td></tr>
+<tr><td>卡片悬停 → ♥ / 📁</td><td>收藏 / 管理专辑归属</td></tr>
+<tr><td>「批量」模式</td><td>多选删除、移动、批量收藏、加入专辑、修复 MP4</td></tr>
 </table>
 
 ### 界面预览
@@ -93,6 +97,8 @@ Loc Gallery 的做法是：**只在本机跑一个轻量 Web 服务**，浏览�
 | **缩略图** | 按需 / 后台补全、队列进度、失败重试、暂停继续 |
 | **播放** | HTML5 小块流式直传 / HLS copy / HLS 转 H.264；列表连播与续播可配置 |
 | **收藏 & 历史** | 持久化 JSON；外部删文件自动 prune |
+| **我的专辑** | 按库 `albums.json`；多对多归属；封面默认首条视频缩略图 |
+| **格式筛选** | 顶栏筛选 + 后台 `format_index`；可修复 MP4 remux |
 | **文件管理** | 删除（回收站）、重命名、移动、打开所在文件夹 |
 | **稳定性** | 下载中文件延迟索引；size/mtime 变化时重置缩略图状态 |
 
@@ -136,13 +142,14 @@ Loc Gallery 的做法是：**只在本机跑一个轻量 Web 服务**，浏览�
 ├──────────┬──────────┬──────────┬──────────┬─────────────┤
 │  scanner  │thumb_mgr │hls_mgr   │media_probe│library/    │
 │          │          │          │          │favorite/    │
-│          │          │          │          │history      │
+│          │          │          │          │history/     │
+│          │          │          │          │album_store  │
 └────┬─────┴────┬─────┴────┬─────┴────┬─────┴──────┬──────┘
      │          │          │          │            │
      ▼          ▼          ▼          ▼            ▼
   各库视频根   libraries/  cache/hls  playback    favorites.json
   目录        {id}/.thumbs            _plans.json play_history.json
-              libraries.json
+              libraries.json          albums.json
 ```
 
 | 层级 | 技术 |
@@ -176,6 +183,7 @@ Loc Gallery 的做法是：**只在本机跑一个轻量 Web 服务**，浏览�
 │   ├── hls_manager.py          # HLS 切片缓存
 │   ├── favorite_store.py       # 收藏
 │   ├── history_store.py        # 播放历史
+│   ├── album_store.py          # 我的专辑
 │   └── file_stability.py       # 下载/写入稳定性检测
 ├── static/                     # 前端静态资源
 ├── tests/                      # 集成测试（含 test_multi_library.py）
@@ -185,7 +193,7 @@ Loc Gallery 的做法是：**只在本机跑一个轻量 Web 服务**，浏览�
     ├── settings.json           # 全局设置
     ├── libraries.json          # 已注册视频库列表
     ├── libraries/
-    │   └── {library_id}/       # 每库独立：收藏、历史、缩略图、HLS 缓存等
+    │   └── {library_id}/       # 每库独立：收藏、历史、专辑、缩略图、HLS 缓存等
     └── logs/
 ```
 
@@ -297,8 +305,18 @@ scripts\build-css.bat
 
 1. 启动服务后，左侧选择**分类**，下方可展开**子目录树**
 2. 顶栏**搜索框**支持标题、文件名、分类关键词
-3. 点击卡片**播放**；悬停左上角 **♥** 收藏
-4. **♥ 我的收藏** / **⏱ 最近播放** 切换视图
+3. 点击卡片**播放**；悬停 **♥** 收藏、**📁** 管理专辑
+4. **♥ 我的收藏** / **⏱ 最近播放** / **📁 我的专辑** 切换顶栏视图
+5. 格式下拉筛选特殊封装；可修复项右键「修复为标准 MP4」
+
+### 我的专辑
+
+- 顶栏 **📁 我的专辑**：新建、编辑、删除专辑；点击进入专辑详情
+- **加入专辑**：右键菜单、批量栏、播放器按钮；勾选对话框支持新建并加入
+- **本页生成专辑**：浏览页工具栏，将当前页视频一次性加入新专辑
+- 专辑详情：**播放全部**、视频数/总时长、右键「设为专辑封面」
+- 数据按库隔离：`data/libraries/{id}/albums.json`；删视频自动从专辑移除
+- 升级含专辑功能的版本后须**重启服务**（`restart.py`），否则 `/api/albums` 返回 404
 
 ### 缩略图队列
 
@@ -326,11 +344,11 @@ scripts\build-css.bat
 
 ### 文件管理
 
-「批量」模式下可多选，执行删除（回收站）、移动、批量收藏。
+「批量」模式下可多选，执行删除（回收站）、移动、批量收藏、加入专辑、修复 MP4。
 
 ## 十、设置项（全局）
 
-在设置面板中统一保存至 `data/settings.json`：
+在设置面板中统一保存至 `data/settings.json`（完整列表见 [PRD.md](./PRD.md) §4.10）：
 
 | 键 | 默认值 | 说明 |
 |----|--------|------|
@@ -338,12 +356,17 @@ scripts\build-css.bat
 | `thumb_random_min` / `max` | 0.5 / 0.8 | 随机截图范围 |
 | `thumb_workers` | 3 | 缩略图并发数（修改后需重启服务） |
 | `thumb_idle_scan` | false | 后台补全全库缩略图 |
-| `default_page_size` | 32 | 每页条数 |
+| `thumb_progress_bar` | auto | 缩略图进度条显示模式 |
+| `default_page_size` | 32 | 每页条数（支持自适应） |
+| `ui_theme` | dark | 界面主题 dark / light |
 | `player_mode` | html5 | html5 / potplayer |
 | `html5_playlist_autoplay` | true | 播完是否按列表连播下一集 |
 | `html5_resume_playback` | true | 是否记忆播放位置并续播 |
-| `html5_fragmented_mp4` | external | 碎片化 MP4：PotPlayer 弹窗 / 边切边播 |
-| `hls_large_h264` / `hls_moov_end_h264` | false | 大文件 / moov 在末尾是否强制 HLS |
+| `html5_wheel_seek_sec` | 5 | 播放区滚轮快进/快退（0=关闭） |
+| `html5_player_prev_key` / `next_key` | `.` / `/` | 上/下一集快捷键 |
+| `html5_modern_codecs_direct` | true | 新编码尝试浏览器直连 |
+| `html5_fragmented_mp4` | external | 碎片化 MP4 处理方式 |
+| `hls_large_h264` / `hls_moov_end_h264` | false | 大文件 / moov 末尾是否 HLS |
 | `potplayer_path` | （自动探测） | 外部播放器路径 |
 | `history_retention_days` | 180 | 播放历史保留天数 |
 
@@ -364,7 +387,8 @@ python tests\test_auto_new_video.py
 # $env:LOC_GALLERY_DISGUISED_SAMPLE = "D:\path\to\sample.mp4"
 python tests\test_disguised_pipe.py
 python -m pytest tests\test_file_stability.py
-python -m pytest tests\test_multi_library.py
+python -m unittest tests.test_album_store tests.test_album_api tests.test_multi_library -v
+python scripts/test_album_e2e.py   # 需已启动服务
 ```
 
 ## 十二、隐私与分享
@@ -402,25 +426,29 @@ python -m pytest tests\test_multi_library.py
 
 **3. 外部删除了视频，收藏和历史还在吗？**
 
-不会。文件删除触发库刷新后，会自动从当前库的 `favorites.json` 与 `play_history.json` 中移除对应条目。
+不会。文件删除触发库刷新后，会自动从当前库的 `favorites.json`、`play_history.json` 与 `albums.json` 中移除对应条目。
 
-**4. 多个视频库的数据存在哪？**
+**4. 点击「我的专辑」报 Not Found？**
 
-`data/libraries.json` 登记库列表；每库数据在 `data/libraries/{library_id}/`（收藏、历史、缩略图、HLS 缓存等）。全局设置在 `data/settings.json`。
+说明后端仍是旧进程。运行 `restart.py` 或在设置页「重启服务」，并 Ctrl+F5 强刷页面。
 
-**5. 能暴露到局域网或公网吗？**
+**5. 多个视频库的数据存在哪？**
+
+`data/libraries.json` 登记库列表；每库数据在 `data/libraries/{library_id}/`（收藏、历史、**专辑**、缩略图、HLS 缓存等）。全局设置在 `data/settings.json`。
+
+**6. 能暴露到局域网或公网吗？**
 
 不建议。服务无认证，设计为 `127.0.0.1` 本机使用。若改 `HOST` 请自行评估风险。
 
-**6. 伪装 MPEG-TS 是什么？**
+**7. 伪装 MPEG-TS 是什么？**
 
 部分文件扩展名为 `.mp4`，文件头却是 PNG 魔数，偏移后为 MPEG-TS 流。探测后使用 `-f mpegts` 切片，详见 PRD 附录。
 
-**7. HLS 缓存占多少磁盘？**
+**8. HLS 缓存占多少磁盘？**
 
 默认上限 5GB（LRU 淘汰）。2.1.0 起每段 **30 秒**（旧版 6 秒），同样时长影片产生的 `.ts` 文件更少。已有 6 秒缓存会在升级后自动作废并重新切片。
 
-**8. 续播进度存在哪？**
+**9. 续播进度存在哪？**
 
 `data/libraries/{library_id}/play_history.json` 的 `position_sec` 字段；HTML5 直连与 HLS 均支持。HLS 边切边播时，若目标位置尚未切片完成，可能需要等待缓冲。
 

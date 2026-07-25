@@ -59,6 +59,23 @@ from loc_gallery.favorite_store import (
     remove_favorites,
     toggle_favorite,
 )
+from loc_gallery.album_store import (
+    add_videos as album_add_videos,
+    create_album,
+    delete_album,
+    get_album,
+    get_album_ids_for_video,
+    get_album_map_for_videos,
+    list_albums,
+    list_album_video_ids_sorted,
+    prune_missing as prune_albums,
+    remove_video_from_all_albums,
+    remove_videos as album_remove_videos,
+    reorder_albums,
+    reorder_videos as album_reorder_videos,
+    set_cover as album_set_cover,
+    update_album,
+)
 from loc_gallery.file_ops import delete_videos, move_videos, rename_video
 from loc_gallery.history_store import (
     clear_history,
@@ -112,8 +129,11 @@ from loc_gallery.settings_store import load_settings, save_settings
 from loc_gallery.service_ctl import schedule_service_restart
 from loc_gallery.thumb_manager import (
     Priority,
+    _thumb_file,
     cleanup_orphans,
     ensure_scheduled,
+    generate_thumb_candidates,
+    get_candidate_path,
     get_failed_items,
     get_status,
     get_thumb_path,
@@ -122,14 +142,18 @@ from loc_gallery.thumb_manager import (
     get_video_thumb_error,
     get_video_duration_sec,
     get_durations_for_ids,
+    get_duration_status,
     enqueue_duration_probe,
     enqueue_missing_durations,
+    backfill_durations_from_history,
+    batch_regenerate_with_candidates,
     start_duration_probe_background,
     get_worker_health,
     init_manager,
     is_paused,
     is_thumb_ready,
     pause_queue,
+    pick_thumb_candidate,
     regenerate_category,
     regenerate_failed,
     reconcile_deferred_thumbs,
@@ -153,6 +177,7 @@ class RegenerateRequest(BaseModel):
 
 class PriorityRequest(BaseModel):
     ids: list[str] = []
+    auto_select: bool = True
 
 
 class DeleteRequest(BaseModel):
@@ -197,12 +222,43 @@ class FavoriteBatchRequest(BaseModel):
     action: str  # add | remove
 
 
+class AlbumCreateRequest(BaseModel):
+    name: str
+    description: str | None = None
+
+
+class AlbumUpdateRequest(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    cover_video_id: str | None = None
+
+
+class AlbumReorderRequest(BaseModel):
+    order: list[str]
+
+
+class AlbumVideosRequest(BaseModel):
+    ids: list[str] = []
+
+
+class AlbumVideosReorderRequest(BaseModel):
+    order: list[str]
+
+
+class AlbumCoverRequest(BaseModel):
+    video_id: str
+
+
 class SettingsUpdate(BaseModel):
     thumb_position: float | None = None
     thumb_random_min: float | None = None
     thumb_random_max: float | None = None
     thumb_workers: int | None = None
     thumb_idle_scan: bool | None = None
+    thumb_progress_bar: str | None = None  # auto | always | never
+    thumb_candidate_count: int | None = None
+    thumb_auto_select_best: bool | None = None
+    thumb_batch_auto_select: bool | None = None
     default_page_size: int | None = None
     potplayer_path: str | None = None
     player_mode: str | None = None
@@ -216,7 +272,6 @@ class SettingsUpdate(BaseModel):
     html5_modern_codecs_direct: bool | None = None
     html5_player_prev_key: str | None = None
     html5_player_next_key: str | None = None
-    thumb_progress_bar: str | None = None  # auto | always | never
     ui_theme: str | None = None  # dark | light
     scope: str | None = None  # global | library
 
@@ -408,7 +463,6 @@ async def lifespan(app: FastAPI):
         complete_startup_sync()
         for lib in list_libraries():
             start_format_index_background(lib.id)
-            start_duration_probe_background(lib.id)
         _broadcast("progress", active_id)
 
     threading.Thread(target=_startup_background, daemon=True, name="startup-bg").start()
@@ -436,9 +490,10 @@ def _prune_user_data(library_id: str) -> None:
     valid = {v.id for v in get_all(library_id)}
     prune_favorites(library_id, valid)
     prune_history(library_id, valid)
+    prune_albums(library_id, valid)
 
 
-def _video_to_dict(library_id: str, v) -> dict:
+def _video_to_dict(library_id: str, v, *, album_ids: list[str] | None = None) -> dict:
     hist = get_history_entry(library_id, v.id)
     fav_at = None
     if is_favorite(library_id, v.id):
@@ -466,6 +521,7 @@ def _video_to_dict(library_id: str, v) -> dict:
         "playPosition": hist.get("position_sec") if hist else None,
         "playDuration": hist.get("duration_sec") if hist else None,
         "durationSec": duration,
+        "albumIds": album_ids if album_ids is not None else get_album_ids_for_video(library_id, v.id),
         "formatBadge": get_format_badge_for_item(
             library_id, v.id, v.mtime, v.size, Path(v.path),
         ),
@@ -481,10 +537,12 @@ def _filter_videos_list(
     sort: str = "mtime_desc",
     favorites: bool = False,
     history: bool = False,
+    album_id: str | None = None,
     format: str | None = None,
 ) -> list:
-    if favorites and history:
-        raise HTTPException(400, "不能同时筛选收藏与最近播放")
+    modes = sum(1 for x in (favorites, history, bool(album_id)) if x)
+    if modes > 1:
+        raise HTTPException(400, "不能同时筛选收藏、最近播放与专辑")
 
     if favorites:
         order_idx = {vid: i for i, vid in enumerate(list_favorite_ids_sorted(library_id))}
@@ -494,13 +552,17 @@ def _filter_videos_list(
         order_idx = {vid: i for i, vid in enumerate(list_history_ids_sorted(library_id))}
         items = [v for v in get_all(library_id) if v.id in order_idx]
         items.sort(key=lambda v: order_idx.get(v.id, 10_000))
+    elif album_id:
+        order_idx = {vid: i for i, vid in enumerate(list_album_video_ids_sorted(library_id, album_id))}
+        items = [v for v in get_all(library_id) if v.id in order_idx]
+        items.sort(key=lambda v: order_idx.get(v.id, 10_000))
     else:
         folder_filter = folder if category else None
         if category and folder is None and not q:
             folder_filter = ""
         items = _filter_videos(library_id, category, folder_filter, q, sort)
 
-    if favorites or history:
+    if favorites or history or album_id:
         if q:
             query = q.lower().strip()
             items = [
@@ -526,7 +588,10 @@ def _filter_videos(
     if category:
         items = [v for v in items if v.category == category]
         if folder is not None:
-            items = [v for v in items if v.subfolder == folder]
+            if folder:
+                items = [v for v in items if v.subfolder == folder or v.subfolder.startswith(folder + "/")]
+            else:
+                items = [v for v in items if v.subfolder == folder]
     if q:
         query = q.lower().strip()
         items = [
@@ -681,17 +746,21 @@ async def api_videos(
     page_size: int = 32,
     favorites: bool = False,
     history: bool = False,
+    album_id: str | None = None,
     format: str | None = None,
     library_id: str = Depends(resolve_library_id),
 ):
+    if album_id and not get_album(library_id, album_id):
+        raise HTTPException(404, "专辑不存在")
     items = _filter_videos_list(
         library_id,
-        category=category if not favorites and not history else None,
-        folder=folder if not favorites and not history else None,
+        category=category if not favorites and not history and not album_id else None,
+        folder=folder if not favorites and not history and not album_id else None,
         q=q,
         sort=sort,
         favorites=favorites,
         history=history,
+        album_id=album_id,
         format=format,
     )
     total = len(items)
@@ -708,7 +777,8 @@ async def api_videos(
         page_items = items[start:start + page_size]
         effective_size = page_size
 
-    page_dicts = [_video_to_dict(library_id, v) for v in page_items]
+    album_map = get_album_map_for_videos(library_id, [v.id for v in page_items])
+    page_dicts = [_video_to_dict(library_id, v, album_ids=album_map.get(v.id, [])) for v in page_items]
     missing_dur = [d["id"] for d in page_dicts if not d.get("durationSec")]
     if missing_dur:
         enqueue_duration_probe(library_id, missing_dur)
@@ -719,7 +789,12 @@ async def api_videos(
         "page": page,
         "pageSize": effective_size,
         "totalPages": total_pages,
-        "view": "favorites" if favorites else ("history" if history else "browse"),
+        "view": (
+            "favorites" if favorites else (
+                "history" if history else ("album" if album_id else "browse")
+            )
+        ),
+        "album_id": album_id,
         "library_id": library_id,
     }
 
@@ -752,6 +827,20 @@ async def api_durations(
     if missing:
         enqueue_duration_probe(library_id, missing)
     return {"durations": durations}
+
+
+@app.get("/api/duration/status")
+async def api_duration_status(library_id: str = Depends(resolve_library_id)):
+    """全库视频时长探测进度。"""
+    return get_duration_status(library_id)
+
+
+@app.post("/api/duration/scan")
+async def api_duration_scan(library_id: str = Depends(resolve_library_id)):
+    """触发后台补全缺失的视频时长。"""
+    backfill_durations_from_history(library_id)
+    queued = enqueue_missing_durations(library_id)
+    return {"ok": True, "queued": queued, **get_duration_status(library_id)}
 
 
 @app.get("/api/format/status")
@@ -801,6 +890,125 @@ async def api_favorites_batch(req: FavoriteBatchRequest, library_id: str = Depen
     result = batch_favorites(library_id, ids, req.action)
     result["count"] = get_favorite_count(library_id)
     return {"ok": True, **result}
+
+
+@app.get("/api/albums")
+async def api_albums_list(library_id: str = Depends(resolve_library_id)):
+    return {"items": list_albums(library_id)}
+
+
+@app.post("/api/albums")
+async def api_albums_create(req: AlbumCreateRequest, library_id: str = Depends(resolve_library_id)):
+    try:
+        album = create_album(library_id, req.name, description=req.description or "")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "album": album}
+
+
+@app.get("/api/albums/{album_id}")
+async def api_albums_get(album_id: str, library_id: str = Depends(resolve_library_id)):
+    album = get_album(library_id, album_id)
+    if not album:
+        raise HTTPException(404, "专辑不存在")
+    total_dur = 0.0
+    for vid in album.get("video_ids") or []:
+        item = get_by_id(library_id, vid)
+        if not item:
+            continue
+        d = get_video_duration_sec(vid, mtime=item.mtime, size=item.size)
+        if d:
+            total_dur += d
+    album["total_duration_sec"] = round(total_dur, 1)
+    return album
+
+
+@app.patch("/api/albums/{album_id}")
+async def api_albums_update(
+    album_id: str,
+    req: AlbumUpdateRequest,
+    library_id: str = Depends(resolve_library_id),
+):
+    try:
+        album = update_album(
+            library_id,
+            album_id,
+            name=req.name,
+            description=req.description,
+            cover_video_id=req.cover_video_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not album:
+        raise HTTPException(404, "专辑不存在")
+    return {"ok": True, "album": album}
+
+
+@app.delete("/api/albums/{album_id}")
+async def api_albums_delete(album_id: str, library_id: str = Depends(resolve_library_id)):
+    if not delete_album(library_id, album_id):
+        raise HTTPException(404, "专辑不存在")
+    return {"ok": True}
+
+
+@app.post("/api/albums/reorder")
+async def api_albums_reorder(req: AlbumReorderRequest, library_id: str = Depends(resolve_library_id)):
+    items = reorder_albums(library_id, req.order)
+    return {"ok": True, "items": items}
+
+
+@app.post("/api/albums/{album_id}/videos")
+async def api_albums_videos_add(
+    album_id: str,
+    req: AlbumVideosRequest,
+    library_id: str = Depends(resolve_library_id),
+):
+    ids = [i for i in req.ids if get_by_id(library_id, i)]
+    album = album_add_videos(library_id, album_id, ids)
+    if not album:
+        raise HTTPException(404, "专辑不存在")
+    return {"ok": True, **album}
+
+
+@app.post("/api/albums/{album_id}/videos/remove")
+async def api_albums_videos_remove(
+    album_id: str,
+    req: AlbumVideosRequest,
+    library_id: str = Depends(resolve_library_id),
+):
+    album = album_remove_videos(library_id, album_id, req.ids)
+    if not album:
+        raise HTTPException(404, "专辑不存在")
+    return {"ok": True, **album}
+
+
+@app.post("/api/albums/{album_id}/videos/reorder")
+async def api_albums_videos_reorder(
+    album_id: str,
+    req: AlbumVideosReorderRequest,
+    library_id: str = Depends(resolve_library_id),
+):
+    album = album_reorder_videos(library_id, album_id, req.order)
+    if not album:
+        raise HTTPException(404, "专辑不存在")
+    return {"ok": True, **album}
+
+
+@app.post("/api/albums/{album_id}/cover")
+async def api_albums_cover(
+    album_id: str,
+    req: AlbumCoverRequest,
+    library_id: str = Depends(resolve_library_id),
+):
+    if not get_by_id(library_id, req.video_id):
+        raise HTTPException(404, "视频不存在")
+    try:
+        album = album_set_cover(library_id, album_id, req.video_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not album:
+        raise HTTPException(404, "专辑不存在")
+    return {"ok": True, "album": album}
 
 
 @app.get("/api/history/summary")
@@ -862,22 +1070,10 @@ async def api_thumb_failed(library_id: str = Depends(resolve_library_id)):
 
 @app.get("/api/thumb/{video_id}")
 async def api_thumb(video_id: str, library_id: str = Depends(resolve_library_id)):
-    item = get_by_id(library_id, video_id)
-    if not item:
-        raise HTTPException(404, "视频不存在")
-
-    thumb = get_thumb_path(item)
-    if not thumb:
-        st = get_video_thumb_status(video_id)
-        if st == "missing":
-            ensure_scheduled(video_id, Priority.HIGH)
-        raise HTTPException(404, "缩略图生成中")
-
     return FileResponse(
-        thumb,
+        _thumb_file(video_id, library_id),
         media_type="image/jpeg",
         headers={
-            # URL 带 ?v= 版本号，文件变更后地址也变；允许浏览器长期缓存本地小图
             "Cache-Control": "public, max-age=31536000, immutable",
         },
     )
@@ -1075,6 +1271,7 @@ def _after_file_change(library_id: str, old_ids: list[str] | None = None) -> Non
         remove_thumbs(old_ids)
         remove_favorites(library_id, old_ids)
         remove_history(library_id, old_ids)
+        remove_video_from_all_albums(library_id, old_ids)
     sync_index_with_videos()
     cleanup_orphans()
     _prune_user_data(library_id)
@@ -1134,6 +1331,7 @@ async def api_rescan(library_id: str = Depends(resolve_library_id)):
     _prune_user_data(library_id)
     rebuild_format_index_from_plans(library_id)
     enqueue_missing_format_probe(library_id)
+    backfill_durations_from_history(library_id)
     enqueue_missing_durations(library_id)
     _broadcast("progress", library_id)
     return {"version": get_version(library_id), "count": len(get_all(library_id))}
@@ -1169,6 +1367,15 @@ async def api_thumb_regenerate_failed(library_id: str = Depends(resolve_library_
     return {"regenerated": count, "versions": versions}
 
 
+@app.post("/api/thumb/batch-regenerate")
+async def api_thumb_batch_regenerate(
+    req: PriorityRequest,
+    library_id: str = Depends(resolve_library_id),
+):
+    count, versions = batch_regenerate_with_candidates(req.ids, auto_select=req.auto_select)
+    return {"regenerated": count, "versions": versions}
+
+
 @app.post("/api/thumb/pause")
 async def api_thumb_pause(library_id: str = Depends(resolve_library_id)):
     pause_queue()
@@ -1186,6 +1393,47 @@ async def api_thumb_cleanup(library_id: str = Depends(resolve_library_id)):
     removed = cleanup_orphans()
     sync_index_with_videos()
     return {"removed": removed}
+
+
+@app.post("/api/thumb/{video_id}/candidates")
+async def api_thumb_candidates(video_id: str, library_id: str = Depends(resolve_library_id)):
+    """Generate 5 candidate thumbnails for manual selection."""
+    try:
+        cands = generate_thumb_candidates(video_id, library_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    version = str(time.time())
+    return {"ok": True, "version": version, "candidates": cands}
+
+
+@app.post("/api/thumb/{video_id}/pick")
+async def api_thumb_pick(
+    video_id: str,
+    req: Request,
+    library_id: str = Depends(resolve_library_id),
+):
+    """Select a candidate thumbnail (by index) as the main thumbnail."""
+    body = await req.json()
+    index = body.get("index")
+    if index is None or not isinstance(index, int) or index < 0 or index > 11:
+        raise HTTPException(400, "缺少或无效的 candidate index (0-4)")
+    if not pick_thumb_candidate(video_id, index, library_id):
+        raise HTTPException(404, "候选缩略图不存在")
+    item = get_by_id(library_id, video_id)
+    thumb = get_thumb_path(item) if item else None
+    version = str(thumb.stat().st_mtime) if thumb and thumb.exists() else str(time.time())
+    return {"ok": True, "version": version}
+
+
+@app.get("/api/thumb/{video_id}/candidate/{index}")
+async def api_thumb_candidate_image(
+    video_id: str, index: int, library_id: str = Depends(resolve_library_id)
+):
+    """Serve a candidate thumbnail image."""
+    path = get_candidate_path(video_id, index, library_id)
+    if not path:
+        raise HTTPException(404, "候选缩略图不存在")
+    return FileResponse(path, media_type="image/jpeg")
 
 
 @app.get("/api/health")

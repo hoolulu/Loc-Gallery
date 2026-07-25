@@ -13,7 +13,7 @@
     })();
   </script>
   <link rel="stylesheet" href="/static/tailwind.css?v=2">
-  <link rel="stylesheet" href="/static/style.css?v=101">
+  <link rel="stylesheet" href="/static/style.css?v=106">
 </head>
 <body class="flex h-full flex-col overflow-hidden bg-surface text-primary antialiased">
 
@@ -26,6 +26,7 @@
         <a href="/" id="btn-view-browse" class="view-mode-btn active" data-view="browse">首页</a>
         <button type="button" id="btn-view-favorites" class="view-mode-btn" data-view="favorites"><span class="view-mode-icon" aria-hidden="true">♥</span>我的收藏</button>
         <button type="button" id="btn-view-history" class="view-mode-btn" data-view="history"><span class="view-mode-icon" aria-hidden="true">⏱</span>最近播放</button>
+        <button type="button" id="btn-view-albums" class="view-mode-btn" data-view="albums"><span class="view-mode-icon" aria-hidden="true">📁</span>我的专辑</button>
         <div id="library-switcher" class="library-switcher header-nav-library">
           <span class="library-switcher-label">视频库</span>
           <select id="library-select" class="library-select" title="切换视频库"></select>
@@ -39,6 +40,10 @@
           <span class="theme-toggle-icon theme-icon-dark" aria-hidden="true">☾</span>
         </button>
         <button type="button" id="btn-settings" class="header-tool-btn" title="设置">设置</button>
+        <button type="button" id="duration-status-chip" class="thumb-status-chip hidden" title="视频时长后台探测中，点击展开详情" aria-label="视频时长探测">
+          <span class="thumb-status-dot thumb-status-dot--busy" aria-hidden="true"></span>
+          <span class="thumb-status-label">时长</span>
+        </button>
         <button type="button" id="thumb-status-chip" class="thumb-status-chip hidden" title="缩略图状态，点击展开详情" aria-label="缩略图，点击查看详情">
           <span class="thumb-status-dot" aria-hidden="true"></span>
           <span class="thumb-status-label">缩略图</span>
@@ -58,6 +63,15 @@
         </div>
       </div>
       <div class="progress-track mt-2"><div id="progress-fill" class="progress-fill"></div></div>
+      <div id="duration-progress-wrap" class="duration-progress-wrap hidden mt-3">
+        <div class="progress-info">
+          <div class="progress-info-left">
+            <span id="duration-progress-text">时长探测: 加载中…</span>
+          </div>
+        </div>
+        <div class="progress-track mt-1"><div id="duration-progress-fill" class="progress-fill duration-progress-fill"></div></div>
+        <p id="duration-progress-hint" class="duration-progress-hint">后台用 ffprobe 逐条探测，结果写入缩略图索引；卡片左下角与播放列表会显示时长。</p>
+      </div>
       <div id="thumb-failed-bar" class="thumb-failed-bar hidden mt-2">
         <div class="thumb-failed-inner">
           <span class="thumb-failed-label">缩略图失败</span>
@@ -122,15 +136,23 @@
             </select>
           </div>
           <div class="toolbar-right flex items-center gap-3">
-            <div class="page-size-controls flex flex-wrap items-center gap-2">
-              <button type="button" id="btn-page-size-auto" class="page-size ui-btn rounded-lg px-2.5 py-1 text-xs active" data-size="auto" title="按当前窗口大小计算每页条数">自适应</button>
-              <label class="page-size-custom-label flex items-center gap-1 text-xs text-secondary">
-                每页
-                <input type="number" id="page-size-custom" class="page-size-input yt-select" min="1" max="999" step="1" placeholder="—" title="自定义每页条数，回车生效">
-                条
-              </label>
-              <button type="button" id="btn-page-size-all" class="page-size ui-btn rounded-lg border border-surface-border px-2.5 py-1 text-xs" data-size="0">全部</button>
+            <div id="album-toolbar-actions" class="album-toolbar-actions hidden flex flex-wrap items-center gap-2">
+              <button type="button" id="btn-albums-back" class="ui-btn sm hidden">← 专辑列表</button>
+              <button type="button" id="btn-album-create" class="ui-btn sm">新建专辑</button>
+              <button type="button" id="btn-album-play-all" class="ui-btn sm hidden">播放全部</button>
+              <button type="button" id="btn-album-edit" class="ui-btn sm hidden">编辑专辑</button>
+              <button type="button" id="btn-album-from-page" class="ui-btn sm hidden" title="将当前页全部视频加入新专辑">本页生成专辑</button>
             </div>
+              <div class="page-size-controls flex flex-wrap items-center gap-2">
+                <button type="button" id="btn-page-size-40" class="page-size ui-btn rounded-lg px-2.5 py-1 text-xs active" data-size="40" title="每页 40 条">40</button>
+                <button type="button" id="btn-page-size-80" class="page-size ui-btn rounded-lg px-2.5 py-1 text-xs" data-size="80" title="每页 80 条">80</button>
+                <label class="page-size-custom-label flex items-center gap-1 text-xs text-secondary">
+                  每页
+                  <input type="number" id="page-size-custom" class="page-size-input yt-select" min="1" max="999" step="1" placeholder="—" title="自定义每页条数，回车生效">
+                  条
+                </label>
+                <button type="button" id="btn-page-size-all" class="page-size ui-btn rounded-lg border border-surface-border px-2.5 py-1 text-xs" data-size="0">全部</button>
+              </div>
             <div class="pagination flex items-center gap-2 text-sm">
               <button id="btn-prev" class="ui-btn rounded-lg border border-surface-border px-2 py-1" disabled>◀</button>
               <span id="page-info" class="text-secondary">第 1 页</span>
@@ -140,6 +162,10 @@
         </div>
 
         <div id="gallery-view" class="min-h-0 flex-1 overflow-y-auto px-5 pb-20 pt-4">
+          <div id="albums-view" class="albums-view hidden">
+            <div id="album-grid" class="album-grid"></div>
+            <div id="albums-empty" class="empty hidden">暂无专辑，点击「新建专辑」开始整理视频</div>
+          </div>
           <div id="grid" class="grid"></div>
           <div id="empty" class="empty hidden">暂无视频</div>
           <nav id="pagination-bottom" class="pagination-bar hidden">
@@ -168,6 +194,7 @@
             </div>
             <div class="player-header-actions">
               <button type="button" id="btn-player-favorite" class="ui-btn sm player-fav-btn player-header-action" aria-pressed="false" title="加入收藏">♡ 收藏</button>
+              <button type="button" id="btn-player-album" class="ui-btn sm player-album-btn player-header-action" aria-pressed="false" title="加入专辑">📁 加入专辑</button>
               <button type="button" id="btn-player-prev" class="ui-btn sm player-header-action" title="上一个（.）">上一个</button>
               <button type="button" id="btn-player-next" class="ui-btn sm player-header-action" title="下一个（/）">下一个</button>
               <span class="player-nav-hint hidden lg:inline" id="player-nav-hint">. 上一个 / 下一个</span>
@@ -223,10 +250,11 @@
     <span id="selection-count">已选 0 个</span>
     <button id="btn-sel-fav-add" class="ui-btn">加入收藏</button>
     <button id="btn-sel-fav-remove" class="ui-btn">取消收藏</button>
+    <button id="btn-sel-album" class="ui-btn">加入专辑</button>
     <button id="btn-sel-play" class="ui-btn">播放</button>
     <button id="btn-sel-rename" class="ui-btn">重命名</button>
     <button id="btn-sel-move" class="ui-btn">移动</button>
-    <button id="btn-sel-regen" class="ui-btn">生成缩略图</button>
+    <button id="btn-sel-regen" class="ui-btn">批量换缩略图</button>
     <button id="btn-sel-remux" class="ui-btn">修复为标准 MP4</button>
     <button id="btn-sel-delete" class="ui-btn danger">删除到回收站</button>
     <button id="btn-sel-cancel" class="ui-btn">取消</button>
@@ -237,14 +265,23 @@
   <div id="ctx-menu" class="ctx-menu hidden">
     <button data-action="play">播放</button>
     <button data-action="folder">打开文件夹</button>
-    <button data-action="regen-random">生成缩略图</button>
+    <button data-action="regen-random">换张缩略图</button>
     <button data-action="remux" class="hidden">修复为标准 MP4</button>
     <button data-action="copy">复制路径</button>
     <button data-action="fav-toggle">加入收藏</button>
+    <button data-action="album-add">加入专辑…</button>
+    <button data-action="album-cover" class="hidden">设为专辑封面</button>
     <div class="sep"></div>
     <button data-action="rename">重命名文件</button>
     <button data-action="move">移动到分类</button>
     <button data-action="delete" class="danger">删除到回收站</button>
+  </div>
+
+  <div id="album-ctx-menu" class="ctx-menu hidden">
+    <button data-action="album-open">打开专辑</button>
+    <button data-action="album-play-all">播放全部</button>
+    <button data-action="album-edit">编辑专辑</button>
+    <button data-action="album-delete" class="danger">删除专辑</button>
   </div>
 
   <dialog id="rename-dialog" class="app-dialog">
@@ -276,6 +313,51 @@
     </form>
   </dialog>
 
+  <dialog id="album-form-dialog" class="app-dialog">
+    <form method="dialog" class="p-6" id="album-form">
+      <h2 id="album-form-title" class="text-lg font-semibold">新建专辑</h2>
+      <p class="hint mt-2" id="album-form-hint">专辑仅对当前视频库有效，视频可归属多个专辑。</p>
+      <label class="mt-4 block dialog-label">专辑名称
+        <input type="text" id="album-form-name" required maxlength="120" class="dlg-input mt-1.5 w-full" placeholder="例如：精选合集">
+      </label>
+      <label class="mt-4 block dialog-label">描述（可选）
+        <textarea id="album-form-desc" rows="3" maxlength="500" class="dlg-input mt-1.5 w-full" placeholder="备注说明"></textarea>
+      </label>
+      <div id="album-form-delete-wrap" class="mt-4 hidden">
+        <button type="button" id="album-form-delete" class="ui-btn danger sm">删除专辑</button>
+      </div>
+      <div class="dialog-btns mt-6 flex justify-end gap-2">
+        <button type="submit" value="cancel" class="ui-btn rounded-lg px-4 py-2">取消</button>
+        <button type="submit" value="save" class="ui-btn ui-btn-primary rounded-lg px-4 py-2">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="album-picker-dialog" class="app-dialog">
+    <form method="dialog" class="p-6" id="album-picker-form">
+      <h2 class="text-lg font-semibold">加入专辑</h2>
+      <p class="hint mt-2" id="album-picker-hint">勾选要加入的专辑，取消勾选将从专辑移除。</p>
+      <div id="album-picker-list" class="album-picker-list mt-4"></div>
+      <button type="button" id="album-picker-new" class="ui-btn sm mt-3">+ 新建专辑并加入</button>
+      <div class="dialog-btns mt-6 flex justify-end gap-2">
+        <button type="submit" value="cancel" class="ui-btn rounded-lg px-4 py-2">取消</button>
+        <button type="submit" value="save" class="ui-btn ui-btn-primary rounded-lg px-4 py-2">确定</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="thumb-picker-dialog" class="app-dialog app-dialog-wide">
+    <form method="dialog" class="p-6" id="thumb-picker-form">
+      <h2 class="text-lg font-semibold">换张缩略图</h2>
+      <p id="thumb-picker-subtitle" class="hint-subtitle hidden"></p>
+      <p class="hint mt-2">正在生成候选缩略图…</p>
+      <div id="thumb-picker-grid" class="thumb-picker-grid mt-4"></div>
+      <div class="dialog-btns mt-6 flex justify-end gap-2">
+        <button type="submit" value="cancel" class="ui-btn rounded-lg px-4 py-2">取消</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="settings-dialog" class="app-dialog app-dialog-settings">
     <form id="settings-form" class="settings-form" novalidate>
       <header class="settings-topbar">
@@ -287,199 +369,245 @@
         </div>
       </header>
 
+      <nav class="settings-tabs">
+        <button type="button" class="settings-tab active" data-tab="library">视频库</button>
+        <button type="button" class="settings-tab" data-tab="playback">播放</button>
+        <button type="button" class="settings-tab" data-tab="thumbnail">缩略图</button>
+        <button type="button" class="settings-tab" data-tab="other">其他</button>
+      </nav>
+
       <div class="settings-body">
-        <section class="settings-block settings-block--compact">
-          <h3 class="settings-block-title">视频库</h3>
+        <div class="settings-tab-pane" data-tab-pane="library">
+          <section class="settings-block settings-block--compact">
+            <h3 class="settings-block-title">视频库</h3>
 
-          <div class="settings-sub">
-            <div class="settings-subtitle">现有视频库</div>
-            <div class="lib-table">
-              <div class="lib-table-head">
-                <span>别名</span>
-                <span>文件夹路径</span>
-                <span class="lib-col-actions">操作</span>
-              </div>
-              <div id="library-list" class="lib-table-body"></div>
-            </div>
-          </div>
-
-          <div class="settings-sub">
-            <div class="settings-subtitle">新增视频库</div>
-            <div class="lib-table-row lib-add-row">
-              <input type="text" id="library-add-alias" class="dlg-input compact-input" placeholder="别名" autocomplete="off">
-              <div class="lib-path-cell">
-                <input type="text" id="library-add-path" class="dlg-input compact-input" placeholder="文件夹路径" autocomplete="off">
-                <button type="button" id="library-add-browse" class="ui-btn sm">浏览</button>
-              </div>
-              <div class="lib-col-actions">
-                <button type="button" id="library-add-submit" class="ui-btn ui-btn-primary sm">添加</button>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section class="settings-block settings-block--compact">
-          <h3 class="settings-block-title">外观</h3>
-          <div class="options-grid options-grid--dense">
-            <label class="opt-cell">
-              <span class="settings-field-label">界面主题</span>
-              <select id="set-ui-theme" class="dlg-input compact-input input-fit input-fit--md" title="白天模式模仿 YouTube 浅色界面">
-                <option value="dark">夜间（默认）</option>
-                <option value="light">白天（YouTube 风格）</option>
-              </select>
-            </label>
-          </div>
-        </section>
-
-        <section class="settings-block settings-block--compact">
-          <h3 class="settings-block-title">其他选项</h3>
-          <div class="options-grid options-grid--dense">
-            <div class="opt-cell opt-cell--stack opt-full">
-              <span class="settings-field-label">播放方式</span>
-              <div class="player-mode-inline">
-                <label class="player-mode-opt">
-                  <input type="radio" name="player-mode" value="html5" class="sr-only" checked>
-                  <span>HTML5</span>
-                </label>
-                <label class="player-mode-opt">
-                  <input type="radio" name="player-mode" value="potplayer" class="sr-only">
-                  <span>PotPlayer</span>
-                </label>
+            <div class="settings-sub">
+              <div class="settings-subtitle">现有视频库</div>
+              <div class="lib-table">
+                <div class="lib-table-head">
+                  <span>别名</span>
+                  <span>文件夹路径</span>
+                  <span class="lib-col-actions">操作</span>
+                </div>
+                <div id="library-list" class="lib-table-body"></div>
               </div>
             </div>
 
-            <div id="potplayer-path-wrap" class="opt-cell opt-full opt-row hidden">
-              <label class="settings-field-label" for="set-potplayer">PotPlayer 路径</label>
-              <input type="text" id="set-potplayer" class="dlg-input compact-input input-fit input-fit--path" placeholder="自动检测">
-            </div>
-
-            <label class="opt-cell">
-              <span class="settings-field-label">大文件 H.264 强制 HLS</span>
-              <select id="set-hls-large-h264" class="dlg-input compact-input input-fit input-fit--lg" title="HTML5 模式下，≥300MB 的 H.264 MP4 是否切片播放">
-                <option value="false">否（直连，省磁盘）</option>
-                <option value="true">是（切片，起播更快）</option>
-              </select>
-            </label>
-
-            <label class="opt-cell">
-              <span class="settings-field-label">索引在末尾 H.264 强制 HLS</span>
-              <select id="set-hls-moov-end-h264" class="dlg-input compact-input input-fit input-fit--md" title="HTML5 模式下，moov 在文件后半段的 H.264 是否切片播放">
-                <option value="false">否（直连）</option>
-                <option value="true">是（切片）</option>
-              </select>
-            </label>
-
-            <label class="opt-cell">
-              <span class="settings-field-label">HTML5 记忆播放位置</span>
-              <select id="set-html5-resume-playback" class="dlg-input compact-input input-fit input-fit--md" title="退出或切换后再次打开从上次进度继续（距结尾不足 45 秒视为看完）">
-                <option value="true">开启续播</option>
-                <option value="false">每次从头播</option>
-              </select>
-            </label>
-
-            <label class="opt-cell">
-              <span class="settings-field-label">HTML5 播放列表连播</span>
-              <select id="set-html5-playlist-autoplay" class="dlg-input compact-input input-fit input-fit--lg" title="按右侧播放列表顺序，当前集播完后是否自动播下一集">
-                <option value="true">播完自动下一集</option>
-                <option value="false">播完停止</option>
-              </select>
-            </label>
-
-            <label class="opt-cell">
-              <span class="settings-field-label">上一个快捷键</span>
-              <input type="text" id="set-html5-player-prev-key" class="dlg-input compact-input input-fit input-fit--xs" maxlength="12" autocomplete="off" title="播放页切换到上一个视频">
-            </label>
-
-            <label class="opt-cell">
-              <span class="settings-field-label">下一个快捷键</span>
-              <input type="text" id="set-html5-player-next-key" class="dlg-input compact-input input-fit input-fit--xs" maxlength="12" autocomplete="off" title="播放页切换到下一个视频">
-            </label>
-
-            <label class="opt-cell">
-              <span class="settings-field-label">滚轮快进/快退</span>
-              <div class="settings-unit-row">
-                <input type="number" id="set-html5-wheel-seek-sec" class="dlg-input compact-input input-fit input-fit--xs" min="0" max="120" step="1" title="播放画面区滚轮：下快进、上快退；0=关闭">
-                <span class="settings-unit">秒</span>
+            <div class="settings-sub">
+              <div class="settings-subtitle">新增视频库</div>
+              <div class="lib-table-row lib-add-row">
+                <input type="text" id="library-add-alias" class="dlg-input compact-input" placeholder="别名" autocomplete="off">
+                <div class="lib-path-cell">
+                  <input type="text" id="library-add-path" class="dlg-input compact-input" placeholder="文件夹路径" autocomplete="off">
+                  <button type="button" id="library-add-browse" class="ui-btn sm">浏览</button>
+                </div>
+                <div class="lib-col-actions">
+                  <button type="button" id="library-add-submit" class="ui-btn ui-btn-primary sm">添加</button>
+                </div>
               </div>
-            </label>
-
-            <div class="opt-cell opt-cell--stack opt-full">
-              <span class="settings-field-label">AV1/HEVC/VP9 实验直连</span>
-              <select id="set-html5-modern-codecs-direct" class="dlg-input compact-input input-fit input-fit--xl" title="在 MP4/WebM 中尝试浏览器直连；失败自动回退服务端转码">
-                <option value="true">开启（实验，可能秒开）</option>
-                <option value="false">关闭（转码播放）</option>
-              </select>
-              <p class="settings-field-hint settings-field-hint--inline">Chromium 94+（VP9/AV1）；HEVC 建议 104+。失败自动回退转码。</p>
             </div>
+          </section>
 
-            <label class="opt-cell">
-              <span class="settings-field-label">碎片化 MP4（HTML5）</span>
-              <select id="set-html5-fragmented-mp4" class="dlg-input compact-input input-fit input-fit--lg" title="碎片化 MP4 无法用浏览器直连，可选本地播放器或切片">
-                <option value="external">PotPlayer（省磁盘，推荐）</option>
-                <option value="hls">边切边播（耗硬盘）</option>
-              </select>
-            </label>
-
-            <div class="opt-cell">
-              <span class="settings-field-label">默认每页</span>
-              <div class="settings-page-size-row">
-                <select id="set-page-size-mode" class="dlg-input compact-input input-fit input-fit--sm" title="新打开页面时的默认每页条数">
-                  <option value="auto">自适应</option>
-                  <option value="custom">自定义</option>
-                  <option value="all">全部</option>
+          <section class="settings-block settings-block--compact">
+            <h3 class="settings-block-title">外观</h3>
+            <div class="options-grid options-grid--dense">
+              <label class="opt-cell">
+                <span class="settings-field-label">界面主题</span>
+                <select id="set-ui-theme" class="dlg-input compact-input input-fit input-fit--md">
+                  <option value="dark">夜间（默认）</option>
+                  <option value="light">白天（YouTube 风格）</option>
                 </select>
-                <input type="number" id="set-page-size-custom" class="dlg-input compact-input input-fit input-fit--xs hidden" min="1" max="999" step="1" placeholder="条数" title="自定义每页条数">
+              </label>
+            </div>
+          </section>
+        </div>
+
+        <div class="settings-tab-pane settings-tab-pane--hidden" data-tab-pane="playback">
+          <section class="settings-block settings-block--compact">
+            <h3 class="settings-block-title">播放</h3>
+            <div class="options-grid options-grid--dense">
+              <div class="opt-cell opt-cell--stack opt-full">
+                <span class="settings-field-label">播放方式</span>
+                <div class="player-mode-inline">
+                  <label class="player-mode-opt">
+                    <input type="radio" name="player-mode" value="html5" class="sr-only" checked>
+                    <span>HTML5</span>
+                  </label>
+                  <label class="player-mode-opt">
+                    <input type="radio" name="player-mode" value="potplayer" class="sr-only">
+                    <span>PotPlayer</span>
+                  </label>
+                </div>
+              </div>
+
+              <div id="potplayer-path-wrap" class="opt-cell opt-full hidden">
+                <span class="settings-field-label">PotPlayer 路径</span>
+                <input type="text" id="set-potplayer" class="dlg-input compact-input" placeholder="自动检测">
+              </div>
+
+              <label class="opt-cell">
+                <span class="settings-field-label">大文件 H.264</span>
+                <select id="set-hls-large-h264" class="dlg-input compact-input input-fit input-fit--sm">
+                  <option value="false">直连</option>
+                  <option value="true">切片</option>
+                </select>
+              </label>
+
+              <label class="opt-cell">
+                <span class="settings-field-label">moov 末尾 H.264</span>
+                <select id="set-hls-moov-end-h264" class="dlg-input compact-input input-fit input-fit--sm">
+                  <option value="false">直连</option>
+                  <option value="true">切片</option>
+                </select>
+              </label>
+
+              <label class="opt-cell">
+                <span class="settings-field-label">碎片化 MP4</span>
+                <select id="set-html5-fragmented-mp4" class="dlg-input compact-input input-fit input-fit--sm">
+                  <option value="external">PotPlayer</option>
+                  <option value="hls">边切边播</option>
+                </select>
+              </label>
+
+              <label class="opt-cell">
+                <span class="settings-field-label">续播</span>
+                <select id="set-html5-resume-playback" class="dlg-input compact-input input-fit input-fit--xs">
+                  <option value="true">开</option>
+                  <option value="false">关</option>
+                </select>
+              </label>
+
+              <label class="opt-cell">
+                <span class="settings-field-label">连播</span>
+                <select id="set-html5-playlist-autoplay" class="dlg-input compact-input input-fit input-fit--xs">
+                  <option value="true">开</option>
+                  <option value="false">关</option>
+                </select>
+              </label>
+
+              <div class="opt-cell opt-cell--stack opt-full">
+                <span class="settings-field-label">AV1/HEVC/VP9 直连</span>
+                <select id="set-html5-modern-codecs-direct" class="dlg-input compact-input input-fit input-fit--md">
+                  <option value="true">开启（实验性，失败自动回退）</option>
+                  <option value="false">关闭（转码播放）</option>
+                </select>
+                <p class="settings-field-hint settings-field-hint--inline">Chromium 94+ 支持 VP9/AV1；HEVC 建议 104+。</p>
               </div>
             </div>
+          </section>
 
-            <label class="opt-cell">
-              <span class="settings-field-label">历史保留天数</span>
-              <input type="number" id="set-history-days" min="1" max="3650" step="1" value="180" class="dlg-input compact-input input-fit input-fit--xs">
-            </label>
+          <section class="settings-block settings-block--compact">
+            <h3 class="settings-block-title">操作</h3>
+            <div class="options-grid options-grid--dense options-grid--3col">
+              <label class="opt-cell">
+                <span class="settings-field-label">上一集键</span>
+                <input type="text" id="set-html5-player-prev-key" class="dlg-input compact-input input-fit input-fit--xs" maxlength="12" autocomplete="off">
+              </label>
 
-            <label class="opt-cell">
-              <span class="settings-field-label">截图位置</span>
-              <input type="number" id="set-position" min="0.05" max="0.95" step="0.05" value="0.6" class="dlg-input compact-input input-fit input-fit--xs">
-            </label>
+              <label class="opt-cell">
+                <span class="settings-field-label">下一集键</span>
+                <input type="text" id="set-html5-player-next-key" class="dlg-input compact-input input-fit input-fit--xs" maxlength="12" autocomplete="off">
+              </label>
 
-            <label class="opt-cell">
-              <span class="settings-field-label">空闲扫描</span>
-              <select id="set-idle-scan" class="dlg-input compact-input input-fit input-fit--xs">
-                <option value="true">是</option>
-                <option value="false">否</option>
-              </select>
-            </label>
+              <label class="opt-cell">
+                <span class="settings-field-label">滚轮快进</span>
+                <div class="settings-unit-row">
+                  <input type="number" id="set-html5-wheel-seek-sec" class="dlg-input compact-input input-fit input-fit--xs" min="0" max="120" step="1">
+                  <span class="settings-unit">秒</span>
+                </div>
+              </label>
+            </div>
+          </section>
+        </div>
 
-            <label class="opt-cell">
-              <span class="settings-field-label">缩略图进度条</span>
-              <select id="set-thumb-progress-bar" class="dlg-input compact-input input-fit input-fit--md" title="全库就绪时自动收起为顶栏小圆点，活动时以浮层显示详情">
-                <option value="auto">仅活动时显示</option>
-                <option value="always">始终显示</option>
-                <option value="never">始终隐藏</option>
-              </select>
-            </label>
+        <div class="settings-tab-pane settings-tab-pane--hidden" data-tab-pane="thumbnail">
+          <section class="settings-block settings-block--compact">
+            <h3 class="settings-block-title">缩略图</h3>
+            <div class="options-grid options-grid--dense">
+              <label class="opt-cell">
+                <span class="settings-field-label">截图位置</span>
+                <div class="settings-unit-row">
+                  <input type="number" id="set-position" min="0.05" max="0.95" step="0.05" class="dlg-input compact-input input-fit input-fit--xs">
+                  <span class="settings-unit">比例</span>
+                </div>
+              </label>
 
-            <div class="opt-cell">
-              <span class="settings-field-label">随机截图</span>
-              <div class="range-inputs compact">
-                <input type="number" id="set-random-min" min="0.05" max="0.95" step="0.05" value="0.5" class="dlg-input compact-input input-fit input-fit--xs">
-                <span class="range-sep">~</span>
-                <input type="number" id="set-random-max" min="0.05" max="0.95" step="0.05" value="0.8" class="dlg-input compact-input input-fit input-fit--xs">
+              <label class="opt-cell">
+                <span class="settings-field-label">空闲扫描</span>
+                <select id="set-idle-scan" class="dlg-input compact-input input-fit input-fit--xs">
+                  <option value="true">开</option>
+                  <option value="false">关</option>
+                </select>
+              </label>
+
+              <label class="opt-cell">
+                <span class="settings-field-label">进度条</span>
+                <select id="set-thumb-progress-bar" class="dlg-input compact-input input-fit input-fit--sm">
+                  <option value="auto">活动时显示</option>
+                  <option value="always">始终显示</option>
+                  <option value="never">始终隐藏</option>
+                </select>
+              </label>
+
+              <label class="opt-cell">
+                <span class="settings-field-label">并发数</span>
+                <input type="number" id="set-workers" min="1" max="8" step="1" class="dlg-input compact-input input-fit input-fit--xs">
+              </label>
+
+              <label class="opt-cell">
+                <span class="settings-field-label">候选图数量</span>
+                <input type="number" id="set-candidate-count" min="3" max="12" step="1" class="dlg-input compact-input input-fit input-fit--xs">
+              </label>
+
+              <label class="opt-cell">
+                <span class="settings-field-label">单选自动最优</span>
+                <select id="set-auto-select-best" class="dlg-input compact-input input-fit input-fit--xs">
+                  <option value="true">开</option>
+                  <option value="false">关</option>
+                </select>
+              </label>
+
+              <label class="opt-cell">
+                <span class="settings-field-label">批量自动最优</span>
+                <select id="set-batch-auto-select" class="dlg-input compact-input input-fit input-fit--xs">
+                  <option value="true">开</option>
+                  <option value="false">关</option>
+                </select>
+              </label>
+            </div>
+          </section>
+        </div>
+
+        <div class="settings-tab-pane settings-tab-pane--hidden" data-tab-pane="other">
+          <section class="settings-block settings-block--compact">
+            <h3 class="settings-block-title">其他</h3>
+            <div class="options-grid options-grid--dense">
+              <div class="opt-cell">
+                <span class="settings-field-label">默认每页</span>
+                <div class="settings-page-size-row">
+                  <select id="set-page-size-mode" class="dlg-input compact-input input-fit input-fit--sm">
+                    <option value="40">40 张</option>
+                    <option value="80">80 张</option>
+                    <option value="custom">自定义</option>
+                    <option value="all">全部</option>
+                  </select>
+                  <input type="number" id="set-page-size-custom" class="dlg-input compact-input input-fit input-fit--xs hidden" min="1" max="999" step="1" placeholder="条数">
+                </div>
+              </div>
+
+              <label class="opt-cell">
+                <span class="settings-field-label">历史保留</span>
+                <input type="number" id="set-history-days" min="1" max="3650" step="1" value="180" class="dlg-input compact-input input-fit input-fit--xs">
+              </label>
+
+              <div class="opt-cell opt-footer opt-full">
+                <button type="button" id="btn-clear-history" class="ui-btn sm">清空播放记录</button>
+                <button type="button" id="btn-restart-service" class="ui-btn sm">重启服务</button>
+                <span class="hint-inline">并发数需重启服务生效</span>
               </div>
             </div>
-
-            <label class="opt-cell">
-              <span class="settings-field-label">缩略图并发</span>
-              <input type="number" id="set-workers" min="1" max="8" step="1" class="dlg-input compact-input input-fit input-fit--xs">
-            </label>
-
-            <div class="opt-cell opt-footer opt-full">
-              <button type="button" id="btn-clear-history" class="ui-btn sm">清空播放记录</button>
-              <button type="button" id="btn-restart-service" class="ui-btn sm">重启服务</button>
-              <span class="hint-inline">并发数需重启服务生效</span>
-            </div>
-          </div>
-        </section>
+          </section>
+        </div>
       </div>
     </form>
   </dialog>
@@ -512,7 +640,9 @@
     </div>
   </dialog>
 
+  <div id="toast-stack" class="toast-stack" aria-live="polite" aria-relevant="additions"></div>
+
   <script src="/static/vendor/hls.min.js"></script>
-  <script src="/static/app.js?v=179"></script>
+  <script src="/static/app.js?v=191"></script>
 </body>
 </html>
