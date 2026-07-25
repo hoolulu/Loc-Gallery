@@ -2105,6 +2105,8 @@ main {
   cursor: pointer;
   transition: transform 0.15s, box-shadow 0.15s;
   position: relative;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 210px;
 }
 
 .card:hover {
