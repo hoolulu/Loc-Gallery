@@ -464,8 +464,7 @@ async def lifespan(app: FastAPI):
             _prune_user_data(lib.id)
         complete_startup_sync()
         for lib in list_libraries():
-            start_format_index_background(lib.id)
-        _broadcast("progress", active_id)
+          start_format_index_background(lib.id)
 
     threading.Thread(target=_startup_background, daemon=True, name="startup-bg").start()
 
