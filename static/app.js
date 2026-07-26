@@ -1,4 +1,4 @@
-(() => {
+﻿(() => {
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => document.querySelectorAll(sel);
 
@@ -8,6 +8,7 @@
   let lastAutoPageSize = 0;
   let autoPageSizeTimer = null;
   let autoReconcileLock = false;
+  let _catTreeDelegateBound = false;
 
   function parseCssLength(val, rootPx) {
     if (!val) return 0;
@@ -1650,7 +1651,7 @@
   }
 
   function getCategoryOrderFromDom(list) {
-    return [...list.querySelectorAll(".cat-item[data-category]")]
+    return [...list.querySelectorAll(".tree-cat-wrapper[data-category]")]
       .map(el => el.dataset.category)
       .filter(Boolean);
   }
@@ -1673,10 +1674,8 @@
     const onMove = (e) => {
       if (!dragging) return;
       const y = e.clientY;
-      const starred = dragging.classList.contains("starred");
-      const siblings = [...list.querySelectorAll(".cat-item[data-category]")]
-        .filter(el => el.dataset.category && el !== dragging
-          && el.classList.contains("starred") === starred);
+      const siblings = [...list.querySelectorAll(".tree-cat-wrapper[data-category]")]
+        .filter(el => el.dataset.category && el !== dragging);
       for (const sib of siblings) {
         const box = sib.getBoundingClientRect();
         if (y < box.top + box.height / 2) {
@@ -1701,14 +1700,13 @@
       await saveCategoryOrder(getCategoryOrderFromDom(list));
     };
 
-    list.querySelectorAll(".cat-grip").forEach(grip => {
-      grip.addEventListener("mousedown", (e) => {
+    list.querySelectorAll(".tree-cat-wrapper").forEach(wrapper => {
+      if (!wrapper?.dataset.category) return;
+      wrapper.addEventListener("mousedown", (e) => {
+        if (e.target.closest(".cat-toggle, .tree-folder-row, .tree-children")) return;
         e.preventDefault();
-        e.stopPropagation();
-        const item = grip.closest(".cat-item");
-        if (!item?.dataset.category) return;
-        dragging = item;
-        item.classList.add("dragging");
+        dragging = wrapper;
+        wrapper.classList.add("dragging");
         document.addEventListener("mousemove", onMove);
         document.addEventListener("mouseup", onUp);
       });
@@ -1731,52 +1729,6 @@
       if (n.children?.length) out.push(...flattenFolders(n.children, depth + 1));
     }
     return out;
-  }
-
-  async function renderSubdirPanel(cats) {
-    const panel = $("#folder-panel");
-    if (!state.category) {
-      panel.classList.add("hidden");
-      panel.innerHTML = "";
-      return;
-    }
-    let tree;
-    try {
-      tree = await fetchFolderTree(state.category);
-    } catch (_) {
-      panel.classList.add("hidden");
-      panel.innerHTML = "";
-      return;
-    }
-    const flat = flattenFolders(tree.folders || []);
-    if (!flat.length) {
-      panel.classList.add("hidden");
-      panel.innerHTML = "";
-      return;
-    }
-    panel.classList.remove("hidden");
-    panel.innerHTML = `
-      <div class="subdir-title">子目录</div>
-      <button type="button" class="subdir-item ${!state.folder ? "active" : ""}" data-folder="">
-        <span class="subdir-name">本目录</span>
-        <span class="subdir-count">${tree.direct_count}</span>
-      </button>
-      ${flat.map(n => `
-        <button type="button" class="subdir-item ${state.folder === n.path ? "active" : ""}"
-                data-folder="${escAttr(n.path)}" style="padding-left:${14 + n.depth * 12}px">
-          <span class="subdir-name" title="${escAttr(n.path)}">${esc(n.name)}</span>
-          <span class="subdir-count">${n.total}</span>
-        </button>`).join("")}`;
-    panel.querySelectorAll(".subdir-item").forEach(btn => {
-      btn.addEventListener("click", () => {
-        selectCategory(state.category, btn.dataset.folder || "");
-      });
-      btn.addEventListener("contextmenu", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        showFolderCtxMenu(e.clientX, e.clientY, btn.dataset.folder || "");
-      });
-    });
   }
 
   function selectCategory(category, folder = "") {
@@ -2157,7 +2109,7 @@
   function updateGalleryPanels() {
     const list = isAlbumListView();
     $("#albums-view")?.classList.toggle("hidden", !list);
-    $("#folder-panel")?.classList.toggle("hidden", !state.category);
+    // folder tree is now integrated into sidebar
     if (list) {
       $("#grid")?.classList.add("hidden");
       $("#empty")?.classList.add("hidden");
@@ -2740,72 +2692,187 @@
     const grip = state.categorySortMode === "custom"
       ? '<span class="cat-grip" title="按住拖拽排序">⋮⋮</span>'
       : "";
+    // (grip hidden via CSS, only used as drag handle in custom sort mode)
 
-    list.innerHTML = `
+    // (folder trees are fetched per-category inside the loop)
+
+    // Recursively render folder tree nodes
+    function renderFolderTree(nodes, depth = 0) {
+      return nodes.map(n => {
+        const hasChildren = n.children && n.children.length > 0;
+        const isActive = state.folder === n.path;
+        const indent = 28 + depth * 14;
+        const isExpanded = state.expandedCategories?.has(n.path);
+        return `<div class="tree-folder-node">
+          <div class="tree-folder-row ${isActive ? "active" : ""}"
+               data-folder="${escAttr(n.path)}" style="padding-left:${indent}px"
+               role="button" tabindex="0">
+            ${hasChildren
+              ? `<span class="folder-toggle ${isExpanded ? "expanded" : ""}">▶</span>`
+              : '<span class="folder-toggle" style="visibility:hidden">▶</span>'}
+            <span class="tree-folder-name" title="${escAttr(n.path)}">${esc(n.name)}</span>
+            <span class="tree-folder-count">${n.total}</span>
+          </div>
+          ${hasChildren
+            ? `<div class="tree-children ${isExpanded ? "" : "collapsed"}">${renderFolderTree(n.children, depth + 1)}</div>`
+            : ""}
+        </div>`;
+      }).join("");
+    }
+
+    // Build HTML: "All" item + each category in a wrapper
+    let html = `
       <div class="cat-item cat-all ${state.category === "" ? "active" : ""}" data-category="" role="button" tabindex="0">
         <span class="cat-left"><span class="cat-name">全部</span></span>
         <span class="cat-count">${total}</span>
-      </div>
-      ${cats.map(c => `
-        <div class="cat-item ${state.category === c.name && !state.folder ? "active" : ""}${c.starred ? " starred" : ""}"
+      </div>`;
+
+    for (const c of cats) {
+      const isActiveCat = state.category === c.name;
+      const hasSubfolders = c.has_subfolders === true;
+      const catExpanded = state.expandedCategories?.has(c.name);
+      
+      // Read cached tree data (always), fetch only for active/expanded categories
+      let folderTree = state.folderTrees[c.name] || null;
+      if (!folderTree && (isActiveCat || catExpanded)) {
+        try {
+          folderTree = await fetchFolderTree(c.name);
+        } catch (_) {}
+      }
+
+      const hasTree = folderTree && folderTree.folders && folderTree.folders.length > 0;
+      const showTree = hasTree && catExpanded !== false;
+
+      html += `<div class="tree-cat-wrapper" data-category="${escAttr(c.name)}">
+        <div class="cat-item ${isActiveCat && !state.folder ? "active" : ""}"
              data-category="${escAttr(c.name)}" role="button" tabindex="0">
           <span class="cat-left">
+            ${hasSubfolders ? `<span class="cat-toggle ${showTree ? "expanded" : ""}">▶</span>` : ""}
             ${grip}
-            <span class="cat-star ${c.starred ? "on" : ""}" title="${c.starred ? "取消星标" : "加星标"}">★</span>
             <span class="cat-name" title="${escAttr(c.name)}">${esc(c.name)}</span>
           </span>
           <span class="cat-count">${c.count}</span>
-        </div>`).join("")}`;
+        </div>
+        ${showTree ? `
+        <div class="tree-children">
+          ${renderFolderTree(folderTree.folders || [], 0)}
+        </div>` : ""}
+      </div>`;
+    }
 
-    list.querySelector(".cat-all")?.addEventListener("click", () => {
-      state.folder = "";
-      selectCategory("", "");
-    });
-    list.querySelector(".cat-all")?.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); state.folder = ""; selectCategory("", ""); }
-    });
+    list.innerHTML = html;
 
-    list.querySelectorAll(".cat-item[data-category]").forEach(el => {
-      const name = el.dataset.category;
-      if (!name) return;
-      el.addEventListener("click", (e) => {
-        if (e.target.closest(".cat-star") || e.target.closest(".cat-grip")) return;
-        state.folder = "";
-        selectCategory(name, "");
-      });
-      el.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          if (e.target.closest(".cat-star") || e.target.closest(".cat-grip")) return;
-          e.preventDefault();
+    // Single delegated handlers (bound once)
+    if (!_catTreeDelegateBound) {
+      _catTreeDelegateBound = true;
+
+    // Single delegated handler: click
+    list.addEventListener("click", async (e) => {
+      // 1. Category toggle arrow
+      const catToggle = e.target.closest(".cat-toggle");
+      if (catToggle) {
+        const wrapper = catToggle.closest(".tree-cat-wrapper");
+        const name = wrapper?.dataset.category;
+        if (!name) return;
+        const children = wrapper.querySelector(".tree-children");
+        if (!children) {
+          try {
+            const tree = await fetchFolderTree(name);
+            if (tree && tree.folders?.length) {
+              state.folderTrees[name] = tree;
+              if (!state.expandedCategories) state.expandedCategories = new Set();
+              state.expandedCategories.add(name);
+              await renderCategoryList(state._lastCats, state.categorySortMode);
+            }
+          } catch (_) {}
+          return;
+        }
+        const collapsed = children.classList.toggle("collapsed");
+        catToggle.classList.toggle("expanded");
+        if (collapsed) state.expandedCategories.delete(name);
+        else state.expandedCategories.add(name);
+        return;
+      }
+
+      // 2. Folder toggle
+      const folderToggle = e.target.closest(".folder-toggle");
+      if (folderToggle) {
+        const row = folderToggle.closest(".tree-folder-row");
+        const children = row?.nextElementSibling;
+        if (!children || !children.classList.contains("tree-children")) return;
+        const collapsed = children.classList.toggle("collapsed");
+        folderToggle.classList.toggle("expanded");
+        const path = row?.dataset.folder;
+        if (path) {
+          if (collapsed) state.expandedCategories.delete(path);
+          else state.expandedCategories.add(path);
+        }
+        return;
+      }
+
+      // 3. Folder row
+      const folderRow = e.target.closest(".tree-folder-row");
+      if (folderRow) {
+        selectCategory(state.category, folderRow.dataset.folder);
+        return;
+      }
+
+      // 5. Category item (包括 .cat-all) — toggle expand + select
+      const catItem = e.target.closest(".cat-item");
+      if (catItem) {
+        const name = catItem.dataset.category;
+        if (name !== undefined) {
           state.folder = "";
+          if (name) {
+            if (!state.expandedCategories) state.expandedCategories = new Set();
+            if (state.expandedCategories.has(name)) {
+              state.expandedCategories.delete(name);
+            } else {
+              state.expandedCategories.add(name);
+            }
+          }
           selectCategory(name, "");
         }
-      });
-      el.addEventListener("contextmenu", (e) => {
+      }
+    });
+
+    // Single delegated handler: keyboard
+    list.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      if (e.target.closest(".cat-toggle")) return;
+      const catItem = e.target.closest(".cat-item");
+      if (!catItem) return;
+      e.preventDefault();
+      const name = catItem.dataset.category;
+      state.folder = "";
+      if (name) {
+        if (!state.expandedCategories) state.expandedCategories = new Set();
+        if (state.expandedCategories.has(name)) state.expandedCategories.delete(name);
+        else state.expandedCategories.add(name);
+      }
+      selectCategory(name ?? "", "");
+    });
+
+    // Single delegated handler: context menu
+    list.addEventListener("contextmenu", (e) => {
+      const folderRow = e.target.closest(".tree-folder-row");
+      if (folderRow) {
         e.preventDefault();
         e.stopPropagation();
-        showFolderCtxMenu(e.clientX, e.clientY, name, "cat");
-      });
+        showFolderCtxMenu(e.clientX, e.clientY, folderRow.dataset.folder || "");
+        return;
+      }
+      const catItem = e.target.closest(".cat-item");
+      if (catItem?.dataset.category) {
+        e.preventDefault();
+        e.stopPropagation();
+        showFolderCtxMenu(e.clientX, e.clientY, catItem.dataset.category, "cat");
+      }
     });
 
-    list.querySelectorAll(".cat-star").forEach(star => {
-      star.addEventListener("click", async (e) => {
-        e.stopPropagation();
-        const el = star.closest(".cat-item");
-        const name = el?.dataset.category;
-        if (!name) return;
-        const starred = !star.classList.contains("on");
-        const data = await api("/api/categories/star", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, starred }),
-        });
-        await renderCategoryList(data.items, state.categorySortMode);
-      });
-    });
+    } // end one-time delegate setup
 
     bindCategoryDrag(list);
-    await renderSubdirPanel(cats);
   }
 
   async function loadCategories() {
@@ -5977,12 +6044,84 @@
     folderCtxTarget = "";
   }
 
+  async function showMoveFolderDialog() {
+    const dlg = $("#move-folder-dialog");
+    const tree = $("#move-folder-tree");
+    const confirmBtn = $("#move-folder-confirm");
+    const cancelBtn = $("#move-folder-cancel");
+    if (!dlg || !tree) return null;
+    let cats = [];
+    try {
+      const res = await api("/api/categories");
+      cats = (res.items || []).filter(c => c.name && c.name !== state.category);
+    } catch (_) {}
+    tree.innerHTML = `
+      <div class="move-folder-item" data-path=""><span class="move-folder-icon">📁</span><span>根目录</span></div>
+      ${cats.map(c => `
+        <div class="move-folder-item" data-path="${escAttr(c.name)}"><span class="move-folder-icon">📁</span><span>${esc(c.name)}</span></div>`).join("")}`;
+    let selPath = "";
+    tree.querySelectorAll(".move-folder-item").forEach(el => {
+      el.addEventListener("click", () => {
+        tree.querySelector(".move-folder-item.selected")?.classList.remove("selected");
+        el.classList.add("selected");
+        selPath = el.dataset.path;
+        if (confirmBtn) confirmBtn.disabled = false;
+      });
+    });
+    if (confirmBtn) confirmBtn.disabled = true;
+    dlg.showModal();
+    return new Promise((resolve) => {
+      if (confirmBtn) {
+        confirmBtn.addEventListener("click", () => { dlg.close(); resolve(selPath); }, { once: true });
+      }
+      if (cancelBtn) {
+        cancelBtn.addEventListener("click", () => { dlg.close(); resolve(null); }, { once: true });
+      }
+      dlg.addEventListener("close", () => resolve(null), { once: true });
+    });
+  }
+
+  function patchCategoryDOM(oldName, newName) {
+    const wrapper = document.querySelector(`.tree-cat-wrapper[data-category="${CSS.escape(oldName)}"]`);
+    if (!wrapper) return;
+    wrapper.dataset.category = newName;
+    const catItem = wrapper.querySelector(".cat-item");
+    if (catItem) catItem.dataset.category = newName;
+    const nameSpan = wrapper.querySelector(".cat-name");
+    if (nameSpan) { nameSpan.textContent = newName; nameSpan.title = newName; }
+  }
+
+  function removeCategoryDOM(name) {
+    const wrapper = document.querySelector(`.tree-cat-wrapper[data-category="${CSS.escape(name)}"]`);
+    if (wrapper) wrapper.remove();
+  }
+
+  function patchFolderTreeDOM(path, newName) {
+    const list = $("#category-list");
+    if (!list) return;
+    const row = list.querySelector(`.tree-folder-row[data-folder="${CSS.escape(path)}"]`);
+    if (!row) return;
+    const newPath = path.includes("/") ? path.split("/").slice(0, -1).join("/") + "/" + newName : newName;
+    row.dataset.folder = newPath;
+    const nameSpan = row.querySelector(".tree-folder-name");
+    if (nameSpan) { nameSpan.textContent = newName; nameSpan.title = newPath; }
+  }
+
+  function removeFolderTreeDOM(path) {
+    const list = $("#category-list");
+    if (!list) return;
+    const row = list.querySelector(`.tree-folder-row[data-folder="${CSS.escape(path)}"]`);
+    if (row) row.remove();
+  }
+
   $("#folder-ctx-menu")?.addEventListener("click", async (e) => {
     const action = e.target.dataset.action;
     if (!action) return;
+    const savedPath = folderCtxTarget;
+    const savedType = folderCtxType;
     hideFolderCtxMenu();
-    if (!folderCtxTarget && folderCtxType === "subdir") return;
-    const target = folderCtxType === "cat" ? folderCtxTarget : `${state.category}/${folderCtxTarget}`;
+    if (!savedPath && savedType === "subdir") return;
+    const target = savedType === "cat" ? savedPath : `${state.category}/${savedPath}`;
 
     if (action === "folder-rename") {
       const oldName = target.split("/").pop();
@@ -5991,44 +6130,36 @@
       try {
         const result = await api(`/api/folders/rename?${new URLSearchParams({
           category: state.category,
-          old_path: folderCtxType === "cat" ? target : folderCtxTarget,
+          old_path: savedType === "cat" ? target : savedPath,
           new_name: newName.trim(),
-          type: folderCtxType,
+          type: savedType,
         })}`, { method: "POST" });
-        if (result.changed > 0) {
-          state.folderTrees[state.category] = null;
-          await renderSubdirPanel();
-          await loadVideos();
-        } else if (result.renamed) {
+        if (result.renamed) {
           state.folder = "";
-          state.folderTrees = {};
+          delete state.folderTrees[state.category];
           lastCatCounts = {};
           await loadCategories();
-          await renderSubdirPanel();
-          await loadVideos();
         }
       } catch (err) {
         alert("重命名失败: " + err.message);
       }
     } else if (action === "folder-move") {
-      const dest = prompt(`输入目标路径（将 "${target}" 移动到该路径下）`, "");
-      if (!dest || !dest.trim()) return;
+      const srcInfo = savedType === "cat" ? `分类「${savedPath}」` : `「${savedPath}」`;
+      $("#move-folder-src").textContent = `将 ${srcInfo} 移动到：`;
+      const selected = await showMoveFolderDialog();
+      if (!selected && selected !== "") return;
       try {
         const result = await api(`/api/folders/move?${new URLSearchParams({
           category: state.category,
-          src_path: folderCtxType === "cat" ? target : folderCtxTarget,
-          dest_path: dest.trim(),
-          type: folderCtxType,
+          src_path: savedType === "cat" ? target : savedPath,
+          dest_path: selected,
+          type: savedType,
         })}`, { method: "POST" });
         if (result.moved) {
           state.folder = "";
-          state.folderTrees = {};
+          delete state.folderTrees[state.category];
           lastCatCounts = {};
           await loadCategories();
-          await renderSubdirPanel();
-          await loadVideos();
-        } else {
-          alert("移动失败");
         }
       } catch (err) {
         alert("移动失败: " + err.message);
@@ -6042,17 +6173,15 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             category: state.category,
-            folder: folderCtxType === "cat" ? target : folderCtxTarget,
-            type: folderCtxType,
+            folder: savedType === "cat" ? target : savedPath,
+            type: savedType,
           }),
         });
         if (result.deleted > 0) {
           state.folder = "";
-          state.folderTrees = {};
+          delete state.folderTrees[state.category];
           lastCatCounts = {};
           await loadCategories();
-          await renderSubdirPanel();
-          await loadVideos();
         } else {
           alert("未找到匹配文件");
         }
@@ -6060,8 +6189,8 @@
         alert("删除失败: " + err.message);
       }
     }
-  });
 
+  });
   function setManageMode(on, { reload = true } = {}) {
     state.manageMode = on;
     document.body.classList.toggle("manage-mode", on);
@@ -6118,7 +6247,6 @@
           lastLibraryVersion = ver;
           state.folderTrees = {};
           await loadCategories();
-          if (state.category) await renderSubdirPanel(state._lastCats || []);
           if (versionChanged && !state.formatFilter) {
             await loadVideos({ forceRebuild: false });
           } else if (pageThumbsNeedPolling(state.pageItems)) {
