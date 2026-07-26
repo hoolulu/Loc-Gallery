@@ -163,3 +163,63 @@ def hidden_subprocess_kwargs() -> dict:
         si.wShowWindow = subprocess.SW_HIDE
     kwargs["startupinfo"] = si
     return kwargs
+
+
+def kill_process_tree(pid: int) -> None:
+    """Windows: kill a process and all its child processes via taskkill."""
+    if sys.platform != "win32":
+        import signal
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except (ProcessLookupError, OSError):
+            pass
+        return
+    try:
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(pid)],
+            capture_output=True,
+            creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0,
+        )
+    except Exception:
+        pass
+
+
+def run_ffmpeg(cmd: list[str], timeout: int) -> subprocess.CompletedProcess | None:
+    """Run ffmpeg with proper process-tree cleanup on timeout.
+
+    On Windows, subprocess.run timeout only kills the parent process,
+    leaving child decoders/muxers as zombies that hold file handles.
+    This wrapper uses taskkill /T to ensure full cleanup.
+    Returns CompletedProcess on success, None on timeout/failure.
+    """
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            **hidden_subprocess_kwargs(),
+        )
+    except Exception:
+        return None
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=proc.returncode if proc.returncode is not None else -1,
+            stdout=stdout,
+            stderr=stderr,
+        )
+    except subprocess.TimeoutExpired:
+        kill_process_tree(proc.pid)
+        try:
+            proc.wait(timeout=5)
+        except Exception:
+            pass
+        return None
+    except Exception:
+        kill_process_tree(proc.pid)
+        try:
+            proc.wait(timeout=5)
+        except Exception:
+            pass
+        return None
