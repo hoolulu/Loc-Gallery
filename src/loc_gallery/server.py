@@ -2,6 +2,7 @@
 import asyncio
 import mimetypes
 import os
+import shutil
 import subprocess
 import threading
 import time
@@ -101,7 +102,6 @@ from loc_gallery.media_probe import (
     get_format_badge_for_item,
     get_format_badges,
     get_playback_plan,
-    schedule_probe_for_ids,
 )
 from loc_gallery.remux_manager import (
     begin_remux_batch,
@@ -259,6 +259,9 @@ class SettingsUpdate(BaseModel):
     thumb_candidate_count: int | None = None
     thumb_auto_select_best: bool | None = None
     thumb_batch_auto_select: bool | None = None
+    thumb_jitter_pct: int | None = None
+    thumb_jitter_min: int | None = None
+    thumb_jitter_max: int | None = None
     default_page_size: int | None = None
     potplayer_path: str | None = None
     player_mode: str | None = None
@@ -343,7 +346,7 @@ def _on_library_changed(library_id: str) -> None:
     changed_ids = sync_index_with_videos()
     if changed_ids:
         schedule_ids(changed_ids, Priority.NORMAL)
-        schedule_probe_for_ids(changed_ids, library_id)
+        # Duration/format probes deferred — _process_one enqueues per-video after thumb generation
     _broadcast("version", library_id, str(get_version(library_id)))
     _broadcast("progress", library_id)
 
@@ -361,7 +364,6 @@ def _on_video_stable(library_id: str, path: Path) -> None:
     if changed_ids:
         thumb_ids = list(dict.fromkeys([item.id, *changed_ids]))
     schedule_ids(thumb_ids, Priority.NORMAL)
-    schedule_probe_for_ids([item.id], library_id)
     _broadcast("version", library_id, str(get_version(library_id)))
     _broadcast("progress", library_id)
 
@@ -510,10 +512,10 @@ def _video_to_dict(library_id: str, v, *, album_ids: list[str] | None = None) ->
         "subfolder": v.subfolder,
         "size": v.size,
         "mtime": v.mtime,
-        "thumbStatus": get_video_thumb_status(v.id),
-        "thumbReady": is_thumb_ready(v.id),
-        "thumbError": get_video_thumb_error(v.id),
-        "thumbVersion": get_thumb_version(v.id) or "",
+        "thumbStatus": get_video_thumb_status(v.id, library_id),
+        "thumbReady": is_thumb_ready(v.id, library_id),
+        "thumbError": get_video_thumb_error(v.id, library_id),
+        "thumbVersion": get_thumb_version(v.id, library_id) or "",
         "favorited": fav_at is not None,
         "favoritedAt": fav_at,
         "playedAt": hist.get("played_at") if hist else None,
@@ -587,11 +589,8 @@ def _filter_videos(
     items = get_all(library_id)
     if category:
         items = [v for v in items if v.category == category]
-        if folder is not None:
-            if folder:
-                items = [v for v in items if v.subfolder == folder or v.subfolder.startswith(folder + "/")]
-            else:
-                items = [v for v in items if v.subfolder == folder]
+        if folder is not None and folder:
+            items = [v for v in items if v.subfolder == folder or v.subfolder.startswith(folder + "/")]
     if q:
         query = q.lower().strip()
         items = [
@@ -734,6 +733,122 @@ async def api_folders(category: str, library_id: str = Depends(resolve_library_i
     if not category:
         raise HTTPException(400, "需要指定分类")
     return get_folder_tree(library_id, category)
+
+
+def _do_rescan(library_id: str) -> None:
+    refresh_cache(library_id)
+    reconcile_deferred_thumbs()
+    sync_index_with_videos()
+    cleanup_orphans()
+    _prune_user_data(library_id)
+    rebuild_format_index_from_plans(library_id)
+    enqueue_missing_format_probe(library_id)
+    backfill_durations_from_history(library_id)
+    enqueue_missing_durations(library_id)
+
+
+@app.post("/api/folders/delete")
+async def api_folders_delete(req: Request, library_id: str = Depends(resolve_library_id)):
+    """Delete all videos in a folder (and subfolders). Files moved to recycle bin."""
+    from loc_gallery.file_ops import delete_path_to_recycle_bin
+
+    body = await req.json()
+    category = (body.get("category") or "").strip()
+    folder = (body.get("folder") or "").strip()
+    ftype = body.get("type", "subdir")
+    if not category:
+        raise HTTPException(400, "需要指定分类")
+
+    if ftype == "cat":
+        # Deleting a top-level category directory
+        items = _filter_videos_list(library_id, category=folder)
+    else:
+        items = _filter_videos_list(library_id, category=category, folder=folder)
+    deleted = 0
+    for v in items:
+        path = Path(v.path)
+        if path.is_file():
+            delete_path_to_recycle_bin(library_id, path)
+            deleted += 1
+    if deleted:
+        _do_rescan(library_id)
+    return {"ok": True, "deleted": deleted}
+
+
+@app.post("/api/folders/rename")
+async def api_folders_rename(
+    req: Request,
+    library_id: str = Depends(resolve_library_id),
+):
+    """Rename a folder on disk and trigger rescan."""
+    category = req.query_params.get("category", "").strip()
+    old_path = req.query_params.get("old_path", "").strip()
+    new_name = req.query_params.get("new_name", "").strip()
+    ftype = req.query_params.get("type", "subdir")
+    if not category or not old_path or not new_name:
+        raise HTTPException(400, "需要 category, old_path, new_name")
+
+    lib = get_library(library_id)
+    if not lib:
+        raise HTTPException(404, "视频库不存在")
+
+    if ftype == "cat":
+        # Rename top-level category directory
+        old_dir = lib.path_obj / old_path
+        new_dir = lib.path_obj / new_name
+    else:
+        cat_dir = lib.path_obj / category
+        if not cat_dir.is_dir():
+            raise HTTPException(404, "分类目录不存在")
+        old_dir = cat_dir / old_path
+        new_dir = cat_dir.parent / new_name
+
+    if not old_dir.is_dir():
+        raise HTTPException(404, f"目录不存在: {old_path}")
+    if new_dir.exists():
+        raise HTTPException(409, f"目标目录已存在: {new_name}")
+
+    shutil.move(str(old_dir), str(new_dir))
+    _do_rescan(library_id)
+    if ftype == "cat":
+        return {"ok": True, "renamed": old_path, "to": new_name}
+    return {"ok": True, "renamed": True}
+
+
+@app.post("/api/folders/move")
+async def api_folders_move(
+    req: Request,
+    library_id: str = Depends(resolve_library_id),
+):
+    """Move a folder to a different parent directory on disk."""
+    category = req.query_params.get("category", "").strip()
+    src_path = req.query_params.get("src_path", "").strip()
+    dest_path = req.query_params.get("dest_path", "").strip()
+    ftype = req.query_params.get("type", "subdir")
+    if not category or not src_path or not dest_path:
+        raise HTTPException(400, "需要 category, src_path, dest_path")
+
+    lib = get_library(library_id)
+    if not lib:
+        raise HTTPException(404, "视频库不存在")
+
+    if ftype == "cat":
+        src = lib.path_obj / src_path
+        dest = lib.path_obj / dest_path
+    else:
+        cat_dir = lib.path_obj / category
+        src = cat_dir / src_path
+        dest = lib.path_obj / dest_path
+
+    if not src.is_dir():
+        raise HTTPException(404, f"目录不存在: {src_path}")
+    if dest.exists():
+        raise HTTPException(409, f"目标路径已存在: {dest_path}")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    shutil.move(str(src), str(dest))
+    _do_rescan(library_id)
+    return {"ok": True, "moved": True}
 
 
 @app.get("/api/videos")
@@ -1074,7 +1189,7 @@ async def api_thumb(video_id: str, library_id: str = Depends(resolve_library_id)
         _thumb_file(video_id, library_id),
         media_type="image/jpeg",
         headers={
-            "Cache-Control": "public, max-age=31536000, immutable",
+            "Cache-Control": "public, max-age=86400",
         },
     )
 
@@ -1335,6 +1450,35 @@ async def api_rescan(library_id: str = Depends(resolve_library_id)):
     enqueue_missing_durations(library_id)
     _broadcast("progress", library_id)
     return {"version": get_version(library_id), "count": len(get_all(library_id))}
+
+
+@app.get("/api/debug/thumb-path/{video_id}")
+async def api_debug_thumb_path(video_id: str, library_id: str = Depends(resolve_library_id)):
+    """Debug: check actual thumbnail file path and existence."""
+    from loc_gallery.thumb_manager import _thumb_file, _tdir, get_thumb_version, _idx
+    from loc_gallery.library_context import current_library_id
+    current_lid = current_library_id()
+    thumb_explicit = _thumb_file(video_id, library_id)
+    thumb_implicit = _thumb_file(video_id)
+    td_explicit = _tdir(library_id)
+    td_implicit = _tdir()
+    entry = _idx(library_id).get(video_id, {})
+    return {
+        "library_id_param": library_id,
+        "current_library_id": current_lid,
+        "match": library_id == current_lid,
+        "thumb_file_explicit": str(thumb_explicit),
+        "thumb_file_implicit": str(thumb_implicit),
+        "tdir_explicit": str(td_explicit),
+        "tdir_implicit": str(td_implicit),
+        "exists_explicit": thumb_explicit.exists(),
+        "exists_implicit": thumb_implicit.exists(),
+        "version": get_thumb_version(video_id, library_id),
+        "index_entry": {
+            "status": entry.get("status"),
+            "thumb_file": entry.get("thumb_file"),
+        },
+    }
 
 
 @app.post("/api/thumb/priority")
