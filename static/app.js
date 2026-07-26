@@ -594,8 +594,6 @@
       return;
     }
     syncThumbProgressUi();
-    void loadProgress();
-    scheduleLoadProgress(500);
     pageThumbWorkTimer = setTimeout(() => {
       if (reqId !== videosLoadSeq) return;
       const items = state.pageItems;
@@ -695,7 +693,7 @@
     const latest = getItemById(item.id) || item;
     const bust = thumbCacheKey(latest);
     const overlays = thumbOverlaysHtml(latest);
-    const preview = latest.thumbReady
+    const preview = (latest.thumbReady || latest.thumbVersion)
       ? `<div class="path-tip-preview"><img src="${libThumbUrl(latest.id, bust)}" alt="" decoding="async">${overlays}</div>`
       : `<div class="path-tip-preview path-tip-preview--empty">暂无缩略图${overlays}</div>`;
     tip.innerHTML = `
@@ -832,6 +830,9 @@
     thumb_candidate_count: 6,
   thumb_auto_select_best: false,
   thumb_batch_auto_select: true,
+    thumb_jitter_pct: 10,
+    thumb_jitter_min: 6,
+    thumb_jitter_max: 94,
     default_page_size: 40,
     potplayer_path: "",
     history_retention_days: 180,
@@ -1371,6 +1372,9 @@
     setVal("set-candidate-count", s.thumb_candidate_count ?? 6);
     setVal("set-auto-select-best", String(!!(s.thumb_auto_select_best ?? SETTINGS_DEFAULTS.thumb_auto_select_best)));
     setVal("set-batch-auto-select", String(!!(s.thumb_batch_auto_select ?? SETTINGS_DEFAULTS.thumb_batch_auto_select)));
+    setVal("set-jitter-pct", s.thumb_jitter_pct ?? 10);
+    setVal("set-jitter-min", s.thumb_jitter_min ?? 6);
+    setVal("set-jitter-max", s.thumb_jitter_max ?? 94);
     state.thumbProgressBar = normalizeThumbProgressBar(s.thumb_progress_bar);
     setVal("set-ui-theme", resolveTheme(s));
     applyTheme(resolveTheme(s), { persistLocal: true });
@@ -1767,6 +1771,11 @@
       btn.addEventListener("click", () => {
         selectCategory(state.category, btn.dataset.folder || "");
       });
+      btn.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showFolderCtxMenu(e.clientX, e.clientY, btn.dataset.folder || "");
+      });
     });
   }
 
@@ -1804,12 +1813,9 @@
           method: "POST",
         });
         candidates = result.candidates || [];
-      } catch (err) {
-        alert("生成候选缩略图失败: " + err.message);
-        return;
-      }
+      } catch (_) { /* fall through */ }
       if (!candidates.length) {
-        alert("未能生成候选缩略图");
+        showToast("未能生成候选缩略图");
         return;
       }
       // candidates are sorted by Laplacian score descending, pick first
@@ -1864,6 +1870,7 @@
     }
 
     hint.textContent = "点击选择一张作为缩略图";
+    renderPickerGrid(candidates);
     dlg.showModal();
     let picked = false;
 
@@ -1873,7 +1880,8 @@
         <div class="thumb-picker-item" data-index="${c.index}" data-pos="${Math.round(c.pos * 100)}">
           <img src="/api/thumb/${encodeURIComponent(videoId)}/candidate/${c.index}?v=${t}"
                alt="候选 ${Math.round(c.pos * 100)}%"
-               loading="eager" decoding="async">
+               loading="eager" decoding="async"
+               onerror="this.style.display='none';this.nextElementSibling.textContent+=' ERR'">
           <div class="thumb-picker-label">${Math.round(c.pos * 100)}%</div>
         </div>
       `).join("");
@@ -1930,10 +1938,13 @@
       }
     };
 
-    renderPickerGrid(candidates);
-
     // "换一组" button: regenerate with jittered positions
-    $("#thumb-picker-reroll").onclick = async () => {
+    let rerolling = false;
+    const rerollBtn = $("#thumb-picker-reroll");
+    rerollBtn.onclick = async () => {
+      if (rerolling) return;
+      rerolling = true;
+      rerollBtn.disabled = true;
       hint.textContent = "重新生成中…";
       grid.innerHTML = "";
 
@@ -1958,6 +1969,8 @@
         dlg.close();
         showToast("无法生成缩略图");
       }
+      rerolling = false;
+      rerollBtn.disabled = false;
     };
 
     dlg.querySelector("button[value='cancel']")?.addEventListener("click", () => {
@@ -2768,6 +2781,11 @@
           selectCategory(name, "");
         }
       });
+      el.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showFolderCtxMenu(e.clientX, e.clientY, name, "cat");
+      });
     });
 
     list.querySelectorAll(".cat-star").forEach(star => {
@@ -3322,10 +3340,6 @@
   function renderThumbHtml(v, index = 99, opts = null) {
     const wrap = opts?.wrap || null;
     const overlays = thumbOverlaysEnabled(wrap, opts) ? thumbOverlaysHtml(v) : "";
-    // All cards visible in grid view — load eagerly, decode async
-    const loadAttr = 'loading="eager" decoding="async"';
-    // Always try to load the thumbnail image. If the file exists on disk,
-    // the server returns it instantly. Only show placeholder for confirmed failures.
     if (v.thumbStatus === "failed") {
       const hint = v.thumbError || "缩略图失败";
       let label = "缩略图失败";
@@ -3334,10 +3348,7 @@
       return `<div class="thumb-placeholder failed" title="${esc(hint)}">${esc(label)}</div>${overlays}`;
     }
     const bust = thumbCacheKey(v);
-    return `<img src="${libThumbUrl(v.id, bust)}"
-      alt="${esc(v.title)}" ${loadAttr} decoding="async"
-      onerror="this.style.display='none';var p=document.getElementById('ph-${v.id}');if(p)p.style.display=''">
-      <div id="ph-${v.id}" class="thumb-placeholder" style="display:none">等待中...</div>${overlays}`;
+    return `<img src="${libThumbUrl(v.id, bust)}" alt="${esc(v.title)}">${overlays}`;
   }
 
   let formatBadgePollTimer = null;
@@ -5928,7 +5939,128 @@
     state.ctxTarget = null;
     hidePathTip();
     hideAlbumCtxMenu();
+    hideFolderCtxMenu();
   }
+
+  let folderCtxTarget = "";
+  let folderCtxType = "subdir"; // subdir | cat
+
+  function showFolderCtxMenu(x, y, folderPath, type = "subdir") {
+    hideCtxMenu();
+    folderCtxTarget = folderPath;
+    folderCtxType = type;
+    const menu = $("#folder-ctx-menu");
+    if (!menu) return;
+    menu.classList.remove("hidden");
+    menu.style.visibility = "hidden";
+    menu.style.left = `${x}px`;
+    menu.style.top = `${y}px`;
+    requestAnimationFrame(() => {
+      const rect = menu.getBoundingClientRect();
+      const pad = 8;
+      let left = x;
+      let top = y;
+      if (left + rect.width > window.innerWidth - pad) {
+        left = Math.max(pad, window.innerWidth - rect.width - pad);
+      }
+      if (top + rect.height > window.innerHeight - pad) {
+        top = Math.max(pad, window.innerHeight - rect.height - pad);
+      }
+      menu.style.left = `${left}px`;
+      menu.style.top = `${top}px`;
+      menu.style.visibility = "";
+    });
+  }
+
+  function hideFolderCtxMenu() {
+    $("#folder-ctx-menu")?.classList.add("hidden");
+    folderCtxTarget = "";
+  }
+
+  $("#folder-ctx-menu")?.addEventListener("click", async (e) => {
+    const action = e.target.dataset.action;
+    if (!action) return;
+    hideFolderCtxMenu();
+    if (!folderCtxTarget && folderCtxType === "subdir") return;
+    const target = folderCtxType === "cat" ? folderCtxTarget : `${state.category}/${folderCtxTarget}`;
+
+    if (action === "folder-rename") {
+      const oldName = target.split("/").pop();
+      const newName = prompt("输入新目录名", oldName);
+      if (!newName || !newName.trim()) return;
+      try {
+        const result = await api(`/api/folders/rename?${new URLSearchParams({
+          category: state.category,
+          old_path: folderCtxType === "cat" ? target : folderCtxTarget,
+          new_name: newName.trim(),
+          type: folderCtxType,
+        })}`, { method: "POST" });
+        if (result.changed > 0) {
+          state.folderTrees[state.category] = null;
+          await renderSubdirPanel();
+          await loadVideos();
+        } else if (result.renamed) {
+          state.folder = "";
+          state.folderTrees = {};
+          lastCatCounts = {};
+          await loadCategories();
+          await renderSubdirPanel();
+          await loadVideos();
+        }
+      } catch (err) {
+        alert("重命名失败: " + err.message);
+      }
+    } else if (action === "folder-move") {
+      const dest = prompt(`输入目标路径（将 "${target}" 移动到该路径下）`, "");
+      if (!dest || !dest.trim()) return;
+      try {
+        const result = await api(`/api/folders/move?${new URLSearchParams({
+          category: state.category,
+          src_path: folderCtxType === "cat" ? target : folderCtxTarget,
+          dest_path: dest.trim(),
+          type: folderCtxType,
+        })}`, { method: "POST" });
+        if (result.moved) {
+          state.folder = "";
+          state.folderTrees = {};
+          lastCatCounts = {};
+          await loadCategories();
+          await renderSubdirPanel();
+          await loadVideos();
+        } else {
+          alert("移动失败");
+        }
+      } catch (err) {
+        alert("移动失败: " + err.message);
+      }
+    } else if (action === "folder-delete") {
+      const confirmMsg = `确定删除目录 "${target}" 及其所有子目录和文件？\n\n将被移动到系统回收站。`;
+      if (!confirm(confirmMsg)) return;
+      try {
+        const result = await api(`/api/folders/delete`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            category: state.category,
+            folder: folderCtxType === "cat" ? target : folderCtxTarget,
+            type: folderCtxType,
+          }),
+        });
+        if (result.deleted > 0) {
+          state.folder = "";
+          state.folderTrees = {};
+          lastCatCounts = {};
+          await loadCategories();
+          await renderSubdirPanel();
+          await loadVideos();
+        } else {
+          alert("未找到匹配文件");
+        }
+      } catch (err) {
+        alert("删除失败: " + err.message);
+      }
+    }
+  });
 
   function setManageMode(on, { reload = true } = {}) {
     state.manageMode = on;
@@ -6054,6 +6186,9 @@
           thumb_candidate_count: candidateCount || 6,
           thumb_auto_select_best: $("#set-auto-select-best")?.value === "true",
           thumb_batch_auto_select: $("#set-batch-auto-select")?.value === "true",
+          thumb_jitter_pct: parseInt($("#set-jitter-pct")?.value, 10) || 10,
+          thumb_jitter_min: parseInt($("#set-jitter-min")?.value, 10) || 6,
+          thumb_jitter_max: parseInt($("#set-jitter-max")?.value, 10) || 94,
           default_page_size: readSettingsPageSize(),
           potplayer_path: $("#set-potplayer")?.value || "",
           player_mode: document.querySelector('input[name="player-mode"]:checked')?.value || SETTINGS_DEFAULTS.player_mode,

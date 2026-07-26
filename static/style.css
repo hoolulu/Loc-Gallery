@@ -30,11 +30,21 @@
   --yt-dialog-backdrop: rgba(0, 0, 0, 0.65);
   --yt-shadow-lg: 0 25px 50px rgba(0, 0, 0, 0.5);
   --yt-shadow-panel: 0 12px 32px rgba(0, 0, 0, 0.42);
+  --yt-shadow-xl: 0 24px 64px rgba(0, 0, 0, 0.55);
+  --yt-shadow-card: 0 4px 16px rgba(0, 0, 0, 0.5);
+  --yt-shadow-card-hover: 0 4px 20px rgba(0, 0, 0, 0.5);
+  --yt-shadow-selection: 0 8px 32px rgba(0, 0, 0, 0.45);
+  --yt-shadow-album-hover: 0 12px 36px rgba(0, 0, 0, 0.35);
+  --yt-shadow-album-btn: 0 4px 20px rgba(0, 0, 0, 0.4);
+  --yt-shadow-album-btn-hover: 0 6px 24px rgba(0, 0, 0, 0.5);
+  --yt-shadow-toast: 0 8px 28px rgba(0, 0, 0, 0.45);
   --yt-pl-hover: #2a2a2a;
   --yt-danger-bg: #2a1515;
   --yt-danger-border: #5c2020;
   --yt-danger-text: #ff8a8b;
   --yt-player-stage-bg: #0f0f0f;
+  --yt-backdrop-overlay: rgba(0, 0, 0, 0.72);
+  --yt-toast-bg: rgba(24, 24, 24, 0.94);
   --yt-radius: 6px;
   --yt-radius-sm: 4px;
   --header-radius: var(--yt-radius);
@@ -68,11 +78,21 @@
   --yt-dialog-backdrop: rgba(0, 0, 0, 0.4);
   --yt-shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.12);
   --yt-shadow-panel: 0 8px 24px rgba(0, 0, 0, 0.1);
+  --yt-shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.15);
+  --yt-shadow-card: 0 4px 12px rgba(0, 0, 0, 0.1);
+  --yt-shadow-card-hover: 0 4px 16px rgba(0, 0, 0, 0.08);
+  --yt-shadow-selection: 0 6px 24px rgba(0, 0, 0, 0.1);
+  --yt-shadow-album-hover: 0 8px 28px rgba(0, 0, 0, 0.12);
+  --yt-shadow-album-btn: 0 4px 16px rgba(0, 0, 0, 0.1);
+  --yt-shadow-album-btn-hover: 0 6px 20px rgba(0, 0, 0, 0.15);
+  --yt-shadow-toast: 0 8px 24px rgba(0, 0, 0, 0.12);
   --yt-pl-hover: #f2f2f2;
   --yt-danger-bg: #fff5f5;
   --yt-danger-border: #f5c2c2;
   --yt-danger-text: #c62828;
   --yt-player-stage-bg: #0f0f0f;
+  --yt-backdrop-overlay: rgba(0, 0, 0, 0.55);
+  --yt-toast-bg: rgba(255, 255, 255, 0.96);
 }
 
 html {
@@ -172,7 +192,7 @@ body {
   border: 1px solid var(--yt-border);
   background: var(--yt-bg-elevated);
   color: var(--yt-text-primary);
-  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--yt-shadow-lg);
 }
 .app-dialog-wide { max-width: 52rem; }
 .app-dialog-settings {
@@ -249,8 +269,8 @@ body {
 }
 .thumb-status-chip:hover,
 .thumb-status-chip:focus-visible {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: #4a4a4a;
+  background: var(--yt-bg-hover);
+  border-color: var(--yt-border);
   color: var(--yt-text-primary);
   outline: none;
 }
@@ -346,7 +366,7 @@ body {
   color: var(--yt-text-muted);
 }
 .header-search:hover {
-  background: var(--yt-bg-hover);
+  background: var(--yt-input-focus-bg);
   border-color: var(--yt-input-focus-border);
 }
 .header-search:focus {
@@ -413,7 +433,10 @@ body {
   min-width: 0;
   max-width: 6.5rem;
   padding: 0.28rem 1.25rem 0.28rem 0.45rem;
-  background: var(--yt-bg-input) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%239aa0a6' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 0.35rem center;
+  background-color: var(--yt-bg-input);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%239aa0a6' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.35rem center;
   border: 1px solid var(--yt-border-subtle);
   border-radius: var(--header-radius);
   color: var(--yt-text-primary);
@@ -421,17 +444,18 @@ body {
   line-height: 1.2;
   cursor: pointer;
   appearance: none;
-  transition: background 0.15s, border-color 0.15s;
+  transition: background-color 0.15s, border-color 0.15s;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .library-select:hover {
-  background-color: #3a3a3a;
-  border-color: #4a4a4a;
+  background-color: var(--yt-bg-tertiary);
+  border-color: var(--yt-border);
+  filter: brightness(1.1);
 }
 .library-select:focus {
   outline: none;
-  border-color: #5a5a5a;
+  border-color: var(--yt-accent);
   box-shadow: none;
 }
 
@@ -440,7 +464,7 @@ body {
   background: var(--yt-bg-elevated);
   border: 1px solid var(--yt-border);
   border-radius: 0.75rem;
-  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.55);
+  box-shadow: var(--yt-shadow-lg);
 }
 .settings-form {
   display: flex;
@@ -862,7 +886,7 @@ body {
   padding: 0.5rem 0.75rem;
   background: var(--yt-bg);
   border: 1px solid var(--yt-border);
-  color: #eee;
+  color: var(--yt-text-primary);
   border-radius: 0.5rem;
   font-size: 0.875rem;
 }
@@ -1383,7 +1407,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.72);
+  background: var(--yt-backdrop-overlay);
   backdrop-filter: blur(4px);
   pointer-events: auto;
 }
@@ -1395,7 +1419,7 @@ body {
   border-radius: 1rem;
   border: 1px solid rgba(229, 9, 20, 0.35);
   background: linear-gradient(180deg, var(--yt-bg-elevated) 0%, var(--yt-bg) 100%);
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+  box-shadow: var(--yt-shadow-xl);
   text-align: center;
 }
 .play-overlay-close {
@@ -1775,7 +1799,7 @@ dialog.app-dialog-settings {
 }
 
 dialog::backdrop {
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--yt-dialog-backdrop);
 }
 
 #settings-dialog,
@@ -1783,7 +1807,7 @@ dialog::backdrop {
 #rename-dialog,
 #move-dialog {
   background: var(--yt-bg-elevated);
-  color: #eee;
+  color: var(--yt-text-primary);
   border: 1px solid var(--yt-border);
   border-radius: 10px;
   padding: 24px;
@@ -2054,7 +2078,7 @@ main {
   padding: 5px 8px;
   background: var(--yt-bg-secondary);
   border: 1px solid var(--yt-border);
-  color: #eee;
+  color: var(--yt-text-primary);
   border-radius: 6px;
   text-align: center;
 }
@@ -2105,13 +2129,11 @@ main {
   cursor: pointer;
   transition: transform 0.15s, box-shadow 0.15s;
   position: relative;
-  content-visibility: auto;
-  contain-intrinsic-size: auto 210px;
 }
 
 .card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  box-shadow: var(--yt-shadow-card-hover);
 }
 
 .card.selected { outline: 2px solid #e50914; }
@@ -2543,7 +2565,7 @@ body.has-selection .card-check {
   justify-content: center;
   gap: 8px 10px;
   z-index: 200;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--yt-shadow-selection);
 }
 .selection-bar #selection-count {
   flex: 0 0 auto;
@@ -2568,7 +2590,7 @@ body.has-selection .card-check {
   padding: 4px 0;
   z-index: 300;
   min-width: 160px;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  box-shadow: var(--yt-shadow-card);
 }
 
 .ctx-menu button {
@@ -2708,7 +2730,7 @@ mark {
   border: 1px solid var(--yt-border);
 }
 [data-theme="light"] .card:hover {
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--yt-shadow-card-hover);
 }
 [data-theme="light"] .selection-bar {
   box-shadow: var(--yt-shadow-lg);
@@ -2814,7 +2836,7 @@ mark {
 .album-card:hover {
   border-color: var(--yt-accent);
   transform: translateY(-4px);
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--yt-shadow-album-hover);
 }
 
 /* 方形封面 (1:1)，专辑封面惯例 */
@@ -2889,7 +2911,7 @@ mark {
   justify-content: center;
   font-size: 1.4rem;
   color: #fff;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--yt-shadow-album-btn);
   transition: transform 0.2s, box-shadow 0.2s;
   transform: scale(0.85);
   border: none;
@@ -2902,7 +2924,7 @@ mark {
 
 .album-play-btn:hover {
   transform: scale(1.1) !important;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--yt-shadow-album-btn-hover);
 }
 
 /* 卡片内容区 */
@@ -3144,9 +3166,9 @@ body.has-selection .card-album-badge {
   padding: 10px 14px;
   border-radius: 10px;
   border: 1px solid var(--yt-border);
-  background: rgba(24, 24, 24, 0.94);
+  background: var(--yt-toast-bg);
   color: var(--yt-text-primary);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--yt-shadow-toast);
   font-size: 0.8125rem;
   line-height: 1.45;
   pointer-events: auto;
@@ -3214,6 +3236,6 @@ body.has-selection .card-album-badge {
 }
 
 [data-theme="light"] .toast {
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  background: var(--yt-toast-bg);
+  box-shadow: var(--yt-shadow-toast);
 }

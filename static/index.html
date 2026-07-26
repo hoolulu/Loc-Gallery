@@ -284,6 +284,12 @@
     <button data-action="album-delete" class="danger">删除专辑</button>
   </div>
 
+  <div id="folder-ctx-menu" class="ctx-menu hidden">
+    <button data-action="folder-rename">重命名目录</button>
+    <button data-action="folder-move">移动目录</button>
+    <button data-action="folder-delete" class="danger">删除目录（含所有文件）</button>
+  </div>
+
   <dialog id="rename-dialog" class="app-dialog">
     <form method="dialog" class="p-6">
       <h2 class="text-lg font-semibold">重命名文件</h2>
@@ -574,6 +580,21 @@
                   <option value="true">开</option>
                   <option value="false">关</option>
                 </select>
+              </label>
+
+              <label class="opt-cell">
+                <span class="settings-field-label">随机偏移 (±%)</span>
+                <input type="number" id="set-jitter-pct" min="5" max="15" step="1" class="dlg-input compact-input input-fit input-fit--xs">
+              </label>
+
+              <label class="opt-cell">
+                <span class="settings-field-label">偏移下限 %</span>
+                <input type="number" id="set-jitter-min" min="3" max="12" step="1" class="dlg-input compact-input input-fit input-fit--xs">
+              </label>
+
+              <label class="opt-cell">
+                <span class="settings-field-label">偏移上限 %</span>
+                <input type="number" id="set-jitter-max" min="88" max="97" step="1" class="dlg-input compact-input input-fit input-fit--xs">
               </label>
             </div>
           </section>
