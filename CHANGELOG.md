@@ -1,5 +1,38 @@
 # Changelog
 
+## [6.0.0] - 2026-07-26
+
+**重大架构修复**：多库线程上下文漂移修复、ffmpeg 进程树清理、缩略图渲染全面优化、文件夹管理、主题适配。
+
+### 🔧 核心修复
+
+- **多库 `current_library_id` 线程漂移**（`_thread_library` → `contextvars.ContextVar`）：删除线程 ID 字典，FastAPI 异步线程复用不再残留旧库 ID，`thumbReady`/`thumbVersion` 全库一致
+- **`generate_thumb_candidates` 路径不一致**：清旧文件用显式 `library_id`，生成新文件用隐式 `_tdir()` → 文件写入错误目录 → 全部改为显式传参
+- **windows ffmpeg 子进程僵尸**：`subprocess.run timeout` 只杀父进程，decoder 子进程残留占文件句柄 → 改用 `Popen`+`taskkill /F /T /PID` 杀整棵进程树
+
+### ✨ 新功能
+
+- **文件夹右键菜单**：侧栏分类 + 子目录面板全部支持右键重命名/移动/删除
+- **文件夹 API**：`POST /api/folders/rename`、`POST /api/folders/delete`、`POST /api/folders/move`
+- **子目录递归过滤已正确实现**：根目录显示所有子目录视频
+- **jitter 配置化**：偏移幅度(±5-15%)、下限(3-12%)、上限(88-97%) 可在设置中调整
+
+### 🎨 界面
+
+- **设置页 Tab 化**：视频库/播放/缩略图/其他四个 Tab，路径列宽度 55% 限制
+- **亮色主题全面适配**：所有阴影/浮层背景改用 CSS 变量，不再硬编码暗色值
+- **缩略图渲染简化**：去掉 `onerror`/`loading`/`decoding`/`content-visibility` 等过度优化，回归浏览器原生行为
+- **候选图 jitter ±10%**（原 ±4%），`[0.06, 0.94]` 范围
+
+### 🐛 修复
+
+- **设置保存失效**：`SettingsUpdate` Pydantic 模型缺 3 个新字段 → Pydantic 静默丢弃
+- **首次访问页面缩略图"等待中"**：`onerror` 误触发 + `content-visibility: auto` 延缓渲染
+- **悬停大图"暂无缩略图"**：`showPathTip` 只检查 `thumbReady` 不检查 `thumbVersion`
+- **进度条重启后误显示**：`current_library_id` 漂移导致所有缩略图误标记为 `missing`
+- **候选图 jitter 相似度过高**：±4% → ±10%
+- **`Cache-Control: immutable` 导致首次加载异常** → 改标准 `max-age=86400`
+
 ## [5.0.3] - 2026-07-25
 
 **缩略图生成可靠性改进**：根本原因分析并修复了候选图间歇性生成失败的 4 个根因；前端所有入口（初始、选图失败、"换一组"）增加 3 次重试循环，失败关框不丢空界面给用户。
