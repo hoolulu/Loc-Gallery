@@ -13,7 +13,7 @@
     })();
   </script>
   <link rel="stylesheet" href="/static/tailwind.css?v=2">
-  <link rel="stylesheet" href="/static/style.css?v=106">
+  <link rel="stylesheet" href="/static/style.css?v=107">
 </head>
 <body class="flex h-full flex-col overflow-hidden bg-surface text-primary antialiased">
 
@@ -96,7 +96,6 @@
         </select>
       </div>
       <div id="category-list" class="cat-nav"></div>
-      <div id="folder-panel" class="subdir-nav hidden"></div>
     </aside>
 
     <div id="content-wrap" class="flex min-h-0 min-w-0 flex-1">
@@ -285,6 +284,7 @@
   </div>
 
   <div id="folder-ctx-menu" class="ctx-menu hidden">
+    <button data-action="folder-star">★ 星标/取消星标</button>
     <button data-action="folder-rename">重命名目录</button>
     <button data-action="folder-move">移动目录</button>
     <button data-action="folder-delete" class="danger">删除目录（含所有文件）</button>
@@ -363,6 +363,19 @@
         <button type="submit" value="cancel" class="ui-btn rounded-lg px-4 py-2">取消</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog id="move-folder-dialog" class="app-dialog app-dialog-wide">
+    <div class="p-6">
+      <h2 class="text-lg font-semibold">移动目录</h2>
+      <p id="move-folder-src" class="hint mt-2"></p>
+      <p class="hint-subtitle mt-1">选择目标目录：</p>
+      <div id="move-folder-tree" class="move-folder-tree mt-3 max-h-80 overflow-y-auto"></div>
+      <div class="dialog-btns mt-6 flex justify-end gap-2">
+        <button type="button" id="move-folder-cancel" class="ui-btn rounded-lg px-4 py-2">取消</button>
+        <button type="button" id="move-folder-confirm" class="ui-btn ui-btn-primary rounded-lg px-4 py-2" disabled>移动到此</button>
+      </div>
+    </div>
   </dialog>
 
   <dialog id="settings-dialog" class="app-dialog app-dialog-settings">

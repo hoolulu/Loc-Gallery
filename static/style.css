@@ -1601,6 +1601,41 @@ aside#sidebar {
   scrollbar-gutter: stable;
 }
 
+/* ── TreezleJS theme overrides ────────────────────────────────── */
+#category-list.tv-container {
+  --tv-font:              inherit;
+  --tv-font-size:         0.85rem;
+  --tv-line-height:       32px;
+  --tv-bg:                transparent;
+  --tv-color:             var(--yt-text-secondary);
+  --tv-hover-bg:          var(--yt-bg-hover);
+  --tv-selected-bg:       var(--yt-bg-hover);
+  --tv-selected-color:    var(--yt-text-primary);
+  --tv-drop-bg:           var(--yt-bg-hover);
+  --tv-drop-border:       var(--yt-accent);
+  --tv-arrow-color:       var(--yt-text-muted);
+  --tv-arrow-size:        9px;
+  --tv-indent:            18px;
+  --tv-border-radius:     6px;
+  --tv-menu-bg:           var(--yt-bg-elevated);
+  --tv-menu-border:       var(--yt-border-subtle);
+  --tv-menu-shadow:       0 8px 28px rgba(0,0,0,0.45);
+  --tv-menu-item-hover:   var(--yt-bg-hover);
+  --tv-ellipsis-color:    var(--yt-text-muted);
+  --tv-ellipsis-hover-bg: var(--yt-bg-hover);
+  overflow: visible;
+  padding: 0;
+}
+#category-list.tv-container .tv-row {
+  border-radius: 6px;
+  margin: 0 2px;
+}
+/* active category gets accent left border */
+
+/* hide checkbox column */
+#category-list.tv-container .tv-checkbox-col { display: none; }
+#category-list.tv-container .tv-ellipsis-col { display: none; }
+
 .cat-item {
   display: flex;
   align-items: center;
@@ -1608,7 +1643,7 @@ aside#sidebar {
   width: 100%;
   gap: 8px;
   padding: 8px 10px;
-  margin-bottom: 2px;
+  margin-bottom: 0;
   border: none;
   border-radius: 6px;
   background: transparent;
@@ -1622,9 +1657,13 @@ aside#sidebar {
 .cat-item:hover { background: var(--yt-bg-hover); color: var(--yt-text-primary); }
 
 .cat-item.active {
-  background: rgba(229, 9, 20, 0.12);
-  color: #ff6b6b;
-  box-shadow: inset 3px 0 0 #e50914;
+  background: var(--yt-bg-hover);
+  color: var(--yt-accent);
+  font-weight: 600;
+}
+
+.cat-all {
+  margin-bottom: 4px;
 }
 
 .cat-item.dragging {
@@ -1668,63 +1707,110 @@ aside#sidebar {
   font-size: 0.78rem;
 }
 
-.cat-star {
+/* ── Integrated directory tree ── */
+
+/* Wrapper per category + its tree children */
+.tree-cat-wrapper + .tree-cat-wrapper {
+  margin-top: 2px;
+}
+
+.tree-cat-wrapper.dragging {
+  opacity: 0.55;
+  background: var(--yt-bg-hover);
+  cursor: grabbing;
+  border-radius: 6px;
+}
+
+/* Toggle arrow for category items */
+.cat-toggle {
   flex-shrink: 0;
   width: 18px;
-  color: #555;
-  font-size: 0.9rem;
-  line-height: 1;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  color: var(--yt-text-muted);
   cursor: pointer;
+  user-select: none;
+  transition: transform 0.15s ease, color 0.15s;
 }
 
-.cat-star:hover { color: #f5c518; }
-.cat-star.on { color: #f5c518; }
-
-.subdir-nav {
-  flex-shrink: 0;
-  max-height: 40vh;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  border-top: 1px solid var(--yt-border);
-  padding: 8px;
-  background: var(--yt-bg-secondary);
-  scrollbar-gutter: stable;
+.cat-toggle:hover {
+  color: var(--yt-text-primary);
 }
 
-.subdir-title {
-  padding: 4px 6px 8px;
-  font-size: 0.72rem;
-  color: #666;
-  letter-spacing: 0.5px;
+.cat-toggle.expanded {
+  transform: rotate(90deg);
+  color: var(--yt-text-primary);
 }
 
-.subdir-item {
+/* Hide grip text, keep drag area */
+.cat-grip {
+  display: none;
+}
+
+/* Children container */
+.tree-children {}
+
+.tree-children.collapsed {
+  display: none;
+}
+
+/* Folder row (inside tree) */
+.tree-folder-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  gap: 8px;
-  padding: 6px 8px;
-  margin-bottom: 2px;
+  gap: 6px;
+  padding: 5px 10px;
+  margin: 0;
   border: none;
   border-radius: 4px;
   background: transparent;
-  color: #888;
+  color: var(--yt-text-secondary);
   font-size: 0.82rem;
   text-align: left;
   cursor: pointer;
+  user-select: none;
 }
 
-.subdir-item:hover { background: var(--yt-bg-hover); color: var(--yt-text-primary); }
-
-.subdir-item.active {
-  background: #1e1e1e;
-  color: #fff;
-  box-shadow: inset 3px 0 0 #e50914;
+.tree-folder-row:hover {
+  background: var(--yt-bg-hover);
+  color: var(--yt-text-primary);
 }
 
-.subdir-name {
+.tree-folder-row.active {
+  background: var(--yt-bg-hover);
+  color: var(--yt-text-primary);
+}
+
+/* Folder toggle */
+.folder-toggle {
+  flex-shrink: 0;
+  width: 14px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.55rem;
+  color: var(--yt-text-muted);
+  cursor: pointer;
+  user-select: none;
+  transition: transform 0.15s ease;
+}
+
+.folder-toggle:hover {
+  color: var(--yt-text-primary);
+}
+
+.folder-toggle.expanded {
+  transform: rotate(90deg);
+}
+
+/* Folder name */
+.tree-folder-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1732,9 +1818,10 @@ aside#sidebar {
   min-width: 0;
 }
 
-.subdir-count {
+/* Folder count */
+.tree-folder-count {
   flex-shrink: 0;
-  color: #555;
+  color: var(--yt-text-muted);
   font-size: 0.75rem;
 }
 
@@ -1743,7 +1830,7 @@ aside#sidebar {
   flex-direction: column;
   gap: 8px;
   padding: 10px 12px;
-  border-bottom: 1px solid #222;
+  border-bottom: 1px solid var(--yt-border-subtle);
   margin-bottom: 8px;
 }
 
@@ -1751,7 +1838,7 @@ aside#sidebar {
   flex-shrink: 0;
   font-size: 0.75rem;
   font-weight: 500;
-  color: #a1a1aa;
+  color: var(--yt-text-muted);
   letter-spacing: 0.5px;
   white-space: nowrap;
 }
@@ -1907,14 +1994,6 @@ main {
   color: var(--yt-text-secondary);
 }
 .cat-item:hover {
-  background: var(--yt-bg-hover);
-  color: var(--yt-text-primary);
-}
-
-.subdir-item {
-  color: var(--yt-text-secondary);
-}
-.subdir-item:hover {
   background: var(--yt-bg-hover);
   color: var(--yt-text-primary);
 }
@@ -2655,6 +2734,40 @@ body.has-selection .card-check {
   color: var(--yt-accent);
   margin: 2px 0;
   font-weight: 500;
+}
+
+.move-folder-tree {
+  border: 1px solid var(--yt-border-subtle);
+  border-radius: 8px;
+  background: var(--yt-bg-secondary);
+  padding: 8px 0;
+  min-height: 120px;
+}
+
+.move-folder-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  cursor: pointer;
+  color: var(--yt-text-secondary);
+  font-size: 0.8125rem;
+  transition: background 0.12s;
+}
+
+.move-folder-item:hover {
+  background: var(--yt-bg-hover);
+  color: var(--yt-text-primary);
+}
+
+.move-folder-item.selected {
+  background: var(--yt-accent);
+  color: #fff;
+}
+
+.move-folder-item .move-folder-icon {
+  opacity: 0.5;
+  font-size: 0.875rem;
 }
 
 .dialog-label {
