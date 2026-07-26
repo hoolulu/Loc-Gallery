@@ -20,7 +20,7 @@ from loc_gallery.config import THUMB_WORKERS, FILE_STABLE_CHECK_DELAY, thumb_dir
 from loc_gallery.library_context import current_library_id, set_thread_library
 from loc_gallery.library_store import list_libraries
 from loc_gallery.file_stability import is_ready_for_processing, is_ready_for_video
-from loc_gallery.process_util import hidden_subprocess_kwargs
+from loc_gallery.process_util import hidden_subprocess_kwargs, kill_process_tree
 from loc_gallery.scanner import VideoItem, get_all, get_by_id
 from loc_gallery.settings_store import get_setting
 
@@ -751,10 +751,10 @@ def get_status(category: str | None = None, page_ids: list[str] | None = None) -
     return counts
 
 
-def get_video_thumb_status_fast(video_id: str) -> str:
-    if _thumb_file_ok(video_id):
+def get_video_thumb_status_fast(video_id: str, library_id: str | None = None) -> str:
+    if _thumb_file_ok(video_id, library_id):
         return STATUS_READY
-    item = get_by_id(_lid(), video_id)
+    item = get_by_id(_lid(library_id), video_id)
     if item and not _video_is_processable(item):
         return STATUS_MISSING
     with _lock:
@@ -762,29 +762,29 @@ def get_video_thumb_status_fast(video_id: str) -> str:
             return STATUS_GENERATING
         if any(q.video_id == video_id for q in _queue):
             return STATUS_QUEUED
-        entry = _idx().get(video_id)
+        entry = _idx(library_id).get(video_id)
         if entry:
             return entry.get("status", STATUS_MISSING)
     return STATUS_MISSING
 
 
-def get_video_thumb_status(video_id: str) -> str:
-    return get_video_thumb_status_fast(video_id)
+def get_video_thumb_status(video_id: str, library_id: str | None = None) -> str:
+    return get_video_thumb_status_fast(video_id, library_id)
 
 
-def get_thumb_version(video_id: str) -> str | None:
-    thumb = _thumb_file(video_id)
+def get_thumb_version(video_id: str, library_id: str | None = None) -> str | None:
+    thumb = _thumb_file(video_id, library_id)
     if thumb.exists():
         return str(thumb.stat().st_mtime)
     # Trust index as fallback (file may be on a slow/network drive)
     with _lock:
-        entry = _idx().get(video_id)
+        entry = _idx(library_id).get(video_id)
         if entry and entry.get("status") == STATUS_READY and entry.get("thumb_file"):
             return entry.get("generated_at") or "0"
     return None
 
 
-def get_video_thumb_error(video_id: str) -> str | None:
+def get_video_thumb_error(video_id: str, library_id: str | None = None) -> str | None:
     with _lock:
         entry = _idx().get(video_id)
         if entry and entry.get("status") == STATUS_FAILED:
@@ -792,12 +792,12 @@ def get_video_thumb_error(video_id: str) -> str | None:
     return None
 
 
-def is_thumb_ready(video_id: str) -> bool:
-    if _thumb_file_ok(video_id):
+def is_thumb_ready(video_id: str, library_id: str | None = None) -> bool:
+    if _thumb_file_ok(video_id, library_id):
         return True
     # Fast fallback: if index already says ready, trust it (avoids slow per-page file stats)
     with _lock:
-        entry = _idx().get(video_id)
+        entry = _idx(library_id).get(video_id)
         return bool(entry and entry.get("status") == STATUS_READY and entry.get("thumb_file"))
 
 
@@ -1465,22 +1465,26 @@ def _thumb_seek_points(duration: float, position: float) -> list[float]:
 
 def _capture_timeout(seek: float, size: int) -> int:
     if seek <= 10:
-        return 8
-    if seek <= 30:
         return 15
+    if seek <= 30:
+        return 20
     if seek <= 180:
-        return 30
+        return 40
     if seek <= 600:
-        return 50
-    return 65 if size <= FFPROBE_MAX_SIZE else 80
+        return 60
+    return 75 if size <= FFPROBE_MAX_SIZE else 90
 
 
-def _try_capture_thumb(item: VideoItem, seek: float, output: Path, use_mpegts: bool) -> bool:
+def _try_capture_thumb(item: VideoItem, seek: float, output: Path, use_mpegts: bool,
+                       extra_probe_args: list[str] | None = None) -> bool:
     global _last_capture_error, _last_capture_seek
     wip = output.parent / f"{output.stem}_wip_{uuid.uuid4().hex[:8]}.jpg"
     wip.unlink(missing_ok=True)
-    cmd = [ffmpeg_path(), "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
-           "-probesize", "8M", "-analyzeduration", "5M"]
+    cmd = [ffmpeg_path(), "-hide_banner", "-loglevel", "error", "-nostdin", "-y"]
+    if extra_probe_args:
+        cmd += extra_probe_args
+    else:
+        cmd += ["-probesize", "8M", "-analyzeduration", "5M"]
     if use_mpegts:
         cmd += ["-f", "mpegts", "-ss", f"{seek:.2f}", "-i", item.path]
     else:
@@ -1494,16 +1498,15 @@ def _try_capture_thumb(item: VideoItem, seek: float, output: Path, use_mpegts: b
     ]
     timeout = _capture_timeout(seek, item.size)
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            timeout=timeout,
+        p = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             **hidden_subprocess_kwargs(),
         )
-        if result.returncode != 0 or not wip.exists() or wip.stat().st_size <= 0:
+        stdout, stderr = p.communicate(timeout=timeout)
+        if p.returncode != 0 or not wip.exists() or wip.stat().st_size <= 0:
             wip.unlink(missing_ok=True)
-            err = (result.stderr or b"").decode("utf-8", errors="replace").strip()
-            _last_capture_error = err[-240:] if err else f"ffmpeg 退出码 {result.returncode}"
+            err = (stderr or b"").decode("utf-8", errors="replace").strip()
+            _last_capture_error = err[-240:] if err else f"ffmpeg 退出码 {p.returncode}"
             return False
         if output.exists():
             output.unlink(missing_ok=True)
@@ -1512,10 +1515,14 @@ def _try_capture_thumb(item: VideoItem, seek: float, output: Path, use_mpegts: b
         _last_capture_seek = seek
         return True
     except subprocess.TimeoutExpired:
+        from loc_gallery.process_util import kill_process_tree
+        kill_process_tree(p.pid)
         wip.unlink(missing_ok=True)
         _last_capture_error = f"ffmpeg 超时 ({timeout}s)，位置 {seek:.0f}s"
         return False
     except Exception as exc:
+        from loc_gallery.process_util import kill_process_tree
+        kill_process_tree(p.pid)
         wip.unlink(missing_ok=True)
         _last_capture_error = str(exc)
         return False
@@ -1537,7 +1544,7 @@ def _generate_thumb_file(
         position = max(0.05, min(0.95, float(position)))
     if output is None:
         output = _thumb_file(item.id)
-    _tdir().mkdir(parents=True, exist_ok=True)
+    output.parent.mkdir(parents=True, exist_ok=True)
 
     modes = [True] if _has_png_header(item.path) else [False, True]
 
@@ -1558,6 +1565,21 @@ def _generate_thumb_file(
         if _capture_by_position(use_mpegts):
             return True
 
+    # Large-file failure (insufficient probesize for moov-at-end files) — retry with bigger probesize
+    time.sleep(0.3)
+    big_probe = ["-probesize", "40M"]
+
+    def _capture_big(use_mpegts: bool) -> bool:
+        duration = _resolve_duration(item, use_mpegts)
+        for seek in _thumb_seek_points(duration, position):
+            if _try_capture_thumb(item, seek, output, use_mpegts, extra_probe_args=big_probe):
+                return True
+        return False
+
+    for use_mpegts in modes:
+        if _capture_big(use_mpegts):
+            return True
+
     return False
 
 
@@ -1565,27 +1587,33 @@ THUMB_CANDIDATE_POSITIONS = [0.1, 0.25, 0.4, 0.55, 0.7, 0.85]
 
 
 def _candidate_positions(count: int, jitter: bool = False) -> list[float]:
-    """Evenly spaced positions in [0.1, 0.85] for N candidates. When jitter=True, add ±4% random offset per position."""
+    """Evenly spaced positions in [0.1, 0.85] for N candidates. When jitter=True, add random offset per position."""
     if count < 2:
         return [0.5]
     positions: list[float] = []
     start, end = 0.1, 0.85
     step = (end - start) / (count - 1)
+    if jitter:
+        from loc_gallery.settings_store import get_setting
+        jitter_pct = max(5, min(15, int(get_setting("thumb_jitter_pct") or 10)))
+        jitter_min = max(3, min(12, int(get_setting("thumb_jitter_min") or 6))) / 100
+        jitter_max = max(88, min(97, int(get_setting("thumb_jitter_max") or 94))) / 100
     for i in range(count):
         pos = round(start + i * step, 4)
         if jitter:
-            offset = round((random.random() - 0.5) * 0.08, 4)
-            pos = round(max(0.08, min(0.88, pos + offset)), 4)
+            offset = round((random.random() - 0.5) * (jitter_pct / 50.0), 4)
+            pos = round(max(jitter_min, min(jitter_max, pos + offset)), 4)
         positions.append(pos)
     return positions
 
 
-def _generate_thumb_candidates(item: VideoItem, count: int = 6, jitter: bool = False) -> list[dict]:
+def _generate_thumb_candidates(item: VideoItem, count: int = 6, jitter: bool = False, library_id: str | None = None) -> list[dict]:
     """Generate N candidate thumbnails at evenly spaced positions. Returns [{pos, file}...]."""
     positions = _candidate_positions(count, jitter=jitter)
     results = []
+    tdir = _tdir(library_id)
     for i, pos in enumerate(positions):
-        cand_path = _tdir() / f"{item.id}_c{i}.jpg"
+        cand_path = tdir / f"{item.id}_c{i}.jpg"
         if _generate_thumb_file(item, position=pos, explicit_position=True, output=cand_path):
             results.append({"pos": pos, "file": f"{item.id}_c{i}.jpg", "index": i})
 
@@ -1593,7 +1621,7 @@ def _generate_thumb_candidates(item: VideoItem, count: int = 6, jitter: bool = F
     if not results:
         rescue = [5.0, 3.0, 1.5, 0.8, 0.3]
         for i, sec in enumerate(rescue):
-            cand_path = _tdir() / f"{item.id}_c{i}.jpg"
+            cand_path = tdir / f"{item.id}_c{i}.jpg"
             if _generate_thumb_file(item, position=sec, explicit_position=True, output=cand_path):
                 results.append({"pos": sec, "file": f"{item.id}_c{i}.jpg", "index": i})
                 break
@@ -1622,7 +1650,7 @@ def generate_thumb_candidates(
             except OSError:
                 pass
 
-    cands = _generate_thumb_candidates(item, count=cand_count, jitter=jitter)
+    cands = _generate_thumb_candidates(item, count=cand_count, jitter=jitter, library_id=lid)
     return cands
 
 
