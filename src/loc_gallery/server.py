@@ -747,6 +747,12 @@ def _do_rescan(library_id: str) -> None:
     enqueue_missing_durations(library_id)
 
 
+def _schedule_rescan(library_id: str) -> None:
+    """Trigger rescan in background thread so API returns immediately."""
+    import threading
+    threading.Thread(target=_do_rescan, args=(library_id,), daemon=True, name="bg-rescan").start()
+
+
 @app.post("/api/folders/delete")
 async def api_folders_delete(req: Request, library_id: str = Depends(resolve_library_id)):
     """Delete all videos in a folder (and subfolders). Files moved to recycle bin."""
@@ -765,14 +771,20 @@ async def api_folders_delete(req: Request, library_id: str = Depends(resolve_lib
     else:
         items = _filter_videos_list(library_id, category=category, folder=folder)
     deleted = 0
+    errors = 0
     for v in items:
         path = Path(v.path)
-        if path.is_file():
+        if not path.is_file():
+            continue
+        try:
             delete_path_to_recycle_bin(library_id, path)
             deleted += 1
+        except (ValueError, OSError):
+            errors += 1
     if deleted:
-        _do_rescan(library_id)
-    return {"ok": True, "deleted": deleted}
+        refresh_cache(library_id)
+        _schedule_rescan(library_id)
+    return {"ok": True, "deleted": deleted, "errors": errors}
 
 
 @app.post("/api/folders/rename")
@@ -801,7 +813,7 @@ async def api_folders_rename(
         if not cat_dir.is_dir():
             raise HTTPException(404, "分类目录不存在")
         old_dir = cat_dir / old_path
-        new_dir = cat_dir.parent / new_name
+        new_dir = cat_dir / new_name
 
     if not old_dir.is_dir():
         raise HTTPException(404, f"目录不存在: {old_path}")
@@ -809,7 +821,8 @@ async def api_folders_rename(
         raise HTTPException(409, f"目标目录已存在: {new_name}")
 
     shutil.move(str(old_dir), str(new_dir))
-    _do_rescan(library_id)
+    refresh_cache(library_id)
+    _schedule_rescan(library_id)
     if ftype == "cat":
         return {"ok": True, "renamed": old_path, "to": new_name}
     return {"ok": True, "renamed": True}
@@ -825,8 +838,8 @@ async def api_folders_move(
     src_path = req.query_params.get("src_path", "").strip()
     dest_path = req.query_params.get("dest_path", "").strip()
     ftype = req.query_params.get("type", "subdir")
-    if not category or not src_path or not dest_path:
-        raise HTTPException(400, "需要 category, src_path, dest_path")
+    if not category or not src_path:
+        raise HTTPException(400, "需要 category, src_path")
 
     lib = get_library(library_id)
     if not lib:
@@ -834,11 +847,11 @@ async def api_folders_move(
 
     if ftype == "cat":
         src = lib.path_obj / src_path
-        dest = lib.path_obj / dest_path
+        dest = lib.path_obj / dest_path / src.name if dest_path else lib.path_obj / src.name
     else:
         cat_dir = lib.path_obj / category
         src = cat_dir / src_path
-        dest = lib.path_obj / dest_path
+        dest = lib.path_obj / dest_path / src.name if dest_path else lib.path_obj / src.name
 
     if not src.is_dir():
         raise HTTPException(404, f"目录不存在: {src_path}")
@@ -847,7 +860,8 @@ async def api_folders_move(
     dest.parent.mkdir(parents=True, exist_ok=True)
 
     shutil.move(str(src), str(dest))
-    _do_rescan(library_id)
+    refresh_cache(library_id)
+    _schedule_rescan(library_id)
     return {"ok": True, "moved": True}
 
 
@@ -1439,15 +1453,7 @@ async def api_videos_move(req: MoveRequest, library_id: str = Depends(resolve_li
 
 @app.post("/api/rescan")
 async def api_rescan(library_id: str = Depends(resolve_library_id)):
-    refresh_cache(library_id)
-    reconcile_deferred_thumbs()
-    sync_index_with_videos()
-    cleanup_orphans()
-    _prune_user_data(library_id)
-    rebuild_format_index_from_plans(library_id)
-    enqueue_missing_format_probe(library_id)
-    backfill_durations_from_history(library_id)
-    enqueue_missing_durations(library_id)
+    _do_rescan(library_id)
     _broadcast("progress", library_id)
     return {"version": get_version(library_id), "count": len(get_all(library_id))}
 

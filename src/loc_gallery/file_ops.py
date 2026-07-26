@@ -79,13 +79,10 @@ def _send_to_recycle_bin(library_id: str, path: Path) -> None:
 
 
 def delete_path_to_recycle_bin(library_id: str, path: Path) -> None:
-    """将库目录下的文件移入系统回收站（用于修复备份等）。"""
+    """将库目录下的文件移入系统回收站（用于修复备份、文件夹删除等）。"""
     resolved = _resolve_under_root(library_id, path)
     if not resolved.is_file():
         return
-    name = resolved.name.lower()
-    if ".bak" not in name:
-        raise ValueError("仅允许删除备份文件")
     _send_to_recycle_bin(library_id, resolved)
 
 
