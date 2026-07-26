@@ -68,6 +68,9 @@ THUMB_PROGRESS_BAR = "auto"  # auto | always | never
 THUMB_CANDIDATE_COUNT = 6    # 3-12
 THUMB_AUTO_SELECT_BEST = False  # auto-pick best in single picker
 THUMB_BATCH_AUTO_SELECT = True  # auto-pick best in batch mode
+THUMB_JITTER_PCT = 10  # ± random offset for "换一组" (5-15%)
+THUMB_JITTER_MIN = 6   # minimum position percentage (3-12)
+THUMB_JITTER_MAX = 94  # maximum position percentage (88-97)
 DEFAULT_PAGE_SIZE = 32
 HISTORY_RETENTION_DAYS = 180
 
