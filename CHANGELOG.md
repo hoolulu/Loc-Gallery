@@ -1,5 +1,32 @@
 # Changelog
 
+## [7.0.0] - 2026-07-26
+
+**大版本重构**：分类树事件委托、点击切换展开、文件夹增删改 API、同步缓存刷新、移除星标。
+
+### 🔧 核心修复
+
+- **文件夹 CRUD API**：新增 `/api/folders/rename`、`/api/folders/move`、`/api/folders/delete` 三个端点；操作后同步 `refresh_cache()` 再后台 `_schedule_rescan`，消除缓存滞后导致前端数据不一致
+- **`delete_path_to_recycle_bin` 递归删除**：去掉 `.bak` 限制，支持整个目录树扔回收站
+
+### ✨ 新功能 / 重构
+
+- **分类树事件委托**：6 组逐元素 `addEventListener` → 单个 `#category-list` 委托处理器，消除 `innerHTML` 重绘后监听器丢失问题
+- **点击分类行切换展开**：点分类行 toggle `state.expandedCategories`，点 ▶ 箭头仅展开不选中，点文件夹行选中并切换展开（若有子节点）
+- **子目录递归过滤**：`_filter_videos` 改为 prefix match，选中父目录时显示所有子目录视频
+
+### 🧹 移除
+
+- **星标功能**：移除 HTML 渲染、点击事件、CSS 样式、右键菜单动作、拖拽星标筛选
+- **TreezleJS 集成**：尝试后回退，249 行代码已剔除；自建树方案保留并优化
+- **选中文档左边框**：`.cat-item.active` 和 `.tree-folder-row.active` 移除 `inset box-shadow`
+
+### 📐 样式
+
+- **亮色主题适配**：CSS 变量化 sidebar-head/sidebar-title 颜色
+- **设置页 Tab 布局**：`.settings-tabs` 替代原分散面板
+- **"本目录" 节点移除**：展开文件夹树后不再显示冗余的本目录行
+
 ## [6.0.0] - 2026-07-26
 
 **重大架构修复**：多库线程上下文漂移修复、ffmpeg 进程树清理、缩略图渲染全面优化、文件夹管理、主题适配。
