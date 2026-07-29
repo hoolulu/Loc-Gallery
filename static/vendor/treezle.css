@@ -1,0 +1,297 @@
+/**
+ * Treezle — Reusable TreeView component
+ * (c) 2026 Micha Sulman
+ * Licensed under the MIT License
+ * https://opensource.org/licenses/MIT
+ */
+
+/* ── Root variables for elements rendered outside .tv-container (e.g. context menu) ── */
+:root {
+  --tv-color:              #1a1a1a;
+  --tv-menu-bg:            #ffffff;
+  --tv-menu-border:        #e0e0e0;
+  --tv-menu-shadow:        0 4px 16px rgba(0,0,0,0.12);
+  --tv-menu-radius:        6px;
+  --tv-menu-item-hover:    #f5f5f5;
+  --tv-menu-font-size:     13px;
+  --tv-menu-item-height:   32px;
+  --tv-menu-icon-size:     15px;
+  --tv-font:               'Segoe UI', system-ui, sans-serif;
+}
+
+/* ── Remix Icon import removed — using custom icons ── */
+
+/* ═══════════════════════════════════════════════════════════════
+   treezle.css — Treezle TreeView component styles
+   All visual customization via CSS variables on .tv-container
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── CSS Variables (override these for theming) ────────────────── */
+.tv-container {
+  --tv-font:              'Segoe UI', system-ui, sans-serif;
+  --tv-font-size:         13px;
+  --tv-line-height:       26px;
+  --tv-bg:                #ffffff;
+  --tv-color:             #1a1a1a;
+  --tv-hover-bg:          #f0f0f0;
+  --tv-selected-bg:       #e0e0e0;
+  --tv-selected-color:    #000000;
+  --tv-disabled-color:    #a0a0a0;
+  --tv-drop-bg:           #e5f3fb;
+  --tv-drop-border:       #ff9023;
+  --tv-arrow-color:       #888;
+  --tv-arrow-size:        10px;
+  --tv-indent:            20px;
+  --tv-border-radius:     3px;
+  --tv-dragging-opacity:  0.4;
+
+  /* Checkbox */
+  --tv-checkbox-size:     16px;
+  --tv-checkbox-margin:   3px;
+
+  /* Context menu */
+  --tv-menu-bg:           #ffffff;
+  --tv-menu-border:       #e0e0e0;
+  --tv-menu-shadow:       0 4px 16px rgba(0,0,0,0.12);
+  --tv-menu-radius:       6px;
+  --tv-menu-item-hover:   #f5f5f5;
+  --tv-menu-font-size:    13px;
+  --tv-menu-item-height:  32px;
+  --tv-menu-icon-size:    15px;
+
+  /* Ellipsis button */
+  --tv-ellipsis-color:    #999;
+  --tv-ellipsis-hover-bg: #e0e0e0;
+  --tv-ellipsis-size:     24px;
+
+  font-family:  var(--tv-font);
+  font-size:    var(--tv-font-size);
+  color:        var(--tv-color);
+  background:   var(--tv-bg);
+  user-select:  none;
+  overflow:     auto;
+  position:     relative;
+}
+
+/* ── Themes ─────────────────────────────────────────────────────── */
+.tv-theme-explorer {
+  border: 1px solid #c8c8c8;
+  padding: 4px 0;
+  --tv-hover-bg:      #ffe0b5;
+  --tv-selected-bg:   #ffc782;
+}
+
+.tv-theme-minimal {
+
+    overflow: hidden;
+    font-family: sans-serif;
+    padding: 4px;
+}
+
+.tv-theme-border {
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    overflow: hidden;
+    font-family: sans-serif;
+    padding: 4px;
+}
+
+/* ── List & Node ─────────────────────────────────────────────────── */
+.tv-list  { list-style: none; margin: 0; padding: 0; }
+.tv-node  { position: relative; }
+
+/* ── Row ─────────────────────────────────────────────────────────── */
+.tv-row {
+  display:        flex;
+  align-items:    center;
+  height:         var(--tv-line-height);
+  cursor:         pointer;
+  border-radius:  var(--tv-border-radius);
+  padding-right:  4px;
+  transition:     background 0.08s;
+  position:       relative;
+}
+.tv-row:hover                { background: var(--tv-hover-bg); }
+.tv-row.tv-selected          { background: var(--tv-selected-bg); color: var(--tv-selected-color); }
+.tv-row.tv-disabled          { color: var(--tv-disabled-color); cursor: default; pointer-events: none; }
+.tv-row.tv-drop-over         { background: var(--tv-drop-bg); outline: 1px dashed var(--tv-drop-border); outline-offset: -1px; }
+.tv-row.tv-dragging          { opacity: var(--tv-dragging-opacity); }
+.tv-row.tv-no-drop           {  cursor: not-allowed;  opacity: 0.5;}
+
+/* ── Arrow ───────────────────────────────────────────────────────── */
+.tv-arrow {
+  display:         inline-flex;
+  align-items:     center;
+  justify-content: center;
+  width:           16px;
+  min-width:       16px;
+  color:           var(--tv-arrow-color);
+  flex-shrink:     0;
+}
+.tv-arrow svg         { transition: transform 0.15s; }
+.tv-arrow-leaf        { visibility: hidden; }
+
+/* ── Checkbox ────────────────────────────────────────────────────── */
+.tv-checkbox-wrap {
+  display:      inline-flex;
+  align-items:  center;
+  margin-right: var(--tv-checkbox-margin);
+  flex-shrink:  0;
+}
+
+[type=checkbox], [type=radio] {
+    border-style: solid;
+    padding: 0;
+    border-color: var(--tv-selected-bg);
+}
+
+.tv-checkbox[type=checkbox] {
+  appearance:         none;
+  -webkit-appearance: none;
+  width:              var(--tv-checkbox-size);
+  height:             var(--tv-checkbox-size);
+  min-width:          var(--tv-checkbox-size);
+  border:             1.5px solid var(--tv-arrow-color)  !important;
+  border-radius:      var(--tv-border-radius);
+  background:         var(--tv-bg);
+  cursor:             pointer;
+  margin:             0;
+  position:           relative;
+  transition:         background 0.15s, border-color 0.15s;
+}
+
+.tv-checkbox[type=checkbox]:hover {
+  border-color: var(--tv-drop-border)  !important;
+}
+
+.tv-checkbox[type=checkbox]:checked {
+  background:   var(--tv-drop-border);
+  border-color: var(--tv-drop-border) !important;
+}
+
+.tv-checkbox:checked::after {
+  content:      "";
+  position:     absolute;
+  left:         4px;
+  top:          0px;
+  width:        6px;
+  height:       10px;
+  border:       2px solid var(--tv-bg);
+  border-top:   none;
+  border-left:  none;
+  transform:    rotate(45deg);
+}
+
+.tv-checkbox:focus-visible {
+  outline:        2px solid var(--tv-drop-border);
+  outline-offset: 2px;
+}
+
+/* Spacer — reserves checkbox column width for nodes without checkbox */
+.tv-checkbox-spacer {
+  display:     inline-block;
+  width:       calc(var(--tv-checkbox-size) + var(--tv-checkbox-margin));
+  flex-shrink: 0;
+}
+
+/* ── Icon ────────────────────────────────────────────────────────── */
+.tv-icon {
+  margin:       0 4px;
+  font-size:    14px;
+  line-height:  1;
+  display:      inline-flex;
+  align-items:  center;
+  flex-shrink:  0;
+}
+.tv-icon-img { width: 16px; height: 16px; object-fit: contain; }
+
+/* ── Label ───────────────────────────────────────────────────────── */
+.tv-label {
+  flex:           1;
+  white-space:    nowrap;
+  overflow:       hidden;
+  text-overflow:  ellipsis;
+  padding:        0 2px;
+  min-width:      0;
+}
+
+/* ── Inline rename ───────────────────────────────────────────────── */
+.tv-rename-input {
+  flex:         1;
+  font-family:  var(--tv-font);
+  font-size:    var(--tv-font-size);
+  border:       1px solid var(--tv-drop-border);
+  border-radius: 2px;
+  padding:      0 4px;
+  outline:      none;
+  height:       18px;
+  line-height:  18px;
+  min-width:    0;
+}
+
+/* ── Ellipsis button ─────────────────────────────────────────────── */
+.tv-ellipsis {
+  display:         inline-flex;
+  align-items:     center;
+  justify-content: center;
+  width:           var(--tv-ellipsis-size);
+  height:          var(--tv-ellipsis-size);
+  border-radius:   4px;
+  border:          none;
+  background:      transparent;
+  color:           var(--tv-ellipsis-color);
+  cursor:          pointer;
+  flex-shrink:     0;
+  opacity:         0;
+  transition:      opacity 0.1s, background 0.1s;
+  padding:         0;
+  margin-left:     2px;
+}
+/* EllipsisButton1: always visible */
+.tv-menu-ellipsis1 .tv-ellipsis            { opacity: 1; }
+/* EllipsisButton2: show on row hover only */
+.tv-menu-ellipsis2 .tv-row:hover .tv-ellipsis  { opacity: 1; }
+.tv-ellipsis:hover { background-color: var(--tv-ellipsis-hover-bg); color: #333; }
+ 
+/* Horizontal dots — inline SVG background */
+.tv-ellipsis-h { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Ccircle cx='3' cy='8' r='1.5' fill='%23888'/%3E%3Ccircle cx='8' cy='8' r='1.5' fill='%23888'/%3E%3Ccircle cx='13' cy='8' r='1.5' fill='%23888'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: center; }
+/* Vertical dots — inline SVG background */
+.tv-ellipsis-v { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='3' r='1.5' fill='%23888'/%3E%3Ccircle cx='8' cy='8' r='1.5' fill='%23888'/%3E%3Ccircle cx='8' cy='13' r='1.5' fill='%23888'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: center; }
+
+
+/* ── Context menu ────────────────────────────────────────────────── */
+.tv-menu {
+  position:     fixed;
+  z-index:      9999;
+  background:   var(--tv-menu-bg);
+  border:       1px solid var(--tv-menu-border);
+  border-radius: var(--tv-menu-radius);
+  box-shadow:   var(--tv-menu-shadow);
+  min-width:    160px;
+  padding:      4px 0;
+  font-size:    var(--tv-menu-font-size);
+  user-select:  none;
+}
+.tv-menu-item {
+  display:      flex;
+  align-items:  center;
+  gap:          8px;
+  height:       var(--tv-menu-item-height);
+  padding:      0 12px;
+  cursor:       pointer;
+  color:        var(--tv-color);
+  transition:   background 0.08s;
+  white-space:  nowrap;
+}
+.tv-menu-item:hover       { background: var(--tv-menu-item-hover); }
+.tv-menu-item-icon {
+  width:        var(--tv-menu-icon-size);
+  height:       var(--tv-menu-icon-size);
+  display:      inline-flex;
+  align-items:  center;
+  justify-content: center;
+  flex-shrink:  0;
+  font-size:    var(--tv-menu-icon-size);
+}
+.tv-menu-item-label       { flex: 1; }
+.tv-menu-separator        { height: 1px; background: var(--tv-menu-border); margin: 4px 0; }

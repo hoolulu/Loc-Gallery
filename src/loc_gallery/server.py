@@ -94,11 +94,14 @@ from loc_gallery.format_index import (
     filter_items_by_format,
     get_format_status,
     rebuild_format_index_from_plans,
+    set_format_kind,
     shutdown_format_index,
     start_format_index_background,
 )
 from loc_gallery.media_probe import (
     can_remux_from_plan,
+    classify_format_plan,
+    force_probe_playback_plan,
     get_format_badge_for_item,
     get_format_badges,
     get_playback_plan,
@@ -1389,7 +1392,7 @@ async def api_open_folder(video_id: str, library_id: str = Depends(resolve_libra
     if not item:
         raise HTTPException(404, "视频不存在")
     folder = str(Path(item.path).parent)
-    os.startfile(folder)
+    subprocess.Popen(["explorer", folder])
     return {"ok": True, "folder": folder}
 
 
@@ -1422,11 +1425,19 @@ async def api_videos_rename(req: RenameRequest, library_id: str = Depends(resolv
     old_id = req.id
     try:
         item = rename_video(library_id, old_id, req.new_name)
+        _after_file_change(library_id, [old_id])
+        # 强制同步 probe 格式，跳过稳定性检查，使筛选立即生效
+        from pathlib import Path
+        p = Path(item.path)
+        if p.is_file():
+            plan = force_probe_playback_plan(p)
+            kind = classify_format_plan(plan)
+            if kind is not None:
+                set_format_kind(library_id, item.id, item.mtime, item.size, kind)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    except OSError as exc:
+    except (OSError, RuntimeError) as exc:
         raise HTTPException(500, str(exc)) from exc
-    _after_file_change(library_id, [old_id])
     return {
         "ok": True,
         "old_id": old_id,

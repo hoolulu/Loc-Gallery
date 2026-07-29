@@ -406,18 +406,10 @@ def _peek_cached_plan(path: Path) -> dict | None:
 def can_remux_from_plan(plan: dict) -> tuple[bool, str]:
     """根据已缓存的播放计划判断是否可流复制修复。"""
     kind = (plan.get("structure") or {}).get("kind")
-    codec = (plan.get("codec") or "").lower()
     mdat_count = int((plan.get("structure") or {}).get("mdat_count") or 0)
     fragmented = kind == "fragmented" or mdat_count > 3
     if not fragmented:
         return False, "仅碎片化 / 多段 mdat 的 MP4 需要重封装"
-    if codec not in ("h264", "avc1"):
-        if codec in ("av1", "hevc", "h265", "vp9"):
-            return (
-                False,
-                f"{codec.upper()} 不能「修复」为 H.264：修复仅重排 MP4 容器（流复制）。",
-            )
-        return False, f"暂不支持 {codec.upper()} 重封装，请用 PotPlayer"
     if plan.get("transcode"):
         return False, "该视频需要转码，无法流复制重封装"
     return True, ""
@@ -439,6 +431,8 @@ def classify_format_plan(plan: dict | None) -> str | None:
         return None
     if mode == "unsupported":
         return "unsupported"
+    if mode == "direct":
+        return None
 
     if can_remux_from_plan(plan)[0]:
         return "remuxable"
@@ -553,6 +547,39 @@ def seed_direct_playback_plan(path: Path, *, codec: str = "h264") -> dict:
     _disk_cache_put(key, st.st_mtime, st.st_size, plan)
     out = dict(plan)
     out["cached"] = True
+    return out
+
+
+def force_probe_playback_plan(path: Path) -> dict:
+    """强制探测文件播放策略，跳过 is_ready_for_processing 检查（重命名/移动后使用）。"""
+    key = str(path.resolve())
+    try:
+        st = path.stat()
+    except OSError:
+        return {"mode": "error", "reason": "文件不存在", "cached": False}
+    with _plan_lock:
+        cached = _plan_cache.get(key)
+        if cached and cached[0] == st.st_mtime and cached[1] == st.st_size:
+            if cached[2].get("_policy") == _hls_policy_tag() and not _plan_needs_rebuild(path, cached[2]):
+                plan = dict(cached[2])
+                plan.pop("_policy", None)
+                plan["cached"] = True
+                return plan
+        disk = _disk_cache_get(key, st.st_mtime, st.st_size)
+        if disk and not _plan_needs_rebuild(path, disk):
+            tagged = {**disk, "_policy": _hls_policy_tag()}
+            _plan_cache[key] = (st.st_mtime, st.st_size, tagged)
+            plan = dict(disk)
+            plan["cached"] = True
+            return plan
+    plan = _build_playback_plan(path)
+    plan["_policy"] = _hls_policy_tag()
+    with _plan_lock:
+        _plan_cache[key] = (st.st_mtime, st.st_size, plan)
+    _disk_cache_put(key, st.st_mtime, st.st_size, plan)
+    out = dict(plan)
+    out.pop("_policy", None)
+    out["cached"] = False
     return out
 
 

@@ -146,6 +146,13 @@ def rename_video(library_id: str, video_id: str, new_name: str) -> VideoItem:
     for v in get_all(library_id):
         if v.path == str(new_path):
             return v
+
+    # refresh_cache 可能因 mtime 检查跳过刚重命名的文件，直接 upsert 兜底
+    from loc_gallery.scanner import upsert_video_from_path
+    new_item = upsert_video_from_path(library_id, new_path)
+    if new_item:
+        return new_item
+
     raise RuntimeError("重命名后未找到视频")
 
 

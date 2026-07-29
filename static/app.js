@@ -3291,7 +3291,7 @@
   const FORMAT_BADGE_META = {
     remuxable: {
       label: "多段交错·可修复",
-      title: "多段 mdat 交错的 H.264 MP4，可流复制修复为标准格式（不重新编码）",
+      title: "多段 mdat 交错，可流复制修复为标准格式（不重新编码）",
       cls: "thumb-format-badge--remuxable",
     },
     transcode: {
@@ -5534,8 +5534,8 @@
         remuxBtn.classList.toggle("hidden", !remuxable);
         remuxBtn.disabled = false;
         remuxBtn.title = remuxable
-          ? "流复制重封装为标准 MP4（不重新编码，仅碎片化 H.264）"
-          : (remuxReason || "仅碎片化 H.264 MP4 支持修复");
+          ? "流复制重封装为标准 MP4（不重新编码）"
+          : (remuxReason || "当前视频不支持流复制修复");
       }
       $("#nonstandard-btn-web")?.classList.add("hidden");
       dlg.showModal();
@@ -5630,7 +5630,7 @@
     if (choice === "potplayer") await playVideoExternal(id);
     else if (choice === "remux") {
       if (!info.remuxable) {
-        alert(info.remux_reason || "当前视频不支持修复为标准 MP4。\n\n仅碎片化 H.264 MP4 可流复制修复。");
+        alert(info.remux_reason || "当前视频不支持修复为标准 MP4。\n\n仅碎片化/多段交错的 MP4 可流复制修复。");
         return;
       }
       await runVideoRemux(id, base);
@@ -5654,7 +5654,7 @@
       } catch (_) { /* skip */ }
     }
     if (!remuxable.length) {
-      alert("所选视频中没有可修复的碎片化 H.264 MP4。\n\n仅碎片化 MP4 支持「流复制」修复；AV1/HEVC 等请用 PotPlayer。");
+      alert("所选视频中没有可修复的碎片化/多段交错 MP4。\n\n仅碎片化 MP4 支持「流复制」修复。");
       return;
     }
     const skipped = ids.length - remuxable.length;
@@ -5976,7 +5976,7 @@
     }
     const remuxBtn = $("#ctx-menu")?.querySelector('[data-action="remux"]');
     if (remuxBtn) {
-      const show = item?.formatBadge === "remuxable" && !item?.remuxedOnPage;
+      const show = (item?.formatBadge === "remuxable" || item?.formatBadge === "interleaved") && !item?.remuxedOnPage;
       remuxBtn.classList.toggle("hidden", !show);
     }
     const menu = $("#ctx-menu");
@@ -6758,18 +6758,40 @@
 
   $("#rename-dialog").addEventListener("close", async (e) => {
     if (e.target.returnValue !== "save" || !renameTargetId) return;
+    const oldId = renameTargetId;
     try {
-      await api("/api/videos/rename", {
+      const result = await api("/api/videos/rename", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: renameTargetId, new_name: $("#rename-input").value.trim() }),
       });
       state.selected.clear();
-      await loadCategories();
-      await loadVideos();
+      // 就地更新卡片，避免重载页面导致格式筛选丢失视频
+      const oldCard = document.querySelector(`.card[data-id="${CSS.escape(oldId)}"]`);
+      const oldItem = getItemById(oldId);
+      if (oldCard && oldItem) {
+        oldItem.id = result.id;
+        oldItem.title = result.title;
+        oldItem.filename = result.filename;
+        oldCard.dataset.id = result.id;
+        const tw = oldCard.querySelector(".thumb-wrap");
+        if (tw) tw.id = `thumb-${result.id}`;
+        const fav = oldCard.querySelector(".card-fav");
+        if (fav) fav.dataset.id = result.id;
+        const cb = oldCard.querySelector(".card-check");
+        if (cb) cb.dataset.id = result.id;
+        const te = oldCard.querySelector(".card-title");
+        if (te) te.innerHTML = highlight(result.title, state.query);
+        const img = oldCard.querySelector(".thumb-wrap img");
+        if (img) { img.src = libThumbUrl(result.id, Date.now()); img.alt = result.title; }
+      } else {
+        // 卡片不在当前页面，回退到全量重载
+        await loadCategories();
+        await loadVideos();
+      }
       loadProgress();
     } catch (err) {
-      alert("重命名失败: " + err.message);
+      showToast("重命名失败: " + err.message, { type: "error" });
     } finally {
       renameTargetId = null;
     }
@@ -6789,7 +6811,13 @@
     if (!action || !id) return;
     hideCtxMenu();
     if (action === "play") playVideo(id);
-    else if (action === "folder") await api(`/api/open-folder/${id}`, { method: "POST" });
+    else if (action === "folder") {
+      try {
+        await api(`/api/open-folder/${id}`, { method: "POST" });
+      } catch (err) {
+        showToast("打开文件夹失败: " + err.message, { type: "error" });
+      }
+    }
     else if (action === "regen-random") await switchThumbCandidate(id);
     else if (action === "remux") {
       const v = getItemById(id);
