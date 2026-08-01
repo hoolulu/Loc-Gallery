@@ -20,6 +20,8 @@ export const getCategories = () => api<CategoriesResponse>('/categories')
 export const getVideos = (params: Record<string, string | number | boolean | undefined | null>) =>
   api<VideosResponse>('/videos', { params })
 
+export const getVideo = (id: string) => api<import('@/types').Video>(`/videos/${id}`)
+
 export const getSettings = (scope = 'merged') =>
   api<Settings>('/settings', { params: { scope } })
 

@@ -6,6 +6,7 @@ import { usePathTip } from '@/composables/usePathTip'
 import { showVideoContextMenu } from '@/composables/useVideoContextActions'
 import { usePlayerStore } from '@/stores/player'
 import { useSettingsStore } from '@/stores/settings'
+import { useUiStore } from '@/stores/ui'
 import { formatDuration } from '@/utils/format'
 import { thumbUrl } from '@/api/client'
 import { toggleFavorite } from '@/api'
@@ -13,6 +14,7 @@ import { PLAYLIST_SORT_OPTIONS } from '@/constants/sort'
 import type { SortMode } from '@/types'
 
 const player = usePlayerStore()
+const ui = useUiStore()
 const settings = useSettingsStore()
 const { playVideo, cancelPlayback, playAdjacent, reloadPlaylist, wheelSeek } = usePlayback()
 const { loadMore } = usePlaylistLoader()
@@ -36,6 +38,14 @@ const canGoNext = computed(
   () =>
     playlistIndex.value >= 0 &&
     (playlistIndex.value < player.playlist.length - 1 || player.playlistCanLoadMore),
+)
+
+const albumCount = computed(() => current.value?.albumIds?.length || 0)
+const albumTitle = computed(() =>
+  albumCount.value > 0 ? `已在 ${albumCount.value} 个专辑，点击管理` : '加入专辑',
+)
+const albumLabel = computed(() =>
+  albumCount.value > 0 ? `${albumCount.value} 个专辑` : '加入专辑',
 )
 
 watch(videoBinding, (el) => {
@@ -139,6 +149,11 @@ async function onToggleFavorite() {
   current.value.favorited = !current.value.favorited
 }
 
+function onAddToAlbum() {
+  if (!current.value) return
+  ui.openAlbumPicker([current.value.id])
+}
+
 async function onPlaylistSortChange(e: Event) {
   await reloadPlaylist((e.target as HTMLSelectElement).value as SortMode)
 }
@@ -153,34 +168,47 @@ async function onPlaylistSortChange(e: Event) {
     <div class="flex min-h-0 flex-1">
       <div class="flex min-h-0 min-w-0 flex-1 flex-col">
         <header class="player-video-toolbar">
-          <button
-            type="button"
-            class="player-back-btn"
-            title="返回列表 (Esc)"
-            @click="cancelPlayback()"
-          >
-            ← 返回列表
-          </button>
           <div class="player-video-meta min-w-0 flex-1">
             <h2 class="truncate text-sm font-medium">{{ current?.title || current?.filename }}</h2>
             <p class="truncate text-xs text-[var(--lg-text-muted)]">{{ current?.path }}</p>
           </div>
-          <button
-            type="button"
-            class="player-toolbar-btn"
-            :class="{ 'text-[var(--lg-accent)]': current?.favorited }"
-            @click="onToggleFavorite"
-          >
-            {{ current?.favorited ? '♥ 已收藏' : '♡ 收藏' }}
-          </button>
-          <button
-            type="button"
-            class="player-toolbar-btn"
-            :class="{ 'text-[var(--lg-accent)]': playlistOpen }"
-            @click="playlistOpen = !playlistOpen"
-          >
-            列表
-          </button>
+          <div class="player-toolbar-actions">
+            <button
+              type="button"
+              class="player-toolbar-btn"
+              :class="{ 'player-toolbar-btn--on': current?.favorited }"
+              @click="onToggleFavorite"
+            >
+              {{ current?.favorited ? '♥ 已收藏' : '♡ 收藏' }}
+            </button>
+            <button
+              type="button"
+              class="player-toolbar-btn player-album-btn"
+              :class="{ 'player-toolbar-btn--on': albumCount > 0 }"
+              :title="albumTitle"
+              :aria-label="albumTitle"
+              :aria-pressed="albumCount > 0 ? 'true' : 'false'"
+              @click="onAddToAlbum"
+            >
+              📁 {{ albumLabel }}
+            </button>
+            <button
+              type="button"
+              class="player-toolbar-btn"
+              :class="{ 'player-toolbar-btn--on': playlistOpen }"
+              @click="playlistOpen = !playlistOpen"
+            >
+              列表
+            </button>
+            <button
+              type="button"
+              class="player-back-btn"
+              title="返回列表 (Esc)"
+              @click="cancelPlayback()"
+            >
+              返回列表
+            </button>
+          </div>
         </header>
 
         <div class="player-stage min-h-0 flex-1" @wheel.prevent="onWheel">

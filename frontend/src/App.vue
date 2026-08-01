@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useSSE } from '@/composables/useSSE'
+import { usePlayerRestore } from '@/composables/usePlayerRestore'
+import { usePlayerUrlSync } from '@/composables/usePlayerUrlSync'
 import { useSettingsStore } from '@/stores/settings'
 import PlayerView from '@/components/player/PlayerView.vue'
 import SettingsDialog from '@/components/dialogs/SettingsDialog.vue'
@@ -27,6 +29,8 @@ const player = usePlayerStore()
 const route = useRoute()
 const thumbProgress = ref<Record<string, unknown> | null>(null)
 const durationStatus = ref<Record<string, unknown> | null>(null)
+const { tryRestore } = usePlayerRestore()
+const { playIdFromUrl } = usePlayerUrlSync()
 
 setupVideoContextActions()
 
@@ -69,6 +73,15 @@ watch(
 watch(
   () => ui.selectedCount,
   (n) => document.body.classList.toggle('has-selection', n > 0),
+  { immediate: true },
+)
+
+watch(
+  () => [library.activeLibraryId, playIdFromUrl()] as const,
+  async ([libId, playId]) => {
+    if (!libId || !playId || player.open) return
+    await tryRestore(playId)
+  },
   { immediate: true },
 )
 

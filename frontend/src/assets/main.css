@@ -986,26 +986,37 @@ body.has-selection .card-album-badge {
 .player-video-toolbar {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.75rem;
   flex-shrink: 0;
   padding: 0.45rem 0.75rem;
   border-bottom: 1px solid var(--lg-border);
   background: var(--lg-bg-secondary);
 }
+.player-toolbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-shrink: 0;
+  gap: 0.35rem;
+  margin-left: auto;
+}
 .player-back-btn {
   flex-shrink: 0;
-  padding: 0.35rem 0.65rem;
+  padding: 0.4rem 0.85rem;
   border-radius: 6px;
   border: 1px solid var(--lg-border);
   background: var(--lg-bg-elevated);
   color: var(--lg-text-primary);
   font-size: 0.8125rem;
+  font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
-  transition: background 0.15s;
+  transition: background 0.15s, border-color 0.15s;
 }
 .player-back-btn:hover {
   background: var(--lg-bg-hover);
+  border-color: var(--lg-accent);
+  color: var(--lg-accent);
 }
 .player-video-meta {
   min-width: 0;
@@ -1014,17 +1025,30 @@ body.has-selection .card-album-badge {
   flex-shrink: 0;
   padding: 0.35rem 0.65rem;
   border-radius: 6px;
-  border: none;
+  border: 1px solid transparent;
   background: transparent;
   color: var(--lg-text-secondary);
   font-size: 0.8125rem;
   cursor: pointer;
   white-space: nowrap;
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 .player-toolbar-btn:hover {
   background: var(--lg-bg-hover);
   color: var(--lg-text-primary);
+}
+.player-toolbar-btn--on {
+  color: var(--lg-accent);
+  border-color: color-mix(in srgb, var(--lg-accent) 35%, transparent);
+  background: color-mix(in srgb, var(--lg-accent) 10%, transparent);
+}
+.player-album-btn.player-toolbar-btn--on {
+  color: #60a5fa;
+  border-color: color-mix(in srgb, #60a5fa 35%, transparent);
+  background: color-mix(in srgb, #60a5fa 10%, transparent);
+}
+.batch-action-bar {
+  z-index: 40;
 }
 .player-stage {
   position: relative;

@@ -192,7 +192,7 @@ async function onBatchRemux() {
 
     v-if="visible"
 
-    class="fixed bottom-0 left-0 right-0 z-50 flex flex-wrap items-center justify-center gap-2 border-t border-[var(--lg-border)] bg-[var(--lg-bg-elevated)] px-4 py-3 shadow-lg"
+    class="batch-action-bar shrink-0 flex flex-wrap items-center justify-center gap-2 border-t border-[var(--lg-border)] bg-[var(--lg-bg-elevated)] px-4 py-3 shadow-lg"
 
   >
 

@@ -3,11 +3,13 @@ import { computed, reactive, ref, watch } from 'vue'
 import { addVideosToAlbum, removeVideosFromAlbum } from '@/api/albums'
 import { useAlbumStore } from '@/stores/album'
 import { useGalleryStore } from '@/stores/gallery'
+import { usePlayerStore } from '@/stores/player'
 import { useUiStore } from '@/stores/ui'
 
 const ui = useUiStore()
 const album = useAlbumStore()
 const gallery = useGalleryStore()
+const player = usePlayerStore()
 
 const loading = ref(false)
 const checked = reactive<Record<string, boolean>>({})
@@ -21,7 +23,11 @@ const hint = computed(() => {
 })
 
 function videoById(id: string) {
-  return gallery.videos.find((v) => v.id === id)
+  return (
+    gallery.videos.find((v) => v.id === id) ??
+    player.playlist.find((v) => v.id === id) ??
+    (player.playingId === id ? player.playingItem : undefined)
+  )
 }
 
 function membership(albumId: string) {
@@ -48,12 +54,16 @@ function initCheckboxes() {
 }
 
 function patchVideoAlbumIds(videoId: string, albumId: string, add: boolean) {
-  const video = videoById(videoId)
-  if (!video) return
-  const ids = new Set(video.albumIds || [])
-  if (add) ids.add(albumId)
-  else ids.delete(albumId)
-  video.albumIds = [...ids]
+  const apply = (video: { albumIds?: string[] } | null | undefined) => {
+    if (!video) return
+    const ids = new Set(video.albumIds || [])
+    if (add) ids.add(albumId)
+    else ids.delete(albumId)
+    video.albumIds = [...ids]
+  }
+  apply(gallery.videos.find((v) => v.id === videoId))
+  apply(player.playlist.find((v) => v.id === videoId))
+  if (player.playingId === videoId) apply(player.playingItem)
 }
 
 watch(

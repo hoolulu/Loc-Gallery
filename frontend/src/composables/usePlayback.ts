@@ -38,6 +38,8 @@ import { formatDuration, getSavedPosition } from '@/utils/format'
 
 import { bindHlsSliceThrottle, clearHlsSliceThrottle } from './useHlsThrottle'
 import { usePlaylistLoader } from './usePlaylistLoader'
+import { usePlayerUrlSync } from './usePlayerUrlSync'
+import { resetPlayerRestore } from './usePlayerRestore'
 
 import type { PlayInfo, SortMode, Video } from '@/types'
 
@@ -53,6 +55,7 @@ export function usePlayback() {
 
   const ui = useUiStore()
   const { ensureAdjacent, reloadForSort, prefetchIfNeeded } = usePlaylistLoader()
+  const { setPlayInUrl } = usePlayerUrlSync()
 
   let saveTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -611,6 +614,7 @@ export function usePlayback() {
     await stopSlice()
 
     player.openPlayer(item, playlist.length ? playlist : player.playlist)
+    setPlayInUrl(item.id)
 
 
 
@@ -716,6 +720,8 @@ export function usePlayback() {
     player.resetPlaylistMeta()
     player.lastPlayedItem = null
     player.closePlayer()
+    setPlayInUrl(null)
+    resetPlayerRestore()
 
   }
 

@@ -15,6 +15,8 @@ export function useBrowseNavigation() {
     if (gallery.sort !== DEFAULT_GALLERY_SORT) q.sort = gallery.sort
     if (gallery.query) q.q = gallery.query
     if (gallery.formatFilter) q.format = gallery.formatFilter
+    const play = router.currentRoute.value.query.play
+    if (typeof play === 'string' && play) q.play = play
     void router.replace({ query: q })
   }
 
@@ -30,6 +32,7 @@ export function useBrowseNavigation() {
     if (typeof q.sort === 'string') gallery.sort = q.sort as SortMode
     if (typeof q.q === 'string') gallery.query = q.q
     if (typeof q.format === 'string') gallery.formatFilter = q.format
+    // play 参数由播放器恢复逻辑处理，不在此清除
   }
 
   async function selectCategory(name: string | null) {
