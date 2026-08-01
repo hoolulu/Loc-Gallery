@@ -1,15 +1,18 @@
 # -*- coding: utf-8 -*-
-"""Loc Gallery Vue 端口规划（与源项目 F:\\Loc-Gallery :3456 隔离）。"""
+"""Loc Gallery Vue 端口（对外仅一个）。"""
 
-# 源项目（只读对照，不修改）
+# 浏览器只访问这个地址
+APP_PORT = 3460
+APP_URL = f"http://127.0.0.1:{APP_PORT}"
+
+# 后端 API 仅本机内部，由 Vite 代理 /api，用户无需直接访问
+API_PORT = 3461
+API_URL = f"http://127.0.0.1:{API_PORT}"
+
+# 兼容旧脚本别名
+PRODUCTION_PORT = APP_PORT
+PRODUCTION_URL = APP_URL
+DEV_FRONTEND_PORT = APP_PORT
+DEV_BACKEND_PORT = API_PORT
 SOURCE_PORT = 3456
-
-# 本项目生产模式（restart.py，后端托管 dist）
-PRODUCTION_PORT = 3460
-
-# 开发模式
-DEV_FRONTEND_PORT = 3457  # Vite
-DEV_BACKEND_PORT = 3458   # FastAPI only
-
-PRODUCTION_URL = f"http://127.0.0.1:{PRODUCTION_PORT}"
 SOURCE_URL = f"http://127.0.0.1:{SOURCE_PORT}"

@@ -171,6 +171,37 @@ async function onPlaylistSortChange(e: Event) {
   >
     <div class="flex min-h-0 flex-1">
       <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div class="player-stage min-h-0 flex-1" @wheel.prevent="onWheel">
+          <video ref="videoBinding" controls playsinline />
+
+          <div
+            v-if="player.overlayVisible"
+            class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-[var(--lg-bg-overlay)] px-6 text-center"
+          >
+            <h3 class="text-lg font-medium">{{ player.overlayTitle }}</h3>
+            <p class="mt-2 text-sm text-[var(--lg-text-secondary)]">{{ player.overlayDetail }}</p>
+            <div
+              v-if="player.overlayIndeterminate"
+              class="mt-4 h-1 w-48 overflow-hidden rounded bg-[var(--lg-bg-hover)]"
+            >
+              <div class="h-full w-1/3 animate-pulse bg-[var(--lg-accent)]" />
+            </div>
+            <div
+              v-else-if="player.overlayProgress != null"
+              class="mt-4 h-1 w-48 overflow-hidden rounded bg-[var(--lg-bg-hover)]"
+            >
+              <div class="h-full bg-[var(--lg-accent)]" :style="{ width: `${player.overlayProgress}%` }" />
+            </div>
+          </div>
+
+          <p
+            v-if="player.statusText"
+            class="absolute bottom-4 left-4 z-10 rounded bg-[var(--lg-bg-overlay)] px-2 py-1 text-xs"
+          >
+            {{ player.statusText }}
+          </p>
+        </div>
+
         <header class="player-video-toolbar">
           <div class="player-video-meta min-w-0 flex-1">
             <h2 class="truncate text-sm font-medium">{{ current?.title || current?.filename }}</h2>
@@ -215,37 +246,6 @@ async function onPlaylistSortChange(e: Event) {
             </button>
           </div>
         </header>
-
-        <div class="player-stage min-h-0 flex-1" @wheel.prevent="onWheel">
-          <video ref="videoBinding" controls playsinline />
-
-          <div
-            v-if="player.overlayVisible"
-            class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-[var(--lg-bg-overlay)] px-6 text-center"
-          >
-            <h3 class="text-lg font-medium">{{ player.overlayTitle }}</h3>
-            <p class="mt-2 text-sm text-[var(--lg-text-secondary)]">{{ player.overlayDetail }}</p>
-            <div
-              v-if="player.overlayIndeterminate"
-              class="mt-4 h-1 w-48 overflow-hidden rounded bg-[var(--lg-bg-hover)]"
-            >
-              <div class="h-full w-1/3 animate-pulse bg-[var(--lg-accent)]" />
-            </div>
-            <div
-              v-else-if="player.overlayProgress != null"
-              class="mt-4 h-1 w-48 overflow-hidden rounded bg-[var(--lg-bg-hover)]"
-            >
-              <div class="h-full bg-[var(--lg-accent)]" :style="{ width: `${player.overlayProgress}%` }" />
-            </div>
-          </div>
-
-          <p
-            v-if="player.statusText"
-            class="absolute bottom-4 left-4 z-10 rounded bg-[var(--lg-bg-overlay)] px-2 py-1 text-xs"
-          >
-            {{ player.statusText }}
-          </p>
-        </div>
       </div>
 
       <aside
@@ -264,31 +264,32 @@ async function onPlaylistSortChange(e: Event) {
             </option>
           </select>
         </div>
-        <div ref="playlistScrollRef" class="player-playlist min-h-0 flex-1 overflow-y-auto">
+        <div ref="playlistScrollRef" class="player-playlist min-h-0 flex-1 overflow-y-auto px-2 py-2">
           <button
             v-for="v in player.playlist"
             :key="v.id"
+            type="button"
             :ref="(el) => setPlaylistItemRef(v.id, el as HTMLElement | null)"
-            class="player-pl-item flex w-full gap-2 border-b border-[var(--lg-divider)] px-3 py-2 text-left text-sm lg-hover"
-            :class="{ 'lg-active': v.id === player.playingId }"
+            class="player-pl-item"
+            :class="{ active: v.id === player.playingId }"
             :data-id="v.id"
             @click="onPlaylistClick(v.id)"
             @contextmenu.prevent="showVideoContextMenu($event, v.id)"
+            @mouseenter="(e) => scheduleShow(v, e.currentTarget as HTMLElement, true)"
+            @mouseleave="(e) => onAnchorLeave(e, e.currentTarget as HTMLElement)"
           >
-            <div
-              class="thumb-wrap relative h-12 w-20 shrink-0"
-              @mouseenter="(e) => scheduleShow(v, e.currentTarget as HTMLElement, true)"
-              @mouseleave="(e) => onAnchorLeave(e, e.currentTarget as HTMLElement)"
-            >
+            <div class="player-pl-thumb">
               <img
                 v-if="v.thumbReady"
                 :src="thumbUrl(v.id, v.thumbVersion)"
-                class="h-full w-full rounded object-cover"
+                alt=""
+                draggable="false"
               />
+              <div v-else class="player-pl-thumb-placeholder">暂无缩略图</div>
             </div>
-            <div class="min-w-0">
-              <div class="truncate">{{ v.title }}</div>
-              <div class="truncate text-xs text-[var(--lg-text-muted)]">{{ playlistSubline(v) }}</div>
+            <div class="player-pl-meta">
+              <div class="player-pl-title">{{ v.title }}</div>
+              <div class="player-pl-sub">{{ playlistSubline(v) }}</div>
             </div>
           </button>
           <div ref="sentinelRef" class="py-2 text-center text-xs text-[var(--lg-text-muted)]">

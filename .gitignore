@@ -26,6 +26,7 @@ data/*
 logs/
 *.log
 .server.pid
+.vite.pid
 
 # 旧版或误放在项目根目录的缓存
 .thumbs/

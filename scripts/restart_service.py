@@ -13,7 +13,8 @@ RESTART_LOG = PROJECT_ROOT / "data" / "logs" / "restart.log"
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
-from service import start_service, stop_service  # noqa: E402
+from ports import API_PORT  # noqa: E402
+from service import start_backend, stop_backend  # noqa: E402
 
 
 def _log(msg: str) -> None:
@@ -24,12 +25,13 @@ def _log(msg: str) -> None:
 
 def main() -> int:
     os.chdir(PROJECT_ROOT)
+    os.environ["LOC_GALLERY_PORT"] = str(API_PORT)
     try:
         _log(f"worker started pid={os.getpid()}")
         time.sleep(0.8)  # 让 API 响应先返回
-        stop_service()
+        stop_backend()
         time.sleep(0.3)
-        pid = start_service()
+        pid = start_backend(port=API_PORT)
         if pid:
             _log(f"restart ok new_pid={pid}")
             return 0

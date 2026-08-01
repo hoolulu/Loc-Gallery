@@ -10,13 +10,12 @@ import type { Video } from '@/types'
 
 export function videoContextMenuItems(): ContextMenuItem[] {
   return [
-    { label: '重命名', action: 'rename' },
-    { label: '移动到分类', action: 'move' },
-    { label: '播放', action: 'play' },
+    { label: '换缩略图', action: 'regen-thumb' },
     { label: '收藏/取消收藏', action: 'favorite' },
     { label: '加入专辑', action: 'add-album' },
+    { label: '重命名', action: 'rename' },
+    { label: '移动到分类', action: 'move' },
     { label: '打开所在文件夹', action: 'open-folder' },
-    { label: '换缩略图', action: 'regen-thumb' },
     { label: '删除', action: 'delete', danger: true },
   ]
 }
