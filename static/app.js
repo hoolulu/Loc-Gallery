@@ -225,6 +225,8 @@
     thumbProgressBar: "auto",
     pendingRestorePlayId: null,
     theme: "dark",
+    randomSeed: null,
+    playlistRandomSeed: null,
   };
 
   let thumbProgressManualExpand = false;
@@ -373,6 +375,10 @@
       }
       if (saved.libraryId !== undefined) state.libraryId = saved.libraryId;
       if (saved.playlistSort) state.playlistSort = saved.playlistSort;
+      if (saved.randomSeed != null) state.randomSeed = saved.randomSeed;
+      else if (state.sort === "random") state.randomSeed = Date.now();
+      if (saved.playlistRandomSeed != null) state.playlistRandomSeed = saved.playlistRandomSeed;
+      else if (state.playlistSort === "random") state.playlistRandomSeed = Date.now();
     } catch (_) { /* ignore */ }
   }
 
@@ -387,6 +393,8 @@
       page: state.page,
       libraryId: state.libraryId,
       playlistSort: state.playlistSort,
+      randomSeed: state.randomSeed,
+      playlistRandomSeed: state.playlistRandomSeed,
     }));
   }
 
@@ -1103,6 +1111,15 @@
     return state.resumePlayback !== false;
   }
 
+  function regenerateRandomSeedIfNeeded() {
+    if (state.sort === "random") {
+      state.randomSeed = Date.now();
+    }
+    if (state.playlistSort === "random") {
+      state.playlistRandomSeed = Date.now();
+    }
+  }
+
   function normalizePlayerMode(mode) {
     const m = (mode || SETTINGS_DEFAULTS.player_mode).trim().toLowerCase();
     return m === "smart" ? "html5" : m;
@@ -1746,6 +1763,7 @@
     state.folder = folder;
     state.page = 1;
     if (!category) state.folder = "";
+    regenerateRandomSeedIfNeeded();
     saveState();
     loadCategories();
     loadVideos({ forceRebuild: true });
@@ -2907,7 +2925,7 @@
   function sortPlaylistItems(items, sortKey) {
     const list = [...items];
     const key = sortKey || state.playlistSort || "page";
-    if (key === "page") return list;
+    if (key === "page" || key === "random") return list;
     const cmpStr = (a, b) => naturalCompare(a, b);
     const sorters = {
       filename_asc: (a, b) => cmpStr(a.filename, b.filename) || cmpStr(a.title, b.title),
@@ -2955,7 +2973,12 @@
       if (state.category && !state.query) params.set("folder", state.folder || "");
     }
     if (state.query) params.set("q", state.query);
-    params.set("sort", playlistApiSort());
+    const sort = playlistApiSort();
+    params.set("sort", sort);
+    if (sort === "random") {
+      const seed = state.playlistSort === "random" ? state.playlistRandomSeed : state.randomSeed;
+      if (seed != null) params.set("seed", String(seed));
+    }
     params.set("page", String(pageNum));
     params.set("page_size", String(getEffectivePageSize()));
     return params;
@@ -2993,6 +3016,14 @@
   }
 
   function initPlayerPlaylistIfNeeded() {
+    if (state.playlistSort === "random") {
+      state.playlistItems = [];
+      state.playlistScopeKey = "";
+      state.playlistTotalPages = 1;
+      state.playlistCanLoadMore = true;
+      state.playlistLoadedThrough = 0;
+      return;
+    }
     if (!state.playlistItems.length || !playlistScopeMatches()) {
       resetPlayerPlaylistFromGrid();
       return;
@@ -3183,6 +3214,9 @@
     }
     if (state.query) params.set("q", state.query);
     params.set("sort", state.sort);
+    if (state.sort === "random" && state.randomSeed != null) {
+      params.set("seed", String(state.randomSeed));
+    }
     if (state.formatFilter) params.set("format", state.formatFilter);
     params.set("page", String(state.page));
     params.set("page_size", String(getEffectivePageSize()));
@@ -6398,6 +6432,7 @@
     searchTimer = setTimeout(() => {
       state.query = e.target.value.trim();
       state.page = 1;
+      regenerateRandomSeedIfNeeded();
       loadVideos();
     }, 300);
   });
@@ -6407,6 +6442,7 @@
       e.target.value = "";
       state.query = "";
       state.page = 1;
+      regenerateRandomSeedIfNeeded();
       loadVideos();
     }
   });
@@ -6414,6 +6450,11 @@
   $("#sort").addEventListener("change", (e) => {
     state.sort = e.target.value;
     state.page = 1;
+    if (state.sort === "random") {
+      state.randomSeed = Date.now();
+    } else {
+      state.randomSeed = null;
+    }
     saveState();
     loadVideos();
   });
@@ -6421,6 +6462,7 @@
   $("#format-filter")?.addEventListener("change", (e) => {
     state.formatFilter = e.target.value;
     state.page = 1;
+    regenerateRandomSeedIfNeeded();
     saveState();
     if (state.formatFilter) {
       void requestFormatScan();
@@ -6435,6 +6477,41 @@
   $("#btn-page-size-40")?.addEventListener("click", () => setPageSize(40));
   $("#btn-page-size-80")?.addEventListener("click", () => setPageSize(80));
   $("#btn-page-size-all")?.addEventListener("click", () => setPageSize(0));
+  $("#btn-random-play")?.addEventListener("click", async () => {
+    if (state.playerViewOpen) {
+      showToast("请先关闭播放器再使用随机播放", { type: "info" });
+      return;
+    }
+    const seed = Date.now();
+    state.playlistSort = "random";
+    state.playlistRandomSeed = seed;
+    saveState();
+    const params = new URLSearchParams();
+    if (state.viewMode === "favorites") params.set("favorites", "1");
+    else if (state.viewMode === "history") params.set("history", "1");
+    else if (isAlbumDetailView() && state.albumId) params.set("album_id", state.albumId);
+    else {
+      if (state.category) params.set("category", state.category);
+      if (state.folder) params.set("folder", state.folder);
+    }
+    if (state.query) params.set("q", state.query);
+    if (state.formatFilter) params.set("format", state.formatFilter);
+    params.set("sort", "random");
+    params.set("seed", String(seed));
+    params.set("page", "1");
+    params.set("page_size", "1");
+    try {
+      const data = await api(`/api/videos?${params}`);
+      const items = data.items || [];
+      if (!items.length) {
+        showToast("没有可播放的视频", { type: "info" });
+        return;
+      }
+      await playVideo(items[0].id);
+    } catch (err) {
+      showToast("随机播放失败: " + (err.message || String(err)), { type: "error" });
+    }
+  });
   $("#page-size-custom")?.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -6686,6 +6763,9 @@
   $("#btn-player-next").addEventListener("click", () => playAdjacentVideo(1));
   $("#player-playlist-sort")?.addEventListener("change", async (e) => {
     state.playlistSort = e.target.value;
+    if (state.playlistSort === "random") {
+      state.playlistRandomSeed = Date.now();
+    }
     saveState();
     await resetPlaylistForSortChange();
   });

@@ -2,6 +2,7 @@
 import asyncio
 import mimetypes
 import os
+import random
 import shutil
 import subprocess
 import threading
@@ -539,6 +540,7 @@ def _filter_videos_list(
     folder: str | None = None,
     q: str | None = None,
     sort: str = "mtime_desc",
+    seed: int | None = None,
     favorites: bool = False,
     history: bool = False,
     album_id: str | None = None,
@@ -564,7 +566,7 @@ def _filter_videos_list(
         folder_filter = folder if category else None
         if category and folder is None and not q:
             folder_filter = ""
-        items = _filter_videos(library_id, category, folder_filter, q, sort)
+        items = _filter_videos(library_id, category, folder_filter, q, sort, seed)
 
     if favorites or history or album_id:
         if q:
@@ -587,6 +589,7 @@ def _filter_videos(
     folder: str | None = None,
     q: str | None = None,
     sort: str = "mtime_desc",
+    seed: int | None = None,
 ) -> list:
     items = get_all(library_id)
     if category:
@@ -601,6 +604,11 @@ def _filter_videos(
             or query in v.filename.lower()
             or query in v.category.lower()
         ]
+
+    if sort == "random":
+        rng = random.Random(seed) if seed is not None else random
+        rng.shuffle(items)
+        return items
 
     sort_key = {
         "mtime_desc": lambda v: v.mtime,
@@ -873,6 +881,7 @@ async def api_videos(
     folder: str | None = None,
     q: str | None = None,
     sort: str = "mtime_desc",
+    seed: int | None = None,
     page: int = 1,
     page_size: int = 32,
     favorites: bool = False,
@@ -889,6 +898,7 @@ async def api_videos(
         folder=folder if not favorites and not history and not album_id else None,
         q=q,
         sort=sort,
+        seed=seed,
         favorites=favorites,
         history=history,
         album_id=album_id,

@@ -119,6 +119,7 @@
               <option value="size_desc">体积最大</option>
               <option value="size_asc">体积最小</option>
               <option value="category_asc">分类 A-Z</option>
+              <option value="random">随机列表</option>
             </select>
             <select id="format-filter" class="yt-select text-xs" title="按播放格式筛选">
               <option value="">全部格式</option>
@@ -143,6 +144,7 @@
               <button type="button" id="btn-album-from-page" class="ui-btn sm hidden" title="将当前页全部视频加入新专辑">本页生成专辑</button>
             </div>
               <div class="page-size-controls flex flex-wrap items-center gap-2">
+                <button type="button" id="btn-random-play" class="ui-btn rounded-lg px-2.5 py-1 text-xs" title="随机播放一个视频">随机播放</button>
                 <button type="button" id="btn-page-size-40" class="page-size ui-btn rounded-lg px-2.5 py-1 text-xs active" data-size="40" title="每页 40 条">40</button>
                 <button type="button" id="btn-page-size-80" class="page-size ui-btn rounded-lg px-2.5 py-1 text-xs" data-size="80" title="每页 80 条">80</button>
                 <label class="page-size-custom-label flex items-center gap-1 text-xs text-secondary">
@@ -207,6 +209,7 @@
                 <span class="text-xs font-medium text-secondary">播放列表</span>
                 <select id="player-playlist-sort" class="player-playlist-sort" title="播放列表排序（连播时按此顺序下一集）">
                   <option value="page">列表顺序</option>
+                  <option value="random">随机</option>
                   <option value="filename_asc">文件名 A→Z（自然）</option>
                   <option value="filename_desc">文件名 Z→A（自然）</option>
                   <option value="title_asc">标题 A→Z</option>
