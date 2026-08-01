@@ -18,6 +18,34 @@ from pydantic import BaseModel
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
+
+class ImmutableStaticFiles(StaticFiles):
+    """Vite 带 hash 的构建产物：允许浏览器长期缓存。"""
+
+    def __init__(
+        self,
+        *args,
+        cache_control: str = "public, max-age=31536000, immutable",
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self._cache_control = cache_control
+
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        if response.status_code == 200:
+            response.headers.setdefault("Cache-Control", self._cache_control)
+        return response
+
+
+def _static_cache_control(relative_path: str) -> str | None:
+    name = relative_path.rsplit("/", 1)[-1]
+    if relative_path.startswith("assets/"):
+        return "public, max-age=31536000, immutable"
+    if name in ("favicon.svg", "icons.svg"):
+        return "public, max-age=86400"
+    return None
+
 from loc_gallery.category_store import get_meta, set_order, set_sort_mode, set_starred, sort_categories
 from loc_gallery.config import HOST, PORT, POTPLAYER_CANDIDATES, POTPLAYER_PATH, VIDEO_EXTENSIONS, WEB_ROOT
 from loc_gallery.range_stream import stream_file_with_disconnect
@@ -55,6 +83,7 @@ from loc_gallery.favorite_store import (
     get_added_at,
     get_favorite_count,
     get_favorite_ids,
+    get_favorites_map,
     is_favorite,
     list_favorite_ids_sorted,
     prune_missing as prune_favorites,
@@ -83,6 +112,7 @@ from loc_gallery.history_store import (
     clear_history,
     get_entry as get_history_entry,
     get_history_count,
+    get_history_map,
     list_history_ids_sorted,
     prune_missing as prune_history,
     record_play,
@@ -93,6 +123,7 @@ from loc_gallery import hls_manager
 from loc_gallery.format_index import (
     enqueue_missing_format_probe,
     filter_items_by_format,
+    get_format_kind_for_item,
     get_format_status,
     rebuild_format_index_from_plans,
     set_format_kind,
@@ -126,7 +157,8 @@ from loc_gallery.library_store import (
     update_library,
 )
 from loc_gallery.scanner import (
-    get_all, get_by_id, get_categories, get_folder_tree, get_version,
+    get_all, get_by_id, get_categories, get_category_sorted_ids, get_folder_tree,
+    get_sorted_ids, get_version,
     refresh_cache, upsert_video_from_path,
 )
 from loc_gallery.settings_store import load_settings, save_settings
@@ -147,6 +179,7 @@ from loc_gallery.thumb_manager import (
     get_video_duration_sec,
     get_durations_for_ids,
     get_duration_status,
+    duration_sec_from_index_entry,
     enqueue_duration_probe,
     enqueue_missing_durations,
     backfill_durations_from_history,
@@ -164,9 +197,11 @@ from loc_gallery.thumb_manager import (
     regenerate_ids,
     register_progress_callback,
     remove_thumbs,
+    resolve_thumb_fields_for_list,
     resume_queue,
     schedule_ids,
     shutdown_manager,
+    snapshot_thumb_list_state,
     start_idle_scan_background,
     stop_idle_scan_background,
     sync_index_with_videos,
@@ -497,7 +532,11 @@ if _demo_dir.is_dir():
 _dist_dir = WEB_ROOT / "frontend" / "dist"
 _dist_assets = _dist_dir / "assets"
 if _dist_assets.is_dir():
-    app.mount("/assets", StaticFiles(directory=str(_dist_assets)), name="frontend-assets")
+    app.mount(
+        "/assets",
+        ImmutableStaticFiles(directory=str(_dist_assets)),
+        name="frontend-assets",
+    )
 
 
 def _prune_user_data(library_id: str) -> None:
@@ -540,6 +579,60 @@ def _video_to_dict(library_id: str, v, *, album_ids: list[str] | None = None) ->
             library_id, v.id, v.mtime, v.size, Path(v.path),
         ),
     }
+
+
+def _videos_to_dicts(
+    library_id: str,
+    items: list,
+    album_map: dict[str, list[str]],
+) -> list[dict]:
+    """列表 API：一次读取收藏/历史/缩略图索引，避免逐条读盘。"""
+    if not items:
+        return []
+    fav_map = get_favorites_map(library_id)
+    hist_map = get_history_map(library_id)
+    thumb_index, generating, queued = snapshot_thumb_list_state(library_id)
+    out: list[dict] = []
+    for v in items:
+        fav_entry = fav_map.get(v.id)
+        hist = hist_map.get(v.id)
+        thumb_status, thumb_ready, thumb_error, thumb_version = resolve_thumb_fields_for_list(
+            v.id,
+            thumb_index=thumb_index,
+            generating=generating,
+            queued=queued,
+        )
+        duration = duration_sec_from_index_entry(
+            thumb_index.get(v.id),
+            mtime=v.mtime,
+            size=v.size,
+        )
+        if not duration and hist:
+            duration = hist.get("duration_sec")
+        out.append({
+            "id": v.id,
+            "title": v.title,
+            "filename": v.filename,
+            "path": v.path,
+            "category": v.category,
+            "subfolder": v.subfolder,
+            "size": v.size,
+            "mtime": v.mtime,
+            "thumbStatus": thumb_status,
+            "thumbReady": thumb_ready,
+            "thumbError": thumb_error,
+            "thumbVersion": thumb_version,
+            "favorited": fav_entry is not None,
+            "favoritedAt": float(fav_entry.get("added_at", 0)) if fav_entry else None,
+            "playedAt": hist.get("played_at") if hist else None,
+            "playCount": hist.get("play_count") if hist else None,
+            "playPosition": hist.get("position_sec") if hist else None,
+            "playDuration": hist.get("duration_sec") if hist else None,
+            "durationSec": duration,
+            "albumIds": album_map.get(v.id, []),
+            "formatBadge": get_format_kind_for_item(library_id, v.id, v.mtime, v.size),
+        })
+    return out
 
 
 def _filter_videos_list(
@@ -590,6 +683,126 @@ def _filter_videos_list(
     if format and format not in ("", "all"):
         items = filter_items_by_format(items, format, library_id)
     return items
+
+
+_filter_ids_cache: dict[tuple, tuple[int, list[str]]] = {}
+
+
+def _filter_cache_key(
+    library_id: str,
+    *,
+    category: str | None,
+    folder: str | None,
+    q: str | None,
+    sort: str,
+    seed: int | None,
+    favorites: bool,
+    history: bool,
+    album_id: str | None,
+    format: str | None,
+) -> tuple:
+    return (
+        library_id,
+        category,
+        folder,
+        (q or "").strip().lower(),
+        sort,
+        seed,
+        favorites,
+        history,
+        album_id,
+        format or "",
+    )
+
+
+def _get_filtered_video_ids(
+    library_id: str,
+    *,
+    category: str | None = None,
+    folder: str | None = None,
+    q: str | None = None,
+    sort: str = "mtime_desc",
+    seed: int | None = None,
+    favorites: bool = False,
+    history: bool = False,
+    album_id: str | None = None,
+    format: str | None = None,
+) -> list[str]:
+    """缓存过滤+排序后的视频 ID 列表，翻页时避免重复全库遍历。"""
+    key = _filter_cache_key(
+        library_id,
+        category=category,
+        folder=folder,
+        q=q,
+        sort=sort,
+        seed=seed,
+        favorites=favorites,
+        history=history,
+        album_id=album_id,
+        format=format,
+    )
+    ver = get_version(library_id)
+    hit = _filter_ids_cache.get(key)
+    if hit and hit[0] == ver:
+        return hit[1]
+
+    ids: list[str] | None = None
+    if not favorites and not history and not album_id and not q:
+        if sort == "random":
+            items = _filter_videos_list(
+                library_id,
+                category=category,
+                folder=folder,
+                q=q,
+                sort=sort,
+                seed=seed,
+                favorites=False,
+                history=False,
+                album_id=None,
+                format=None,
+            )
+            ids = [v.id for v in items]
+        elif category:
+            ids = get_category_sorted_ids(library_id, category, sort)
+            if folder is not None and folder:
+                filtered: list[str] = []
+                for vid in ids:
+                    item = get_by_id(library_id, vid)
+                    if not item:
+                        continue
+                    if item.subfolder == folder or item.subfolder.startswith(folder + "/"):
+                        filtered.append(vid)
+                ids = filtered
+        else:
+            sorted_ids = get_sorted_ids(library_id, sort)
+            if sorted_ids is not None:
+                ids = sorted_ids
+
+    if ids is None:
+        items = _filter_videos_list(
+            library_id,
+            category=category,
+            folder=folder,
+            q=q,
+            sort=sort,
+            seed=seed,
+            favorites=favorites,
+            history=history,
+            album_id=album_id,
+            format=None,
+        )
+        ids = [v.id for v in items]
+
+    if format and format not in ("", "all"):
+        fmt_items = [v for vid in ids if (v := get_by_id(library_id, vid))]
+        ids = [v.id for v in filter_items_by_format(fmt_items, format, library_id)]
+
+    _filter_ids_cache[key] = (ver, ids)
+
+    stale = [k for k, (cached_ver, _) in _filter_ids_cache.items() if k[0] == library_id and cached_ver != ver]
+    for k in stale:
+        _filter_ids_cache.pop(k, None)
+    return ids
 
 
 def _filter_videos(
@@ -904,10 +1117,12 @@ async def api_videos(
 ):
     if album_id and not get_album(library_id, album_id):
         raise HTTPException(404, "专辑不存在")
-    items = _filter_videos_list(
+    filter_category = category if not favorites and not history and not album_id else None
+    filter_folder = folder if not favorites and not history and not album_id else None
+    ids = _get_filtered_video_ids(
         library_id,
-        category=category if not favorites and not history and not album_id else None,
-        folder=folder if not favorites and not history and not album_id else None,
+        category=filter_category,
+        folder=filter_folder,
         q=q,
         sort=sort,
         seed=seed,
@@ -916,10 +1131,10 @@ async def api_videos(
         album_id=album_id,
         format=format,
     )
-    total = len(items)
+    total = len(ids)
 
     if page_size <= 0:
-        page_items = items
+        page_ids = ids
         page = 1
         total_pages = 1
         effective_size = total
@@ -927,11 +1142,13 @@ async def api_videos(
         total_pages = max(1, (total + page_size - 1) // page_size)
         page = max(1, min(page, total_pages))
         start = (page - 1) * page_size
-        page_items = items[start:start + page_size]
+        page_ids = ids[start:start + page_size]
         effective_size = page_size
 
+    page_items = [v for vid in page_ids if (v := get_by_id(library_id, vid))]
+
     album_map = get_album_map_for_videos(library_id, [v.id for v in page_items])
-    page_dicts = [_video_to_dict(library_id, v, album_ids=album_map.get(v.id, [])) for v in page_items]
+    page_dicts = _videos_to_dicts(library_id, page_items, album_map)
     missing_dur = [d["id"] for d in page_dicts if not d.get("durationSec")]
     if missing_dur:
         enqueue_duration_probe(library_id, missing_dur)
@@ -1715,7 +1932,11 @@ async def spa_fallback(spa_path: str):
     if spa_path and "." in spa_path.split("/")[-1]:
         file_path = _dist_dir / spa_path
         if file_path.is_file():
-            return FileResponse(file_path)
+            headers = {}
+            cache = _static_cache_control(spa_path.replace("\\", "/"))
+            if cache:
+                headers["Cache-Control"] = cache
+            return FileResponse(file_path, headers=headers or None)
     return FileResponse(
         index,
         headers={

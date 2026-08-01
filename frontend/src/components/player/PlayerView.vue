@@ -47,6 +47,10 @@ const albumTitle = computed(() =>
 const albumLabel = computed(() =>
   albumCount.value > 0 ? `${albumCount.value} 个专辑` : '加入专辑',
 )
+const playlistToggleLabel = computed(() => (playlistOpen.value ? '收起侧栏' : '播放列表'))
+const playlistToggleTitle = computed(() =>
+  playlistOpen.value ? '隐藏右侧播放列表' : '显示右侧播放列表',
+)
 
 watch(videoBinding, (el) => {
   player.videoEl = el
@@ -196,17 +200,18 @@ async function onPlaylistSortChange(e: Event) {
               type="button"
               class="player-toolbar-btn"
               :class="{ 'player-toolbar-btn--on': playlistOpen }"
+              :title="playlistToggleTitle"
               @click="playlistOpen = !playlistOpen"
             >
-              列表
+              {{ playlistToggleLabel }}
             </button>
             <button
               type="button"
               class="player-back-btn"
-              title="返回列表 (Esc)"
+              title="关闭播放器，返回浏览页 (Esc)"
               @click="cancelPlayback()"
             >
-              返回列表
+              返回浏览
             </button>
           </div>
         </header>

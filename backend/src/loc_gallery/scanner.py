@@ -25,6 +25,58 @@ class VideoItem:
 _lock = threading.Lock()
 _caches: dict[str, dict[str, VideoItem]] = {}
 _versions: dict[str, int] = {}
+_sort_id_indexes: dict[str, dict[str, list[str]]] = {}
+_category_items: dict[str, dict[str, list[VideoItem]]] = {}
+
+
+def _rebuild_indexes_locked(library_id: str) -> None:
+    cache = _caches.get(library_id) or {}
+    items = list(cache.values())
+    by_cat: dict[str, list[VideoItem]] = {}
+    for item in items:
+        by_cat.setdefault(item.category, []).append(item)
+    _category_items[library_id] = by_cat
+    _sort_id_indexes[library_id] = {
+        "mtime_desc": [v.id for v in sorted(items, key=lambda x: x.mtime, reverse=True)],
+        "mtime_asc": [v.id for v in sorted(items, key=lambda x: x.mtime)],
+        "title_asc": [v.id for v in sorted(items, key=lambda x: x.title.lower())],
+        "title_desc": [v.id for v in sorted(items, key=lambda x: x.title.lower(), reverse=True)],
+        "size_desc": [v.id for v in sorted(items, key=lambda x: x.size, reverse=True)],
+        "size_asc": [v.id for v in sorted(items, key=lambda x: x.size)],
+        "category_asc": [v.id for v in sorted(items, key=lambda x: x.category.lower())],
+    }
+
+
+def _ensure_indexes_locked(library_id: str) -> None:
+    if library_id not in _sort_id_indexes:
+        _rebuild_indexes_locked(library_id)
+
+
+def get_sorted_ids(library_id: str, sort: str) -> list[str] | None:
+    with _lock:
+        _ensure_indexes_locked(library_id)
+        ids = (_sort_id_indexes.get(library_id) or {}).get(sort)
+        return list(ids) if ids is not None else None
+
+
+def get_category_sorted_ids(library_id: str, category: str, sort: str) -> list[str]:
+    with _lock:
+        _ensure_indexes_locked(library_id)
+        items = list((_category_items.get(library_id) or {}).get(category, []))
+    if sort == "random":
+        return [v.id for v in items]
+    sort_key = {
+        "mtime_desc": lambda v: v.mtime,
+        "mtime_asc": lambda v: v.mtime,
+        "title_asc": lambda v: v.title.lower(),
+        "title_desc": lambda v: v.title.lower(),
+        "size_desc": lambda v: v.size,
+        "size_asc": lambda v: v.size,
+        "category_asc": lambda v: v.category.lower(),
+    }.get(sort, lambda v: v.mtime)
+    reverse = sort in ("mtime_desc", "title_desc", "size_desc")
+    items.sort(key=sort_key, reverse=reverse)
+    return [v.id for v in items]
 
 
 def _make_id(rel_path: str) -> str:
@@ -101,6 +153,8 @@ def upsert_video_from_path(library_id: str, video_path: Path) -> VideoItem | Non
         cache = _caches.setdefault(library_id, {})
         cache[item.id] = item
         _versions[library_id] = _versions.get(library_id, 0) + 1
+        _sort_id_indexes.pop(library_id, None)
+        _category_items.pop(library_id, None)
     return item
 
 
@@ -165,6 +219,7 @@ def refresh_cache(library_id: str, video_root: Path | None = None) -> int:
     with _lock:
         _caches[library_id] = new_cache
         _versions[library_id] = _versions.get(library_id, 0) + 1
+        _rebuild_indexes_locked(library_id)
         return _versions[library_id]
 
 

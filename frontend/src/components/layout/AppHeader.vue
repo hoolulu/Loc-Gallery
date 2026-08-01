@@ -7,6 +7,8 @@ import { useSettingsStore, type ThemePreset } from '@/stores/settings'
 import { useUiStore } from '@/stores/ui'
 import { useAlbumStore } from '@/stores/album'
 import { rescan } from '@/api'
+import HeaderProgressChips from '@/components/layout/HeaderProgressChips.vue'
+import HeaderProgressBar from '@/components/layout/HeaderProgressBar.vue'
 
 const route = useRoute()
 const gallery = useGalleryStore()
@@ -138,6 +140,7 @@ async function onPresetChange(p: ThemePreset) {
         <button class="rounded border border-[var(--lg-border)] px-3 py-1.5 text-sm lg-hover" @click="ui.settingsOpen = true">
           设置
         </button>
+        <HeaderProgressChips />
         <button
           class="rounded border border-[var(--lg-accent)] px-3 py-1.5 text-sm text-[var(--lg-accent)] hover:bg-[var(--lg-accent-muted)]"
           @click="onRescan"
@@ -146,5 +149,6 @@ async function onPresetChange(p: ThemePreset) {
         </button>
       </div>
     </div>
+    <HeaderProgressBar />
   </header>
 </template>

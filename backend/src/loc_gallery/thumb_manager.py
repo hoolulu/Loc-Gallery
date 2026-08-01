@@ -772,6 +772,51 @@ def get_video_thumb_status(video_id: str, library_id: str | None = None) -> str:
     return get_video_thumb_status_fast(video_id, library_id)
 
 
+def snapshot_thumb_list_state(library_id: str | None = None) -> tuple[dict, set[str], set[str]]:
+    """列表 API 批量读取缩略图状态，避免逐条 stat 磁盘。"""
+    lid = _lid(library_id)
+    with _lock:
+        return dict(_idx(lid)), set(_generating), {q.video_id for q in _queue}
+
+
+def resolve_thumb_fields_for_list(
+    video_id: str,
+    *,
+    thumb_index: dict,
+    generating: set[str],
+    queued: set[str],
+) -> tuple[str, bool, str | None, str]:
+    if video_id in generating:
+        return STATUS_GENERATING, False, None, ""
+    if video_id in queued:
+        return STATUS_QUEUED, False, None, ""
+    entry = thumb_index.get(video_id)
+    if not entry:
+        return STATUS_MISSING, False, None, ""
+    status = entry.get("status", STATUS_MISSING)
+    if status == STATUS_READY:
+        ver = entry.get("generated_at") or entry.get("thumb_file") or ""
+        return STATUS_READY, True, None, str(ver) if ver else ""
+    if status == STATUS_FAILED:
+        return STATUS_FAILED, False, entry.get("error"), ""
+    return status, False, None, ""
+
+
+def duration_sec_from_index_entry(entry: dict | None, *, mtime: float, size: int) -> float | None:
+    if not entry:
+        return None
+    if entry.get("mtime") != mtime or entry.get("size") != size:
+        return None
+    dur = entry.get("duration_sec")
+    if dur is None:
+        return None
+    try:
+        val = float(dur)
+        return val if val > 3 else None
+    except (TypeError, ValueError):
+        return None
+
+
 def get_thumb_version(video_id: str, library_id: str | None = None) -> str | None:
     thumb = _thumb_file(video_id, library_id)
     if thumb.exists():

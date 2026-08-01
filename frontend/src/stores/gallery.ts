@@ -10,6 +10,12 @@ import type { Category, FolderTreeResponse, SortMode, Video, ViewMode } from '@/
 import type { ThemePreset } from '@/stores/settings'
 import { DEFAULT_PAGE_SIZE } from '@/constants/layout'
 import { pageSizeKey, PREFS_KEYS, getSavedBrowseState, setSavedBrowseState } from '@/utils/userPrefs'
+import {
+  buildVideoListCacheKey,
+  clearVideoListCache,
+  readVideoListCache,
+  writeVideoListCache,
+} from '@/utils/videoListCache'
 
 
 
@@ -57,6 +63,8 @@ export const useGalleryStore = defineStore('gallery', () => {
   const totalPages = ref(0)
 
   const loading = ref(false)
+
+  const refreshing = ref(false)
 
   const albumId = ref<string | null>(null)
 
@@ -159,37 +167,47 @@ export const useGalleryStore = defineStore('gallery', () => {
 
   async function loadVideos() {
 
-    loading.value = true
+    const params: Record<string, string | number | boolean> = {
+
+      page: page.value,
+
+      page_size: pageSize.value,
+
+      sort: sort.value,
+
+    }
+
+    if (category.value) params.category = category.value
+
+    if (folder.value) params.folder = folder.value
+
+    if (query.value.trim()) params.q = query.value.trim()
+
+    if (formatFilter.value) params.format = formatFilter.value
+
+    if (viewMode.value === 'favorites') params.favorites = true
+
+    if (viewMode.value === 'history') params.history = true
+
+    if (viewMode.value === 'album-detail' && albumId.value) params.album_id = albumId.value
+
+    if (sort.value === 'random' && randomSeed.value != null) params.seed = randomSeed.value
+
+    const cacheKey = buildVideoListCacheKey(params)
+    const cached = readVideoListCache(cacheKey)
+    if (cached) {
+      videos.value = cached.items
+      total.value = cached.total
+      page.value = cached.page
+      pageSize.value = cached.pageSize
+      totalPages.value = cached.totalPages
+      loading.value = false
+    } else {
+      loading.value = true
+    }
+    refreshing.value = true
 
     try {
-
-      const params: Record<string, string | number | boolean> = {
-
-        page: page.value,
-
-        page_size: pageSize.value,
-
-        sort: sort.value,
-
-      }
-
-      if (category.value) params.category = category.value
-
-      if (folder.value) params.folder = folder.value
-
-      if (query.value.trim()) params.q = query.value.trim()
-
-      if (formatFilter.value) params.format = formatFilter.value
-
-      if (viewMode.value === 'favorites') params.favorites = true
-
-      if (viewMode.value === 'history') params.history = true
-
-      if (viewMode.value === 'album-detail' && albumId.value) params.album_id = albumId.value
-
-      if (sort.value === 'random' && randomSeed.value != null) params.seed = randomSeed.value
-
-
 
       const data = await getVideos(params)
 
@@ -203,9 +221,12 @@ export const useGalleryStore = defineStore('gallery', () => {
 
       totalPages.value = data.totalPages
 
+      writeVideoListCache(cacheKey, data)
+
     } finally {
 
       loading.value = false
+      refreshing.value = false
 
     }
 
@@ -317,6 +338,7 @@ export const useGalleryStore = defineStore('gallery', () => {
     expandedCategories.value = new Set()
 
     expandedFolders.value = new Set()
+    clearVideoListCache()
 
   }
 
@@ -351,6 +373,8 @@ export const useGalleryStore = defineStore('gallery', () => {
     totalPages,
 
     loading,
+
+    refreshing,
 
     albumId,
 

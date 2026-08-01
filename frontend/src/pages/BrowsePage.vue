@@ -22,6 +22,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { scanFormat } from '@/api/thumbs'
 import { FORMAT_FILTER_OPTIONS, type SortMode } from '@/types'
 import { GALLERY_SORT_OPTIONS } from '@/constants/sort'
+import { GRID_COLUMNS } from '@/constants/layout'
 
 
 
@@ -38,6 +39,11 @@ const { syncUrl, applyRouteQuery, selectCategory } = useBrowseNavigation()
 
 const customPageSize = ref('')
 const sortOptions = GALLERY_SORT_OPTIONS
+const skeletonCount = computed(() => Math.min(gallery.pageSize, 24))
+const skeletonColumns = computed(() => GRID_COLUMNS[settings.preset])
+const skeletonStyle = computed(() => ({
+  gridTemplateColumns: `repeat(${skeletonColumns.value}, minmax(0, 1fr))`,
+}))
 
 
 
@@ -62,29 +68,26 @@ const breadcrumb = computed(() => {
 
 
 async function init() {
-
   gallery.viewMode = 'browse'
-
   gallery.restoreRandomSeed()
   gallery.restoreBrowseState()
   gallery.restoreSort()
   gallery.restorePageSize(settings.preset)
 
-  await library.loadLibraries()
+  applyRouteQuery(
+    'cat' in router.currentRoute.value.query,
+    'folder' in router.currentRoute.value.query,
+  )
 
-  await settings.loadSettings()
-  gallery.restorePageSize(settings.preset)
+  const videosTask = gallery.loadVideos()
+  void Promise.all([library.loadLibraries(), settings.loadSettings()]).then(() => {
+    gallery.restorePageSize(settings.preset)
+    void gallery.loadCategories()
+    if (gallery.category) void gallery.loadFolderTree(gallery.category)
+  })
 
-  applyRouteQuery('cat' in router.currentRoute.value.query, 'folder' in router.currentRoute.value.query)
-
-  await gallery.loadCategories()
-
-  if (gallery.category) await gallery.loadFolderTree(gallery.category)
-
-  await gallery.loadVideos()
-
+  await videosTask
   syncUrl()
-
 }
 
 watch(
@@ -259,14 +262,22 @@ function onVideoContext(e: MouseEvent, videoId: string) {
 
 
 
-        <div v-if="gallery.loading" class="flex min-h-0 flex-1 items-center justify-center text-[var(--lg-text-muted)]">
-
-          加载中...
-
+        <div
+          v-if="gallery.loading && !gallery.videos.length"
+          class="video-grid min-h-0 flex-1 grid gap-3 pb-4"
+          :style="skeletonStyle"
+        >
+          <div
+            v-for="n in skeletonCount"
+            :key="n"
+            class="gallery-skeleton-card"
+          />
         </div>
 
         <VirtualVideoGrid
           v-else
+          class="transition-opacity duration-150"
+          :class="{ 'opacity-60 pointer-events-none': gallery.refreshing }"
           :videos="gallery.videos"
           @play="onPlay"
           @toggle-favorite="onToggleFavorite"

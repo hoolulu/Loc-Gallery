@@ -39,6 +39,12 @@ def _cutoff_ts(library_id: str) -> float:
     return time.time() - retention_days(library_id) * 86400
 
 
+def get_history_map(library_id: str) -> dict[str, dict]:
+    """一次读取播放历史，供列表 API 批量使用。"""
+    with _lock:
+        return dict(_load_raw(library_id).get("items") or {})
+
+
 def get_entry(library_id: str, video_id: str) -> dict | None:
     with _lock:
         entry = (_load_raw(library_id).get("items") or {}).get(video_id)

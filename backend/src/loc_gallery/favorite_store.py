@@ -30,6 +30,12 @@ def _save_raw(library_id: str, data: dict) -> dict:
     return data
 
 
+def get_favorites_map(library_id: str) -> dict[str, dict]:
+    """一次读取收藏索引，供列表 API 批量使用。"""
+    with _lock:
+        return dict(_load_raw(library_id).get("items") or {})
+
+
 def get_favorite_ids(library_id: str) -> set[str]:
     with _lock:
         return set(_load_raw(library_id).get("items") or {})
