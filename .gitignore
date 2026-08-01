@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+.pytest_cache/
+
+# Node / 前端构建
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/test-results/
+.cache/
+
+# ── 隐私 / 运行时数据（切勿提交）────────────────────────────
+# 含视频绝对路径、收藏、播放历史、本机 PotPlayer 路径、缩略图与 HLS 缓存
+data/*
+!data/.gitkeep
+
+# 日志与 PID（可能含 Windows 用户名与绝对路径）
+logs/
+*.log
+.server.pid
+
+# 旧版或误放在项目根目录的缓存
+.thumbs/
+cache/
+
+# 若误将运行时 JSON 放在根目录
+/settings.json
+/category_meta.json
+/favorites.json
+/play_history.json
+
+# 环境变量
+.env
+.env.*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store

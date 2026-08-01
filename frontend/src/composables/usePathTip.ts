@@ -1,0 +1,126 @@
+import { ref } from 'vue'
+import type { Video } from '@/types'
+
+const visible = ref(false)
+const item = ref<Video | null>(null)
+const anchorRect = ref<DOMRect | null>(null)
+const inPlaylist = ref(false)
+const tipLeft = ref(0)
+const tipTop = ref(0)
+const measuring = ref(false)
+
+let timer: ReturnType<typeof setTimeout> | null = null
+let anchorEl: HTMLElement | null = null
+
+function positionTip(tipW: number, tipH: number) {
+  const rect = anchorRect.value
+  if (!rect) return
+  const pad = 12
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  let left: number
+  let top: number
+
+  const spaceRight = vw - rect.right - pad
+  const spaceLeft = rect.left - pad
+  const spaceAbove = rect.top - pad
+
+  if (inPlaylist.value && spaceLeft >= tipW) {
+    left = rect.left - tipW - pad
+    top = rect.top + rect.height / 2 - tipH / 2
+  } else if (spaceRight >= tipW) {
+    left = rect.right + pad
+    top = rect.top + rect.height / 2 - tipH / 2
+  } else if (spaceLeft >= tipW) {
+    left = rect.left - tipW - pad
+    top = rect.top + rect.height / 2 - tipH / 2
+  } else if (spaceAbove >= tipH) {
+    left = rect.left + rect.width / 2 - tipW / 2
+    top = rect.top - tipH - pad
+  } else {
+    left = rect.left + rect.width / 2 - tipW / 2
+    top = rect.bottom + pad
+  }
+
+  tipLeft.value = Math.round(Math.min(Math.max(pad, left), vw - tipW - pad))
+  tipTop.value = Math.round(Math.min(Math.max(pad, top), vh - tipH - pad))
+}
+
+function scheduleShow(video: Video, anchor: HTMLElement, playlist = false) {
+  if (!video.path) return
+  if (anchorEl === anchor && visible.value) return
+  hide()
+  anchorEl = anchor
+  inPlaylist.value = playlist
+  timer = setTimeout(() => {
+    item.value = video
+    anchorRect.value = anchor.getBoundingClientRect()
+    tipLeft.value = -9999
+    tipTop.value = -9999
+    measuring.value = true
+    visible.value = true
+  }, 220)
+}
+
+function hide() {
+  if (timer) clearTimeout(timer)
+  timer = null
+  anchorEl = null
+  visible.value = false
+  item.value = null
+  measuring.value = false
+}
+
+function onAnchorLeave(e: MouseEvent, anchor: HTMLElement) {
+  const related = e.relatedTarget as Node | null
+  if (related && anchor.contains(related)) return
+  hide()
+}
+
+function afterLayout(tipEl: HTMLElement | null) {
+  if (!tipEl || !anchorRect.value) return
+  const img = tipEl.querySelector('.path-tip-preview img') as HTMLImageElement | null
+  const body = tipEl.querySelector('.path-tip-body') as HTMLElement | null
+  let w = 0
+  if (img) {
+    const ir = img.getBoundingClientRect()
+    w = Math.round(ir.width)
+    if (w <= 0 && img.naturalWidth > 0) {
+      const maxW = Math.min(window.innerWidth * 0.88, 920)
+      const maxH = Math.min(window.innerHeight * 0.7, 720)
+      const scale = Math.min(1, maxW / img.naturalWidth, maxH / img.naturalHeight)
+      w = Math.round(img.naturalWidth * scale)
+    }
+  }
+  if (w <= 0) {
+    const preview = tipEl.querySelector('.path-tip-preview') as HTMLElement | null
+    if (preview) w = Math.round(preview.getBoundingClientRect().width)
+  }
+  if (w > 0) {
+    tipEl.style.width = `${w}px`
+    tipEl.style.maxWidth = `${w}px`
+    if (body) {
+      body.style.width = `${w}px`
+      body.style.maxWidth = `${w}px`
+    }
+  }
+  const rect = tipEl.getBoundingClientRect()
+  positionTip(rect.width, rect.height)
+  measuring.value = false
+}
+
+export function usePathTip() {
+  return {
+    visible,
+    item,
+    anchorRect,
+    inPlaylist,
+    tipLeft,
+    tipTop,
+    measuring,
+    scheduleShow,
+    hide,
+    onAnchorLeave,
+    afterLayout,
+  }
+}
