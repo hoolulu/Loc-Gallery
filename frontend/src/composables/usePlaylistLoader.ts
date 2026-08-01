@@ -29,6 +29,14 @@ export function usePlaylistLoader() {
       gallery.pageSize !== 0 && gallery.page < gallery.totalPages
   }
 
+  async function bindRandomPlaylist(seed: number): Promise<Video | null> {
+    player.playlistContext = snapshotContext()
+    player.playlistSort = 'random'
+    player.playlistRandomSeed = seed
+    const data = await fetchPage(1, 'random', true)
+    return data.items[0] ?? null
+  }
+
   function updatePaging(page: number, totalPages: number) {
     player.playlistLoadedThrough = page
     player.playlistTotalPages = totalPages
@@ -110,6 +118,7 @@ export function usePlaylistLoader() {
 
   return {
     bindFromGallery,
+    bindRandomPlaylist,
     loadMore,
     reloadForSort,
     ensureAdjacent,

@@ -23,7 +23,7 @@ const settingsStore = useSettingsStore()
 
 
 
-const visible = computed(() => ui.manageMode && ui.selectedCount > 0)
+const visible = computed(() => ui.selectedCount > 0)
 
 const ids = computed(() => [...ui.selectedIds])
 

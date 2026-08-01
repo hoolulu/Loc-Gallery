@@ -98,7 +98,10 @@ export const useUiStore = defineStore('ui', () => {
 
     if (next.has(id)) next.delete(id)
 
-    else next.add(id)
+    else {
+      next.add(id)
+      manageMode.value = true
+    }
 
     selectedIds.value = next
 

@@ -5,8 +5,8 @@ import { useGalleryPlay } from '@/composables/useGalleryPlay'
 import { usePlayback } from '@/composables/usePlayback'
 import { useGalleryStore } from '@/stores/gallery'
 import { usePlayerStore } from '@/stores/player'
-import { useUiStore } from '@/stores/ui'
-import type { ContextMenuItem } from '@/stores/ui'
+import { useUiStore, type ContextMenuItem } from '@/stores/ui'
+import type { Video } from '@/types'
 
 export function videoContextMenuItems(): ContextMenuItem[] {
   return [
@@ -26,12 +26,23 @@ export function showVideoContextMenu(e: MouseEvent, videoId: string) {
   ui.showContextMenu(e, videoContextMenuItems(), { targetId: videoId, targetType: 'video' })
 }
 
+function findVideo(id: string, gallery: ReturnType<typeof useGalleryStore>, player: ReturnType<typeof usePlayerStore>): Video | undefined {
+  return gallery.videos.find((v) => v.id === id) ?? player.playlist.find((v) => v.id === id)
+}
+
+function patchVideoInPlayer(id: string, patch: Partial<Video>) {
+  const player = usePlayerStore()
+  const pl = player.playlist.find((v) => v.id === id)
+  if (pl) Object.assign(pl, patch)
+  if (player.playingId === id && player.playingItem) Object.assign(player.playingItem, patch)
+}
+
 export function setupVideoContextActions() {
   const gallery = useGalleryStore()
   const player = usePlayerStore()
   const ui = useUiStore()
   const { onPlay, onToggleFavorite } = useGalleryPlay()
-  const { playVideo } = usePlayback()
+  const { playVideo, cancelPlayback } = usePlayback()
 
   async function onContextAction(ev: Event) {
     const detail = (ev as CustomEvent).detail as {
@@ -45,7 +56,7 @@ export function setupVideoContextActions() {
 
     if (detail.action === 'play') {
       if (player.open) {
-        const item = player.playlist.find((v) => v.id === id) ?? gallery.videos.find((v) => v.id === id)
+        const item = findVideo(id, gallery, player)
         if (item) await playVideo(item, player.playlist)
       } else {
         await onPlay(id)
@@ -62,10 +73,11 @@ export function setupVideoContextActions() {
       await regenerateThumbSmart(id)
       await gallery.loadVideos()
     } else if (detail.action === 'rename') {
-      const item = gallery.videos.find((v) => v.id === id) ?? player.playlist.find((v) => v.id === id)
+      const item = findVideo(id, gallery, player)
       const name = prompt('新文件名', item?.filename || item?.title || '')
       if (name) {
         await renameVideo(id, name)
+        patchVideoInPlayer(id, { filename: name, title: name.replace(/\.[^.]+$/, '') })
         await gallery.loadVideos()
         ui.showToast('已重命名')
       }
@@ -73,7 +85,19 @@ export function setupVideoContextActions() {
       ui.openFolderMove({ mode: 'videos', videoIds: [id], category: gallery.category || undefined })
     } else if (detail.action === 'delete') {
       if (!confirm('确定删除此视频？')) return
+      const wasPlaying = player.playingId === id
+      const idx = player.playlist.findIndex((v) => v.id === id)
       await deleteVideos([id])
+      const remaining = player.playlist.filter((v) => v.id !== id)
+      player.playlist = remaining
+      if (wasPlaying) {
+        if (remaining.length) {
+          const next = remaining[Math.min(idx, remaining.length - 1)]
+          await playVideo(next, remaining)
+        } else {
+          await cancelPlayback()
+        }
+      }
       await gallery.loadVideos()
       ui.showToast('已删除')
     }

@@ -28,6 +28,16 @@ let observer: IntersectionObserver | null = null
 const current = computed(() => player.playingItem)
 const playlistSortOptions = PLAYLIST_SORT_OPTIONS
 
+const playlistIndex = computed(() =>
+  player.playingId ? player.playlist.findIndex((v) => v.id === player.playingId) : -1,
+)
+const canGoPrev = computed(() => playlistIndex.value > 0)
+const canGoNext = computed(
+  () =>
+    playlistIndex.value >= 0 &&
+    (playlistIndex.value < player.playlist.length - 1 || player.playlistCanLoadMore),
+)
+
 watch(videoBinding, (el) => {
   player.videoEl = el
 })
@@ -138,61 +148,71 @@ async function onPlaylistSortChange(e: Event) {
   <div
     v-if="player.open"
     data-testid="player-view"
-    class="fixed inset-0 z-[100] flex flex-col bg-[var(--lg-bg-player)] text-[var(--lg-text-primary)]"
+    class="player-view fixed inset-0 z-[100] flex min-h-0 flex-col bg-[var(--lg-bg-player)] text-[var(--lg-text-primary)]"
   >
-    <header class="flex shrink-0 items-center gap-2 border-b border-[var(--lg-border)] px-4 py-3">
-      <div class="min-w-0 flex-1">
-        <h2 class="truncate text-sm font-medium">{{ current?.title || current?.filename }}</h2>
-        <p class="truncate text-xs text-[var(--lg-text-muted)]">{{ current?.path }}</p>
-      </div>
-      <button
-        class="shrink-0 rounded px-3 py-1.5 text-sm lg-hover"
-        :class="{ 'text-[var(--lg-accent)]': playlistOpen }"
-        @click="playlistOpen = !playlistOpen"
-      >
-        列表
-      </button>
-      <button
-        class="shrink-0 rounded px-3 py-1.5 text-sm lg-hover"
-        :class="{ 'text-[var(--lg-accent)]': current?.favorited }"
-        @click="onToggleFavorite"
-      >
-        {{ current?.favorited ? '♥ 已收藏' : '♡ 收藏' }}
-      </button>
-      <button
-        class="shrink-0 rounded px-3 py-1.5 text-lg leading-none lg-hover"
-        title="关闭 (Esc)"
-        aria-label="关闭"
-        @click="cancelPlayback()"
-      >
-        ✕
-      </button>
-    </header>
-
     <div class="flex min-h-0 flex-1">
-      <div class="player-stage" @wheel.prevent="onWheel">
-        <video ref="videoBinding" controls playsinline />
+      <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+        <header class="player-video-toolbar">
+          <button
+            type="button"
+            class="player-back-btn"
+            title="返回列表 (Esc)"
+            @click="cancelPlayback()"
+          >
+            ← 返回列表
+          </button>
+          <div class="player-video-meta min-w-0 flex-1">
+            <h2 class="truncate text-sm font-medium">{{ current?.title || current?.filename }}</h2>
+            <p class="truncate text-xs text-[var(--lg-text-muted)]">{{ current?.path }}</p>
+          </div>
+          <button
+            type="button"
+            class="player-toolbar-btn"
+            :class="{ 'text-[var(--lg-accent)]': current?.favorited }"
+            @click="onToggleFavorite"
+          >
+            {{ current?.favorited ? '♥ 已收藏' : '♡ 收藏' }}
+          </button>
+          <button
+            type="button"
+            class="player-toolbar-btn"
+            :class="{ 'text-[var(--lg-accent)]': playlistOpen }"
+            @click="playlistOpen = !playlistOpen"
+          >
+            列表
+          </button>
+        </header>
 
-        <div
-          v-if="player.overlayVisible"
-          class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-[var(--lg-bg-overlay)] px-6 text-center"
-        >
-          <h3 class="text-lg font-medium">{{ player.overlayTitle }}</h3>
-          <p class="mt-2 text-sm text-[var(--lg-text-secondary)]">{{ player.overlayDetail }}</p>
-          <div v-if="player.overlayIndeterminate" class="mt-4 h-1 w-48 overflow-hidden rounded bg-[var(--lg-bg-hover)]">
-            <div class="h-full w-1/3 animate-pulse bg-[var(--lg-accent)]" />
+        <div class="player-stage min-h-0 flex-1" @wheel.prevent="onWheel">
+          <video ref="videoBinding" controls playsinline />
+
+          <div
+            v-if="player.overlayVisible"
+            class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-[var(--lg-bg-overlay)] px-6 text-center"
+          >
+            <h3 class="text-lg font-medium">{{ player.overlayTitle }}</h3>
+            <p class="mt-2 text-sm text-[var(--lg-text-secondary)]">{{ player.overlayDetail }}</p>
+            <div
+              v-if="player.overlayIndeterminate"
+              class="mt-4 h-1 w-48 overflow-hidden rounded bg-[var(--lg-bg-hover)]"
+            >
+              <div class="h-full w-1/3 animate-pulse bg-[var(--lg-accent)]" />
+            </div>
+            <div
+              v-else-if="player.overlayProgress != null"
+              class="mt-4 h-1 w-48 overflow-hidden rounded bg-[var(--lg-bg-hover)]"
+            >
+              <div class="h-full bg-[var(--lg-accent)]" :style="{ width: `${player.overlayProgress}%` }" />
+            </div>
           </div>
-          <div v-else-if="player.overlayProgress != null" class="mt-4 h-1 w-48 overflow-hidden rounded bg-[var(--lg-bg-hover)]">
-            <div class="h-full bg-[var(--lg-accent)]" :style="{ width: `${player.overlayProgress}%` }" />
-          </div>
+
+          <p
+            v-if="player.statusText"
+            class="absolute bottom-4 left-4 z-10 rounded bg-[var(--lg-bg-overlay)] px-2 py-1 text-xs"
+          >
+            {{ player.statusText }}
+          </p>
         </div>
-
-        <p
-          v-if="player.statusText"
-          class="absolute bottom-4 left-4 z-10 rounded bg-[var(--lg-bg-overlay)] px-2 py-1 text-xs"
-        >
-          {{ player.statusText }}
-        </p>
       </div>
 
       <aside
@@ -206,7 +226,9 @@ async function onPlaylistSortChange(e: Event) {
             :value="player.playlistSort"
             @change="onPlaylistSortChange"
           >
-            <option v-for="opt in playlistSortOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+            <option v-for="opt in playlistSortOptions" :key="opt.value" :value="opt.value">
+              {{ opt.label }}
+            </option>
           </select>
         </div>
         <div ref="playlistScrollRef" class="player-playlist min-h-0 flex-1 overflow-y-auto">
@@ -243,8 +265,24 @@ async function onPlaylistSortChange(e: Event) {
           </div>
         </div>
         <div class="flex gap-2 border-t border-[var(--lg-border)] p-3">
-          <button class="flex-1 rounded bg-[var(--lg-btn-bg)] py-2 text-sm lg-hover" @click="playAdjacent(-1)">上一集</button>
-          <button class="flex-1 rounded bg-[var(--lg-btn-bg)] py-2 text-sm lg-hover" @click="playAdjacent(1)">下一集</button>
+          <button
+            type="button"
+            class="flex-1 rounded bg-[var(--lg-btn-bg)] py-2 text-sm lg-hover disabled:cursor-not-allowed disabled:opacity-40"
+            :disabled="!canGoPrev"
+            title="上一个"
+            @click="playAdjacent(-1)"
+          >
+            上一个
+          </button>
+          <button
+            type="button"
+            class="flex-1 rounded bg-[var(--lg-btn-bg)] py-2 text-sm lg-hover disabled:cursor-not-allowed disabled:opacity-40"
+            :disabled="!canGoNext"
+            title="下一个"
+            @click="playAdjacent(1)"
+          >
+            下一个
+          </button>
         </div>
       </aside>
     </div>

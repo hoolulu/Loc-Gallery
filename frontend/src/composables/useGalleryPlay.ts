@@ -1,5 +1,4 @@
 import { toggleFavorite } from '@/api'
-import { getVideos } from '@/api'
 import { usePlayback } from '@/composables/usePlayback'
 import { usePlaylistLoader } from '@/composables/usePlaylistLoader'
 import { useGalleryStore } from '@/stores/gallery'
@@ -12,7 +11,7 @@ export function useGalleryPlay() {
   const player = usePlayerStore()
   const ui = useUiStore()
   const { playVideo } = usePlayback()
-  const { bindFromGallery } = usePlaylistLoader()
+  const { bindFromGallery, bindRandomPlaylist } = usePlaylistLoader()
 
   async function onPlay(id: string, list?: Video[]) {
     if (player.open) {
@@ -41,28 +40,16 @@ export function useGalleryPlay() {
     const seed = Date.now()
     gallery.setSort('random')
     gallery.randomSeed = seed
-    player.playlistSort = 'random'
-    player.playlistRandomSeed = seed
-    const params: Record<string, string | number> = {
-      sort: 'random',
-      seed,
-      page: 1,
-      page_size: 1,
+    try {
+      const item = await bindRandomPlaylist(seed)
+      if (!item) {
+        ui.showToast('没有可播放的视频')
+        return
+      }
+      await playVideo(item, player.playlist)
+    } catch (err) {
+      ui.showToast(`随机播放失败: ${err instanceof Error ? err.message : String(err)}`)
     }
-    if (gallery.category) params.category = gallery.category
-    if (gallery.folder) params.folder = gallery.folder
-    if (gallery.query) params.q = gallery.query
-    if (gallery.formatFilter) params.format = gallery.formatFilter
-    if (gallery.viewMode === 'favorites') params.favorites = 'true'
-    if (gallery.viewMode === 'history') params.history = 'true'
-    if (gallery.viewMode === 'album-detail' && gallery.albumId) params.album_id = gallery.albumId
-    const data = await getVideos(params)
-    if (!data.items.length) {
-      ui.showToast('没有可播放的视频')
-      return
-    }
-    bindFromGallery(gallery.videos)
-    await playVideo(data.items[0], player.playlist)
   }
 
   return { onPlay, onToggleFavorite, onRandomPlay }

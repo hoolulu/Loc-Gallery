@@ -980,6 +980,52 @@ body.has-selection .card-album-badge {
 }
 
 /* 播放器舞台：视频始终撑满可用区域 */
+.player-view {
+  overflow: hidden;
+}
+.player-video-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  padding: 0.45rem 0.75rem;
+  border-bottom: 1px solid var(--lg-border);
+  background: var(--lg-bg-secondary);
+}
+.player-back-btn {
+  flex-shrink: 0;
+  padding: 0.35rem 0.65rem;
+  border-radius: 6px;
+  border: 1px solid var(--lg-border);
+  background: var(--lg-bg-elevated);
+  color: var(--lg-text-primary);
+  font-size: 0.8125rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+.player-back-btn:hover {
+  background: var(--lg-bg-hover);
+}
+.player-video-meta {
+  min-width: 0;
+}
+.player-toolbar-btn {
+  flex-shrink: 0;
+  padding: 0.35rem 0.65rem;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--lg-text-secondary);
+  font-size: 0.8125rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+.player-toolbar-btn:hover {
+  background: var(--lg-bg-hover);
+  color: var(--lg-text-primary);
+}
 .player-stage {
   position: relative;
   min-height: 0;
