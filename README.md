@@ -41,31 +41,31 @@
 
 ### 界面预览
 
-> 演示数据为风景图占位，非真实视频库内容。10.0.0 为 Vue 3 重构版，界面布局与交互已升级，以下为功能示意截图。
+> 演示数据为风景图占位，非真实视频库内容。10.0.0 为 Vue 3 重构版，界面布局与交互已升级；截图沿用 [v8.1.0](https://github.com/hoolulu/Loc-Gallery/tree/v8.1.0/docs/screenshots) 历史资源（Git 中已有，无需重复上传）。
 
 **画廊浏览** — 左侧分类与子目录树，网格分页浏览整个视频库。
 
-<p align="center"><img src="docs/screenshots/gallery.png" width="100%" alt="画廊浏览" /></p>
+<p align="center"><img src="https://raw.githubusercontent.com/hoolulu/Loc-Gallery/v8.1.0/docs/screenshots/gallery.png" width="100%" alt="画廊浏览" /></p>
 
 **内嵌播放** — 页面内播放器与右侧播放列表；支持排序、上一个/下一个、HTML5 连播。
 
-<p align="center"><img src="docs/screenshots/player.png" width="100%" alt="内嵌播放" /></p>
+<p align="center"><img src="https://raw.githubusercontent.com/hoolulu/Loc-Gallery/v8.1.0/docs/screenshots/player.png" width="100%" alt="内嵌播放" /></p>
 
 **我的收藏** — 一键筛选已收藏视频，卡片左上角显示红心标记。
 
-<p align="center"><img src="docs/screenshots/favorites.png" width="100%" alt="我的收藏" /></p>
+<p align="center"><img src="https://raw.githubusercontent.com/hoolulu/Loc-Gallery/v8.1.0/docs/screenshots/favorites.png" width="100%" alt="我的收藏" /></p>
 
 **最近播放** — 按播放时间倒序浏览，快速回到上次看到的内容。
 
-<p align="center"><img src="docs/screenshots/history.png" width="100%" alt="最近播放" /></p>
+<p align="center"><img src="https://raw.githubusercontent.com/hoolulu/Loc-Gallery/v8.1.0/docs/screenshots/history.png" width="100%" alt="最近播放" /></p>
 
 **设置** — 视频库管理、全局播放与缩略图选项；自动探测 PotPlayer 路径。
 
-<p align="center"><img src="docs/screenshots/settings.png" width="100%" alt="设置" /></p>
+<p align="center"><img src="https://raw.githubusercontent.com/hoolulu/Loc-Gallery/v8.1.0/docs/screenshots/settings.png" width="100%" alt="设置" /></p>
 
 **批量选择** — 多选后批量收藏、移动、删除，底部浮出操作栏。
 
-<p align="center"><img src="docs/screenshots/batch.png" width="100%" alt="批量选择" /></p>
+<p align="center"><img src="https://raw.githubusercontent.com/hoolulu/Loc-Gallery/v8.1.0/docs/screenshots/batch.png" width="100%" alt="批量选择" /></p>
 
 ---
 
@@ -195,7 +195,7 @@ Loc Gallery 的做法是：**只在本机跑一个轻量 Web 服务**，浏览�
 │   └── settings.example.json   # 设置模板
 ├── doc/
 │   └── PRD.md                  # 产品需求文档
-├── docs/screenshots/           # README 界面截图
+├── docs/screenshots/           # 界面截图（见 v8.1.0 标签，本地可从历史检出）
 └── data/                       # 运行时数据（gitignored）
     ├── settings.json           # 全局设置
     ├── libraries.json          # 已注册视频库列表
@@ -379,7 +379,7 @@ python backend/tests/test_auto_new_video.py
 | `frontend/`、`backend/`、`scripts/` | 整个 `data/` 目录 |
 | `config/settings.example.json` | `data/settings.json` |
 | `README.md`、`doc/PRD.md`、`CHANGELOG.md` | `data/libraries.json`、`data/libraries/` |
-| `docs/screenshots/` | `data/logs/`、`.server.pid`、`.vite.pid` |
+| `docs/screenshots/`（v8.1.0 标签中） | `data/logs/`、`.server.pid`、`.vite.pid` |
 
 **源码中不应出现：**
 
