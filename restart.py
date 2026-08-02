@@ -15,6 +15,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
 from ports import APP_URL  # noqa: E402
 from service import start_dev, start_production, stop_all  # noqa: E402
+from setup import ensure_deps  # noqa: E402
 
 
 def build_frontend() -> bool:
@@ -37,6 +38,12 @@ def build_frontend() -> bool:
 def main() -> None:
     os.chdir(PROJECT_ROOT)
     production = "--build" in sys.argv or "--prod" in sys.argv
+    auto_setup = "--no-setup" not in sys.argv
+
+    if not ensure_deps(need_node=True, auto_install=auto_setup):
+        print("\n可手动执行：python scripts/setup.py")
+        input("\n按 Enter 键关闭...")
+        return
 
     if production:
         print("=== Loc Gallery · 生产构建模式 ===\n")

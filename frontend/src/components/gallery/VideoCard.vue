@@ -5,6 +5,7 @@ import { usePathTip } from '@/composables/usePathTip'
 import { useGalleryStore } from '@/stores/gallery'
 import { useUiStore } from '@/stores/ui'
 import type { Video } from '@/types'
+import { formatBadgeLabel } from '@/utils/format'
 
 const props = defineProps<{
   video: Video
@@ -96,7 +97,7 @@ function onCheckChange(e: Event) {
         <div class="h-full bg-[var(--lg-accent)]" :style="{ width: `${progressPct}%` }" />
       </div>
       <span v-if="video.formatBadge" class="thumb-overlay thumb-format-badge">
-        {{ video.formatBadge }}
+        {{ formatBadgeLabel(video.formatBadge) }}
       </span>
       <span v-if="video.durationSec" class="thumb-overlay thumb-duration">
         {{ formatDuration(video.durationSec) }}

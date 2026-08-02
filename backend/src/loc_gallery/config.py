@@ -22,7 +22,7 @@ SETTINGS_FILE = DATA_DIR / "settings.json"
 LOG_FILE = PROJECT_ROOT / "logs" / "server.log"
 PID_FILE = PROJECT_ROOT / ".server.pid"
 
-HLS_CACHE_MAX_BYTES = 5 * 1024 * 1024 * 1024  # 5 GB
+HLS_CACHE_MAX_BYTES = 2 * 1024 * 1024 * 1024  # 单库 HLS 切片上限 2GB（超出 LRU 淘汰）
 LARGE_FILE_HLS_BYTES = 300 * 1024 * 1024  # 300 MB
 HLS_LARGE_H264 = False  # 大文件 H.264 是否强制 HLS（HTML5）
 HLS_MOOV_END_H264 = False  # 索引在末尾的 H.264 是否强制 HLS（HTML5）

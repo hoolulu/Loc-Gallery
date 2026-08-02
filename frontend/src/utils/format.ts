@@ -37,3 +37,22 @@ export function getSavedPosition(
   if (!enabled) return null
   return normalizeResumePosition(Number(playPosition), playDuration)
 }
+
+const FORMAT_BADGE_LABELS: Record<string, string> = {
+  special: '特殊',
+  remuxable: '可修复',
+  interleaved: '交错',
+  disguised: '伪装',
+  fragmented: '碎片化',
+  unsupported: '无法播放',
+  hls: 'HLS',
+  moov_end: '慢起播',
+  large: '大文件',
+  transcode: '特殊',
+}
+
+export function formatBadgeLabel(kind?: string | null): string {
+  if (!kind) return ''
+  const key = kind.toLowerCase()
+  return FORMAT_BADGE_LABELS[key] ?? kind
+}

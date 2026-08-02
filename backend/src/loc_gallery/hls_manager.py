@@ -376,6 +376,40 @@ def shutdown() -> None:
     stop_playback(force=True)
 
 
+def enforce_cache_limit() -> None:
+    """将当前视频库的 HLS 缓存压到配置上限以下（LRU 淘汰）。"""
+    with _lock:
+        _evict_lru_if_needed()
+
+
+def enforce_cache_limits_all_libraries(library_ids: list[str]) -> None:
+    """启动或维护时：对每个视频库执行缓存上限检查。"""
+    from loc_gallery.library_context import set_thread_library
+
+    for lid in library_ids:
+        set_thread_library(lid)
+        enforce_cache_limit()
+
+
+def purge_all_hls_caches() -> int:
+    """清空所有视频库的 HLS 切片目录（保留缩略图、收藏、历史、专辑等）。"""
+    from loc_gallery.config import LIBRARIES_ROOT
+
+    count = 0
+    if not LIBRARIES_ROOT.is_dir():
+        return count
+    for lib_dir in LIBRARIES_ROOT.iterdir():
+        if not lib_dir.is_dir():
+            continue
+        hls = lib_dir / "cache" / "hls"
+        if not hls.exists():
+            continue
+        shutil.rmtree(hls, ignore_errors=True)
+        hls.mkdir(parents=True, exist_ok=True)
+        count += 1
+    return count
+
+
 def _status_dict(
     video_id: str,
     *,

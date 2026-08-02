@@ -123,7 +123,6 @@ from loc_gallery import hls_manager
 from loc_gallery.format_index import (
     enqueue_missing_format_probe,
     filter_items_by_format,
-    get_format_kind_for_item,
     get_format_status,
     rebuild_format_index_from_plans,
     set_format_kind,
@@ -488,6 +487,7 @@ async def lifespan(app: FastAPI):
     init_manager(sync_videos=False)
     register_progress_callback(lambda: _broadcast("progress", get_active_library_id()))
     _start_watchers()
+    hls_manager.enforce_cache_limits_all_libraries([lib.id for lib in list_libraries()])
 
     def _startup_background() -> None:
         from loc_gallery.thumb_manager import complete_startup_sync
@@ -630,7 +630,9 @@ def _videos_to_dicts(
             "playDuration": hist.get("duration_sec") if hist else None,
             "durationSec": duration,
             "albumIds": album_map.get(v.id, []),
-            "formatBadge": get_format_kind_for_item(library_id, v.id, v.mtime, v.size),
+            "formatBadge": get_format_badge_for_item(
+                library_id, v.id, v.mtime, v.size, Path(v.path),
+            ),
         })
     return out
 
@@ -1861,6 +1863,29 @@ async def api_get_settings(
     return merged
 
 
+_PLAYBACK_POLICY_KEYS = frozenset({
+    "html5_modern_codecs_direct",
+    "hls_large_h264",
+    "hls_moov_end_h264",
+    "html5_fragmented_mp4",
+})
+
+
+def _playback_policy_changed(payload: dict, before: dict, after: dict) -> bool:
+    for key in _PLAYBACK_POLICY_KEYS:
+        if key in payload and before.get(key) != after.get(key):
+            return True
+    return False
+
+
+def _rebuild_format_indexes_after_policy_change() -> None:
+    from loc_gallery.library_store import list_libraries
+
+    for lib in list_libraries():
+        rebuild_format_index_from_plans(lib.id)
+        enqueue_missing_format_probe(lib.id)
+
+
 @app.post("/api/settings")
 async def api_save_settings(body: SettingsUpdate, library_id: str = Depends(resolve_library_id)):
     scope = body.scope or "library"
@@ -1868,17 +1893,21 @@ async def api_save_settings(body: SettingsUpdate, library_id: str = Depends(reso
     if scope == "global":
         current = load_settings()
         old_idle = current.get("thumb_idle_scan")
+        before = dict(current)
         current.update(payload)
         saved = save_settings(current)
     else:
         current = load_settings(library_id)
         old_idle = current.get("thumb_idle_scan")
+        before = dict(current)
         current.update(payload)
         saved = save_settings(current, library_id)
     if saved.get("thumb_idle_scan") and not old_idle:
         start_idle_scan_background()
     elif not saved.get("thumb_idle_scan") and old_idle:
         stop_idle_scan_background()
+    if _playback_policy_changed(payload, before, saved):
+        _rebuild_format_indexes_after_policy_change()
     return saved
 
 

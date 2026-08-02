@@ -13,37 +13,67 @@ venv/
 node_modules/
 frontend/node_modules/
 frontend/dist/
+frontend/dist-ssr/
 frontend/.vite/
 frontend/test-results/
+frontend/playwright-report/
 .cache/
 
-# ── 隐私 / 运行时数据（切勿提交）────────────────────────────
-# 含视频绝对路径、收藏、播放历史、本机 PotPlayer 路径、缩略图与 HLS 缓存
-data/*
+# ═══════════════════════════════════════════════════════════
+# 隐私与运行时数据 — 切勿提交（含本机视频绝对路径、播放记录等）
+# ═══════════════════════════════════════════════════════════
+
+# 整个 data 目录为运行时状态（缩略图、收藏、历史、HLS 缓存等）
+data/
 !data/.gitkeep
 
-# 日志与 PID（可能含 Windows 用户名与绝对路径）
+# 若有人误用 git add -f，以下模式二次兜底
+data/**
+!data/.gitkeep
+**/cache/hls/
+**/.thumbs/
+libraries.json
+**/favorites.json
+**/play_history.json
+**/albums.json
+**/category_meta.json
+**/settings.json
+**/cache/playback_plans.json
+**/cache/format_index.json
+
+# 日志与进程文件（可能含 Windows 用户名、绝对路径）
 logs/
+data/logs/
 *.log
 .server.pid
 .vite.pid
+**/.server.pid
+**/.vite.pid
 
-# 旧版或误放在项目根目录的缓存
+# 旧版或误放在项目根目录的运行时文件
 .thumbs/
 cache/
-
-# 若误将运行时 JSON 放在根目录
 /settings.json
 /category_meta.json
 /favorites.json
 /play_history.json
 
-# 环境变量
+# 环境变量与密钥
 .env
 .env.*
+*.pem
+*.key
 
-# IDE
+# IDE / 系统
 .idea/
 .vscode/
+!.vscode/extensions.json
 *.swp
 .DS_Store
+Thumbs.db
+desktop.ini
+
+# 临时 / 交付脚本
+*.tmp
+*.bak
+rename-loc-gallery.bat

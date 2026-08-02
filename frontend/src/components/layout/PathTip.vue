@@ -2,7 +2,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { thumbUrl } from '@/api/client'
 import { usePathTip } from '@/composables/usePathTip'
-import { formatDuration, formatSize } from '@/utils/format'
+import { formatDuration, formatSize, formatBadgeLabel } from '@/utils/format'
 
 const { visible, item, tipLeft, tipTop, measuring, afterLayout } = usePathTip()
 const tipRef = ref<HTMLElement | null>(null)
@@ -55,7 +55,7 @@ const techChips = computed(() => {
   const chips: string[] = []
   const dur = formatDuration(v.durationSec)
   if (dur) chips.push(`时长 ${dur}`)
-  if (v.formatBadge) chips.push(v.formatBadge.toUpperCase())
+  if (v.formatBadge) chips.push(formatBadgeLabel(v.formatBadge))
   if (v.size) chips.push(formatSize(v.size))
   if (v.mtime) chips.push(`修改于 ${formatTs(v.mtime)}`)
   return chips
@@ -100,7 +100,7 @@ watch(visible, (v) => {
         decoding="async"
         @load="onImgLoad"
       />
-      <span v-if="item.formatBadge" class="thumb-format-badge">{{ item.formatBadge }}</span>
+      <span v-if="item.formatBadge" class="thumb-format-badge">{{ formatBadgeLabel(item.formatBadge) }}</span>
       <span v-if="item.durationSec" class="thumb-duration">{{ formatDuration(item.durationSec) }}</span>
     </div>
     <div v-else class="path-tip-preview path-tip-preview--empty">暂无缩略图</div>

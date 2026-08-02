@@ -131,12 +131,9 @@ export interface Settings {
 export const FORMAT_FILTER_OPTIONS: { value: string; label: string }[] = [
   { value: '', label: '全部格式' },
   { value: 'remuxable', label: '多段交错·可修复' },
-  { value: 'transcode', label: '需转码' },
-  { value: 'hls', label: 'HLS 边切' },
+  { value: 'transcode', label: '特殊编码（可能转码）' },
   { value: 'interleaved', label: '多段交错' },
   { value: 'disguised', label: '伪装格式' },
-  { value: 'moov_end', label: '索引在末尾' },
-  { value: 'large', label: '大文件' },
   { value: 'fragmented', label: '碎片化' },
   { value: 'unsupported', label: '无法播放' },
   { value: 'non_standard', label: '任意非标准' },

@@ -423,7 +423,7 @@ def _is_interleaved_structure(plan: dict) -> bool:
 
 
 def classify_format_plan(plan: dict | None) -> str | None:
-    """格式分类（角标/筛选共用）；标准直连返回 None。"""
+    """格式分类（角标/筛选共用）；能直连或仅需后台 HLS 切片的返回 None。"""
     if not plan:
         return None
     mode = plan.get("mode")
@@ -431,7 +431,7 @@ def classify_format_plan(plan: dict | None) -> str | None:
         return None
     if mode == "unsupported":
         return "unsupported"
-    if mode == "direct":
+    if mode == "direct" or plan.get("experimental_direct"):
         return None
 
     if can_remux_from_plan(plan)[0]:
@@ -439,7 +439,6 @@ def classify_format_plan(plan: dict | None) -> str | None:
 
     structure = plan.get("structure") or {}
     kind = structure.get("kind")
-    mdat_count = int(structure.get("mdat_count") or 0)
     interleaved = _is_interleaved_structure(plan)
 
     if plan.get("disguised") or kind in ("disguised_mpegts", "disguised_h264"):
@@ -451,20 +450,34 @@ def classify_format_plan(plan: dict | None) -> str | None:
     if plan.get("transcode"):
         return "transcode"
 
-    if kind == "moov_end":
-        return "moov_end"
-
-    reason = plan.get("reason") or ""
-    if mode == "hls" and "大文件" in reason:
-        return "large"
-
     if mode == "external":
         return "fragmented"
 
-    if mode == "hls":
-        return "hls"
+    # HLS 仅切片 / moov 在末尾 / 大文件：可正常播放，不展示角标
+    if mode == "hls" and not plan.get("transcode"):
+        return None
 
     return None
+
+
+_FORMAT_BADGE_LABELS: dict[str, str] = {
+    "transcode": "special",
+    "remuxable": "remuxable",
+    "interleaved": "interleaved",
+    "disguised": "disguised",
+    "fragmented": "fragmented",
+    "unsupported": "unsupported",
+    # 旧索引可能仍带以下 kind，保留映射以便筛选/展示一致
+    "hls": "hls",
+    "moov_end": "moov_end",
+    "large": "large",
+}
+
+
+def format_badge_display(kind: str | None) -> str | None:
+    if not kind:
+        return None
+    return _FORMAT_BADGE_LABELS.get(kind, kind)
 
 
 def get_format_badge_for_item(
@@ -474,16 +487,19 @@ def get_format_badge_for_item(
     size: int,
     path: Path | None = None,
 ) -> str | None:
-    """从格式索引读角标；索引未命中时只读已有播放计划缓存，不触发探测。"""
-    from loc_gallery.format_index import get_format_kind_for_item
+    """读角标：优先用播放计划缓存重新分类，避免索引与当前策略不一致。"""
+    from loc_gallery.format_index import get_format_kind_for_item, set_format_kind
+
+    plan = _peek_cached_plan_entry(path, mtime, size) if path is not None else None
+    if plan is not None:
+        kind = classify_format_plan(plan)
+        indexed = get_format_kind_for_item(library_id, video_id, mtime, size)
+        if kind != indexed:
+            set_format_kind(library_id, video_id, mtime, size, kind)
+        return format_badge_display(kind)
 
     kind = get_format_kind_for_item(library_id, video_id, mtime, size)
-    if kind:
-        return kind
-    if path is None:
-        return None
-    plan = _peek_cached_plan_entry(path, mtime, size)
-    return classify_format_plan(plan)
+    return format_badge_display(kind)
 
 
 def get_format_badge(path: Path) -> str | None:
@@ -495,7 +511,7 @@ def get_format_badge(path: Path) -> str | None:
         except OSError:
             return None
         plan = _peek_cached_plan_entry(path, st.st_mtime, st.st_size)
-    return classify_format_plan(plan)
+    return format_badge_display(classify_format_plan(plan))
 
 
 def get_format_badges(paths: dict[str, Path], library_id: str | None = None) -> dict[str, str]:
