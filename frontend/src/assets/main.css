@@ -1178,6 +1178,28 @@ body.has-selection .card-album-badge {
   border-color: var(--lg-accent);
   color: var(--lg-accent);
 }
+.player-nav-btn {
+  flex-shrink: 0;
+  padding: 0.4rem 0.85rem;
+  border-radius: 6px;
+  border: 1px solid var(--lg-border);
+  background: var(--lg-bg-elevated);
+  color: var(--lg-text-primary);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+}
+.player-nav-btn:hover:not(:disabled) {
+  background: var(--lg-bg-hover);
+  border-color: var(--lg-accent);
+  color: var(--lg-accent);
+}
+.player-nav-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
 .player-video-meta {
   min-width: 0;
 }
@@ -1224,6 +1246,13 @@ body.has-selection .card-album-badge {
   height: 100%;
   object-fit: contain;
   background: #000;
+  outline: none;
+  border: none;
+}
+.player-stage video:focus,
+.player-stage video:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 /* 播放列表侧栏 */

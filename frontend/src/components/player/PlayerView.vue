@@ -244,6 +244,24 @@ async function onPlaylistSortChange(e: Event) {
             >
               返回浏览
             </button>
+            <button
+              type="button"
+              class="player-nav-btn"
+              :disabled="!canGoPrev"
+              title="上一个"
+              @click="playAdjacent(-1)"
+            >
+              上一个
+            </button>
+            <button
+              type="button"
+              class="player-nav-btn"
+              :disabled="!canGoNext"
+              title="下一个"
+              @click="playAdjacent(1)"
+            >
+              下一个
+            </button>
           </div>
         </header>
       </div>
@@ -297,26 +315,6 @@ async function onPlaylistSortChange(e: Event) {
             <span v-else-if="player.playlistCanLoadMore">向下滚动加载更多</span>
             <span v-else-if="player.playlist.length">已加载全部</span>
           </div>
-        </div>
-        <div class="flex gap-2 border-t border-[var(--lg-border)] p-3">
-          <button
-            type="button"
-            class="flex-1 rounded bg-[var(--lg-btn-bg)] py-2 text-sm lg-hover disabled:cursor-not-allowed disabled:opacity-40"
-            :disabled="!canGoPrev"
-            title="上一个"
-            @click="playAdjacent(-1)"
-          >
-            上一个
-          </button>
-          <button
-            type="button"
-            class="flex-1 rounded bg-[var(--lg-btn-bg)] py-2 text-sm lg-hover disabled:cursor-not-allowed disabled:opacity-40"
-            :disabled="!canGoNext"
-            title="下一个"
-            @click="playAdjacent(1)"
-          >
-            下一个
-          </button>
         </div>
       </aside>
     </div>
