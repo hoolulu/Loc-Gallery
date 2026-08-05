@@ -212,7 +212,11 @@ def _worker(job: RemuxJob) -> None:
     set_thread_library(job.library_id)
     source = job.source.resolve()
     backup = _backup_path(source)
-    _legacy_temp_path(source, job.video_id).unlink(missing_ok=True)
+    try:
+        _legacy_temp_path(source, job.video_id).unlink(missing_ok=True)
+    except OSError:
+        # 临时文件可能被残留进程占用；忽略，避免 worker 在入队阶段崩溃导致 job 永久卡在 queued
+        pass
     timestamps: FileTimestamps | None = None
     _enter_remux_job(job.library_id)
 

@@ -73,6 +73,9 @@ cache/
 Thumbs.db
 desktop.ini
 
+# Reasonix 会话 / 内部状态（非项目代码）
+.reasonix/
+
 # 临时 / 交付脚本
 *.tmp
 *.bak

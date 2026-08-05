@@ -156,7 +156,9 @@ def get_format_status(library_id: str) -> dict:
             indexed += 1
     pending = max(0, total - indexed)
     with _index_lock:
-        scanning = _probe_queue.qsize() + len(_probe_pending)
+        # _probe_pending 已涵盖排队中 + 处理中的全部项（入队即 add，完成才 discard）；
+        # _probe_queue.qsize() 与 pending 重叠（排队项同时在两者中），会重复计数。
+        scanning = len(_probe_pending)
     return {
         "total": total,
         "indexed": indexed,

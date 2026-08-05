@@ -2,6 +2,23 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [10.0.2] - 2026-08-05
+
+### 修复
+
+- **缩略图接口 404**：`/api/thumb/{video_id}` 在缩略图文件不存在时返回 500 而非 404（文件被清理 / 外部删除 / 生成失败时会触发），现改为返回 404
+- **播放修复卡死**：`remux_manager` worker 在清理旧临时文件时若抛出 `OSError`（文件被残留进程占用），会让该视频的修复任务永久停在排队状态、无法重试；现忽略该清理错误
+- **重封装后排序错乱**：`refresh_video_item_stat` 更新 size/mtime 后未失效按大小 / 时间排序的全局索引，导致 remux 原地替换后列表顺序错误
+- **误删收藏/历史/专辑风险**：库索引因瞬时状态（文件处于 20 秒写入窗口等）暂时为空时，清理逻辑会按空集合误删全部收藏、播放历史与专辑；现为空索引时跳过清理
+- **格式扫描进度重复计数**：`get_format_status` 的 `scanning` 统计把排队项重复计入，导致进度高估一倍
+
+### 测试
+
+- 新增回归测试：`test_thumb_404.py`、`test_scanner_invalidate.py`、`test_prune_guard.py`
+- 修复 `test_auto_new_video.py`（旧模块 `avv_gallery`、旧端口、多库适配）与 `test_multi_library.py`（调用已不存在的 `update_position`）
+
+---
+
 ## [10.0.1] - 2026-08-04
 
 ### 改进

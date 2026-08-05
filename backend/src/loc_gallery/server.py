@@ -541,6 +541,16 @@ if _dist_assets.is_dir():
 
 def _prune_user_data(library_id: str) -> None:
     valid = {v.id for v in get_all(library_id)}
+    if not valid:
+        # 索引为空时跳过清理：扫描可能因文件处于 20 秒写入窗口/瞬时状态而暂时为空，
+        # 此时按空集合 prune 会误删全部收藏/历史/专辑（不可逆）。
+        import logging
+
+        logging.getLogger("loc_gallery").warning(
+            "跳过用户数据清理：库 %s 当前索引为空（可能为瞬时扫描空，而非真实删除）",
+            library_id,
+        )
+        return
     prune_favorites(library_id, valid)
     prune_history(library_id, valid)
     prune_albums(library_id, valid)
@@ -1442,8 +1452,11 @@ async def api_thumb_failed(library_id: str = Depends(resolve_library_id)):
 
 @app.get("/api/thumb/{video_id}")
 async def api_thumb(video_id: str, library_id: str = Depends(resolve_library_id)):
+    path = _thumb_file(video_id, library_id)
+    if not path.is_file():
+        raise HTTPException(404, "缩略图不存在")
     return FileResponse(
-        _thumb_file(video_id, library_id),
+        path,
         media_type="image/jpeg",
         headers={
             "Cache-Control": "public, max-age=86400",

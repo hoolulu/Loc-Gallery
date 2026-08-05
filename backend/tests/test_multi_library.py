@@ -57,13 +57,14 @@ class MultiLibraryIsolationTest(unittest.TestCase):
         self.assertIsNone(history_store.get_entry("lib-b", "vid9"))
 
     def test_playback_position_isolated(self) -> None:
-        history_store.update_position("lib-a", "vid1", 120.5, 3600)
+        history_store.save_position("lib-a", "vid1", 120.5, duration_sec=3600)
         entry_a = history_store.get_entry("lib-a", "vid1")
         self.assertEqual(entry_a.get("position_sec"), 120.5)
         self.assertIsNone(history_store.get_entry("lib-b", "vid1"))
-        history_store.update_position("lib-a", "vid1", 3590, 3600)
+        history_store.save_position("lib-a", "vid1", 3590, duration_sec=3600)
         entry_done = history_store.get_entry("lib-a", "vid1")
-        self.assertNotIn("position_sec", entry_done or {})
+        # 存储层总是保存 position；是否"接近结尾不续播"由前端 normalizeResumePosition 判断
+        self.assertEqual(entry_done.get("position_sec"), 3590.0)
 
     def test_settings_library_override(self) -> None:
         settings_store.save_settings({"player_mode": "potplayer"}, library_id="lib-a")

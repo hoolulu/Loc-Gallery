@@ -254,6 +254,9 @@ def refresh_video_item_stat(library_id: str, video_id: str) -> bool:
         item.size = st.st_size
         item.mtime = st.st_mtime
         _versions[library_id] = _versions.get(library_id, 0) + 1
+        # size/mtime 变了，需失效按 size/mtime 排序的全局索引与分类索引
+        _sort_id_indexes.pop(library_id, None)
+        _category_items.pop(library_id, None)
         return True
 
 
