@@ -197,7 +197,24 @@ export function useHoverPreview() {
       v.src = streamUrl(videoItem.id)
       v.load()
 
-      // 浮层渲染完成后把 video 挂到预览区，挂载成功才开始 seek/play
+      let started = false // 蒙太奇是否已启动（防止 attach/onMeta 重复触发）
+
+      // 挂载 + metadata 均就绪后启动播放
+      const startMontageIfReady = () => {
+        if (!running || started) return
+        if (!v.parentElement) return // 未挂载，等 attach
+        const dur = v.duration
+        if (!Number.isFinite(dur) || dur <= 0) return // metadata 未就绪，等 loadedmetadata
+        started = true
+        setPreviewRatioFromVideo(v)
+        const segCount = Number(settings.settings?.html5_hover_preview_segments)
+        const segSec = Number(settings.settings?.html5_hover_preview_segment_sec)
+        const positions = computePositions(Number.isFinite(segCount) && segCount > 0 ? segCount : 5)
+        const secPerSeg = Number.isFinite(segSec) && segSec > 0 ? segSec : 5
+        runMontage(v, dur, positions, secPerSeg)
+      }
+
+      // 浮层渲染完成后把 video 挂到预览区
       const attach = (tries = 0) => {
         if (!running) return
         const container = findPreviewContainer()
@@ -209,22 +226,11 @@ export function useHoverPreview() {
           return
         }
         if (v.parentElement !== container) container.appendChild(v)
-        const dur = v.duration
-        if (!Number.isFinite(dur) || dur <= 0) {
-          previewFailed.value = true
-          stopNow()
-          return
-        }
-        // 挂载完成：读取比例（浮层此时已渲染占位）并开始蒙太奇播放
-        setPreviewRatioFromVideo(v)
-        const segCount = Number(settings.settings?.html5_hover_preview_segments)
-        const segSec = Number(settings.settings?.html5_hover_preview_segment_sec)
-        const positions = computePositions(Number.isFinite(segCount) && segCount > 0 ? segCount : 5)
-        const secPerSeg = Number.isFinite(segSec) && segSec > 0 ? segSec : 5
-        runMontage(v, dur, positions, secPerSeg)
+        startMontageIfReady()
       }
 
-      // metadata 就绪（比例可知）即触发浮层渲染；若加载极快且容器已存在则直接走 attach
+      // metadata 就绪（比例可知）即触发浮层渲染；一律等事件，避免复用元素时
+      // 同步 readyState 拿到上次加载的残留状态导致误判失败
       const onMeta = () => {
         if (!running) return
         const dur = v.duration
@@ -234,9 +240,9 @@ export function useHoverPreview() {
           return
         }
         setPreviewRatioFromVideo(v)
+        startMontageIfReady()
       }
-      if (v.readyState >= 1) onMeta()
-      else v.addEventListener('loadedmetadata', onMeta, { once: true })
+      v.addEventListener('loadedmetadata', onMeta, { once: true })
 
       attach()
     }, START_DELAY)
