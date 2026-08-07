@@ -107,12 +107,13 @@ function playlistSubline(v: { durationSec?: number; filename?: string }) {
 }
 
 onMounted(() => {
-  document.addEventListener('keydown', onKeydown)
+  // 捕获阶段监听：播放器快捷键独占，任何 stopPropagation 都无法拦截
+  document.addEventListener('keydown', onKeydown, true)
   window.addEventListener('pagehide', onPageHide)
 })
 
 onUnmounted(() => {
-  document.removeEventListener('keydown', onKeydown)
+  document.removeEventListener('keydown', onKeydown, true)
   window.removeEventListener('pagehide', onPageHide)
   observer?.disconnect()
   player.moviPlayer?.destroy()
@@ -141,8 +142,8 @@ function onKeydown(e: KeyboardEvent) {
 
   // 倍速快捷键：Z 减速 / X 正常速度 / C 加速（0.1 步进）。
   // movi 的 playbackRate setter 内部会 clamp 到 getMaxAllowedRate（默认上限 2）。
-  // 注意：播放页已设 nohotkeys（html5_disable_movi_hotkeys 默认开），movi 内置
-  // 快捷键（z/x 字幕延迟等）不冲突；焦点在输入框时上面已拦截。
+  // 播放器已无条件设置 nohotkeys（movi 内置快捷键关闭），本页快捷键独占；
+  // 用捕获阶段监听，任何页面级 stopPropagation 都无法拦截。焦点在输入框时上面已拦截。
   if (e.key === 'z' || e.key === 'Z') {
     e.preventDefault()
     if (moviEl && typeof moviEl.playbackRate === 'number') {

@@ -78,7 +78,7 @@ export function createMoviPlayer(
   host: HTMLElement,
   url: string,
   handlers: MoviPlaybackHandlers = {},
-  opts: { startAt?: number; noHotkeys?: boolean; seekPreview?: boolean } = {},
+  opts: { startAt?: number; seekPreview?: boolean } = {},
 ) {
   let el: MoviElement | null = null
   let activeAudioTrackId: number | null = null
@@ -136,11 +136,11 @@ export function createMoviPlayer(
     if (opts.startAt && opts.startAt > 0) {
       node.setAttribute('startat', String(opts.startAt))
     }
-    // nohotkeys：关闭 movi-player 内置键盘快捷键（空格/方向键/z/x 等），
-    // 避免与油猴等全局快捷键脚本冲突（其 keydown 处理会 preventDefault 吞掉按键）。
-    if (opts.noHotkeys) {
-      node.setAttribute('nohotkeys', '')
-    }
+    // nohotkeys：始终关闭 movi 内置键盘快捷键（空格/方向键/z/x 字幕延迟等）。
+    // 播放页快捷键统一由 PlayerView 的页面级 keydown 处理（Z/X/C 倍速、←/→ 快进、
+    // Enter 全屏），movi 内置快捷键会与之冲突（z/x 是字幕延迟、←/→ 是 movi 快进），
+    // 故无条件设置，不再提供设置项开关。
+    node.setAttribute('nohotkeys', '')
     // thumb：开启进度条悬停时间点截图（movi-player 原生：第二个 WASM 上下文
     // Range seek 解码目标帧，零预生成/零磁盘；由设置 html5_seek_preview 控制）。
     if (opts.seekPreview) {

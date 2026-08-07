@@ -382,16 +382,6 @@ watch(
                       <span class="settings-unit">秒</span>
                     </div>
                   </label>
-                  <div class="settings-field settings-field--full">
-                    <span class="settings-field-label">播放器内置快捷键</span>
-                    <select v-model="form.html5_disable_movi_hotkeys" class="settings-input">
-                      <option :value="true">关闭（推荐，避免与油猴脚本冲突）</option>
-                      <option :value="false">开启（空格/方向键/z/x 等由播放器接管）</option>
-                    </select>
-                    <p class="settings-field-hint">
-                      关闭后键盘操作完全交给页面级脚本（如油猴 HTML5 增强），画面上的控件不受影响。
-                    </p>
-                  </div>
                 </div>
               </section>
             </template>
