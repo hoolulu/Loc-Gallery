@@ -56,8 +56,10 @@ function createVideo(): HTMLVideoElement {
   // 初始透明：加载/seek 阶段盖在 <img> 上不闪黑，play() 成功后才显示
   v.style.opacity = '0'
   v.addEventListener('error', () => {
-    // 仅当前预览的错误才终止；旧元素延迟到达的 error 不影响新预览
-    if (running && v === video) {
+    // 仅当预览运行中、仍是当前活动元素、且【仍在 DOM】时才视为真实失败：
+    // PathTip 销毁/切走导致元素脱离 DOM 后触发的 error 是清理副作用，
+    // 若把它算作失败，previewFailed 会污染下一次预览 → 浮层提前渲染空预览区 → 黑屏。
+    if (running && v === video && v.parentElement) {
       previewFailed.value = true
       stopNow()
     }
@@ -137,9 +139,13 @@ function stopNow() {
   activeId = ''
 }
 
-/** 浮层渲染完成后，其预览区才存在于 DOM */
+/** 浮层渲染完成后，其预览区才存在于 DOM（须等占位元素渲染，否则容器高度 0，video 挂入黑屏） */
 function findPreviewContainer(): HTMLElement | null {
-  return document.querySelector<HTMLElement>('.path-tip .path-tip-preview')
+  const placeholder = document.querySelector<HTMLElement>(
+    '.path-tip .path-tip-preview--placeholder',
+  )
+  if (placeholder) return placeholder.parentElement
+  return null
 }
 
 function runMontage(v: HTMLVideoElement, duration: number, positions: number[], segSec: number) {
@@ -183,7 +189,6 @@ export function useHoverPreview() {
   function startPreview(videoItem: Video) {
     if (settings.settings?.html5_hover_preview === false) return
     if (activeId === videoItem.id && running) return
-    previewFailed.value = false // 新一轮预览重置失败标记
     if (pendingStop) {
       clearTimeout(pendingStop)
       pendingStop = null
@@ -191,6 +196,9 @@ export function useHoverPreview() {
     if (pendingStart) clearTimeout(pendingStart)
     pendingStart = setTimeout(() => {
       pendingStart = null
+      // 真正启动时才重置失败标记：mouseenter 时重置会被旧预览异步 error 重新污染
+      // （previewFailed=true → tipVisible 提前 → 浮层渲染空预览区 → 黑屏）
+      previewFailed.value = false
       stopNow()
       activeId = videoItem.id
       running = true

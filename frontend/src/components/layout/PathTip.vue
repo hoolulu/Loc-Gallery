@@ -16,13 +16,19 @@ const hoverPreviewEnabled = computed(
   () => settings.settings?.html5_hover_preview !== false,
 )
 
-// 浮层显示条件：预览开启时等比例就绪或确认失败才显示（文字+预览区同时出现，
-// 浮层一次定位不跳动）；预览关闭时立即显示
+// 浮层显示条件：预览开启时等比例就绪才显示（文字+预览区同时出现，一次定位不跳动；
+// 预览失败时不等待比例，直接显示文字浮层——但预览区仍由 previewRatio 控制，不会渲染空容器）；
+// 预览关闭时立即显示
 const tipVisible = computed(
   () =>
     visible.value &&
     !!item.value &&
     (!hoverPreviewEnabled.value || !!previewRatio.value || !!previewFailed.value),
+)
+
+// 预览区渲染条件：预览开启且比例就绪（有真实尺寸才渲染，避免空容器挂 video 黑屏）
+const previewAreaVisible = computed(
+  () => hoverPreviewEnabled.value && !!previewRatio.value,
 )
 
 // 占位尺寸按原视频宽高比自适应：约束最大宽/高，竖屏（比例<1）宽度随高度反推
@@ -175,7 +181,7 @@ watch(visible, (v) => {
            不经过 16:9 占位 → 真实比例的横→竖变化，也不在加载中显示缩略图）；
            比例未就绪时预览区留空（浮层仅显示文字），就绪后 spinner → 视频淡入 -->
       <div
-        v-if="hoverPreviewEnabled && previewRatio"
+        v-if="previewAreaVisible"
         class="path-tip-preview--placeholder"
         :class="{ 'path-tip-preview--placeholder-idle': !placeholderLoading }"
         :style="placeholderStyle"
