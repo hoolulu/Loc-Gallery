@@ -147,7 +147,10 @@ function onKeydown(e: KeyboardEvent) {
   if (e.key === 'z' || e.key === 'Z') {
     e.preventDefault()
     if (moviEl && typeof moviEl.playbackRate === 'number') {
-      moviEl.playbackRate = Math.max(0.25, roundRate(moviEl.playbackRate) - 0.1)
+      // 整数(十分位)计算避免浮点误差：1.1+0.1 若直接算得 1.2000000000000002，
+      // movi 内部会存这个值并原样显示；(tenths±1)/10 得到精确的 1.2
+      const tenths = Math.round(roundRate(moviEl.playbackRate) * 10)
+      moviEl.playbackRate = Math.max(0.25, (tenths - 1) / 10)
       showSpeedTip(moviEl.playbackRate)
     }
   } else if (e.key === 'x' || e.key === 'X') {
@@ -159,7 +162,8 @@ function onKeydown(e: KeyboardEvent) {
   } else if (e.key === 'c' || e.key === 'C') {
     e.preventDefault()
     if (moviEl && typeof moviEl.playbackRate === 'number') {
-      moviEl.playbackRate = Math.min(2, roundRate(moviEl.playbackRate) + 0.1)
+      const tenths = Math.round(roundRate(moviEl.playbackRate) * 10)
+      moviEl.playbackRate = Math.min(2, (tenths + 1) / 10)
       showSpeedTip(moviEl.playbackRate)
     }
   } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
@@ -200,9 +204,10 @@ function roundRate(r: number) {
   return Math.round(r * 10) / 10
 }
 
-// 倍速提示：左下角 statusText 显示 1.5 秒后消失
+// 倍速提示：左下角 statusText 显示 1.5 秒后消失（tenths/10 保证显示精确的一位小数）
 function showSpeedTip(rate: number) {
-  player.statusText = `速度 ${roundRate(rate)}x`
+  const tenths = Math.round(rate * 10)
+  player.statusText = `速度 ${tenths / 10}x`
   setTimeout(() => {
     if (player.statusText.startsWith('速度 ')) player.statusText = ''
   }, 1500)
