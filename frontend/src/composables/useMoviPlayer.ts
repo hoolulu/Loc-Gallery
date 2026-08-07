@@ -182,17 +182,74 @@ export function createMoviPlayer(
       video.style.zIndex = '0'
       host.appendChild(video)
     }
-    if (!video.dataset.rateSynced) {
-      video.dataset.rateSynced = '1'
-      video.addEventListener('ratechange', () => {
+    if (!video.dataset.ctrlSynced) {
+      video.dataset.ctrlSynced = '1'
+      // h5player 等油猴脚本直接操作 <video> 的 playbackRate/currentTime/paused/volume，
+      // movi 是独立解码时钟（video 是空壳、无媒体源），必须把这些操作桥接回 movi 元素。
+      // 注意：video 无媒体时 currentTime 赋值不触发 seeking/seeked，play/pause 也不派发
+      // 事件——所以 seek 用「属性 setter 代理」、播放用「方法代理」；倍速/音量仍走事件
+      // （ratechange/volumechange 在无媒体时也会派发，已实测）。全部带状态差判断防回环。
+      const safe = (fn: () => void) => {
         try {
-          if (node.playbackRate !== video.playbackRate) {
-            node.playbackRate = video.playbackRate
-          }
+          fn()
         } catch {
           // movi 未就绪时忽略
         }
-      })
+      }
+      // 倍速（C/X/Z）：movi setter 会 clamp 到 getMaxAllowedRate（默认上限 2）
+      video.addEventListener('ratechange', () => safe(() => {
+        if (node.playbackRate !== video.playbackRate) node.playbackRate = video.playbackRate
+      }))
+      // 音量（↑/↓/M）
+      video.addEventListener('volumechange', () => safe(() => {
+        if (node.volume !== video.volume) node.volume = video.volume
+        if (node.muted !== video.muted) node.muted = video.muted
+      }))
+      // 快进/快退/逐帧（←/→/Ctrl+←→/D/F）：h5player 给 video.currentTime 赋值，
+      // 无媒体不触发事件 → 代理 setter 直接桥接
+      try {
+        const proto = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'currentTime')
+        if (proto && proto.set) {
+          Object.defineProperty(video, 'currentTime', {
+            configurable: true,
+            get: () => proto.get!.call(video),
+            set: (val: number) => {
+              proto.set!.call(video, val)
+              safe(() => {
+                if (Math.abs(node.currentTime - val) > 0.3) node.currentTime = val
+              })
+            },
+          })
+        }
+      } catch {
+        // 代理失败时退化为事件监听（有媒体源的环境）
+        video.addEventListener('seeked', () => safe(() => {
+          if (Math.abs(node.currentTime - video.currentTime) > 0.3) node.currentTime = video.currentTime
+        }))
+      }
+      // 播放/暂停（空格/K）：h5player 调 video.play()/pause() → 方法代理
+      const origPlay = video.play.bind(video)
+      video.play = (async () => {
+        try {
+          await origPlay()
+        } catch {
+          /* 无媒体时 play() 可能 rejected */
+        }
+        safe(() => {
+          if (node.paused) void node.play()
+        })
+      }) as typeof video.play
+      const origPause = video.pause.bind(video)
+      video.pause = (() => {
+        try {
+          origPause()
+        } catch {
+          /* 忽略 */
+        }
+        safe(() => {
+          if (!node.paused) node.pause()
+        })
+      }) as typeof video.pause
     }
   }
 
