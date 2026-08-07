@@ -158,7 +158,8 @@ watch(visible, (v) => {
     </button>
     <div class="path-tip-preview">
       <!-- 悬浮预览启用：预览区仅在视频比例就绪后渲染（直接以正确比例出现，
-           不经过 16:9 占位 → 真实比例的横→竖变化）；就绪后 spinner → 视频淡入 -->
+           不经过 16:9 占位 → 真实比例的横→竖变化，也不在加载中显示缩略图）；
+           比例未就绪时预览区留空（浮层仅显示文字），就绪后 spinner → 视频淡入 -->
       <div
         v-if="hoverPreviewEnabled && previewRatio"
         class="path-tip-preview--placeholder"
@@ -167,8 +168,8 @@ watch(visible, (v) => {
       >
         <span v-if="placeholderLoading" class="hover-preview-spinner" />
       </div>
-      <!-- 悬浮预览关闭：回到缩略图展示 -->
-      <template v-else>
+      <!-- 悬浮预览关闭：回到缩略图展示（仅在设置关闭预览时） -->
+      <template v-else-if="!hoverPreviewEnabled">
         <img
           v-if="item.thumbReady || item.thumbVersion"
           :src="thumbUrl(item.id, item.thumbVersion)"

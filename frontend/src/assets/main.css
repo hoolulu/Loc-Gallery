@@ -819,10 +819,6 @@ body.has-selection .card-album-badge {
   /* 视频已就绪：占位淡出（尺寸保留撑布局），视频在其上淡入 */
   opacity: 0;
 }
-.path-tip-preview--placeholder-idle {
-  /* 占位在预览间隙也保留（撑起浮层比例），无 spinner */
-  background: color-mix(in srgb, var(--lg-bg-secondary) 70%, transparent);
-}
 .hover-preview-spinner {
   width: 28px;
   height: 28px;
