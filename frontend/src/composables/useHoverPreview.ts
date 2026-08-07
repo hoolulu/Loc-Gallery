@@ -46,7 +46,9 @@ let segTimer: ReturnType<typeof setTimeout> | null = null
 let onFirstFrame: (() => void) | null = null
 
 /** 每次预览新建独立 <video>：复用元素切换 src 会残留缓冲/事件状态，
- *  导致"先预览别的视频再悬停此视频"时偶发黑屏。新建成本极低。 */
+ *  导致"先预览别的视频再悬停此视频"时偶发黑屏。新建成本极低。
+ *  所有事件回调必须校验「本元素仍是当前活动预览」：快速切换时旧元素的事件
+ *  （尤其 playing）可能延迟到达，若误触发会提前显示新视频（黑屏）。 */
 function createVideo(): HTMLVideoElement {
   const v = document.createElement('video')
   v.className = 'hover-preview-video'
@@ -56,15 +58,17 @@ function createVideo(): HTMLVideoElement {
   // 初始透明：加载/seek 阶段盖在 <img> 上不闪黑，play() 成功后才显示
   v.style.opacity = '0'
   v.addEventListener('error', () => {
-    // 仅预览运行中的错误才静默终止（清空 src 时的正常 abort 不算）
-    if (running) {
+    // 仅当前预览的错误才终止；旧元素延迟到达的 error 不影响新预览
+    if (running && v === video) {
       previewFailed.value = true
       stopNow()
     }
   })
   // 真正有帧渲染（playing）才显示视频；play() resolve 不代表首帧就绪
   v.addEventListener('playing', () => {
-    if (running && onFirstFrame) {
+    // 必须校验 v === video：快速切换时旧元素的 playing 可能延迟到达，
+    // 若误触发 onFirstFrame 会提前显示新视频 → 黑屏
+    if (running && v === video && onFirstFrame) {
       const fn = onFirstFrame
       onFirstFrame = null
       fn()
@@ -73,10 +77,10 @@ function createVideo(): HTMLVideoElement {
   // 视频尺寸就绪（videoWidth/videoHeight 可用）时刷新宽高比：
   // loadedmetadata 阶段尺寸可能还是 0，resize 事件保证拿到真实比例（竖屏/超宽屏自适应）
   v.addEventListener('resize', () => {
-    if (running) setPreviewRatioFromVideo(v)
+    if (running && v === video) setPreviewRatioFromVideo(v)
   })
   v.addEventListener('loadeddata', () => {
-    if (running) setPreviewRatioFromVideo(v)
+    if (running && v === video) setPreviewRatioFromVideo(v)
   })
   return v
 }
