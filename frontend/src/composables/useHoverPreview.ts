@@ -54,7 +54,7 @@ function setPlaceholderLoading(v: boolean) {
 function setPreviewRatioFromVideo(v: HTMLVideoElement) {
   const w = v.videoWidth
   const h = v.videoHeight
-  if (w > 0 && h > 0) previewRatio.value = w / h
+  if (w > 0 && h > 0 && previewRatio.value !== w / h) previewRatio.value = w / h
 }
 
 function getVideo(): HTMLVideoElement {
@@ -69,6 +69,14 @@ function getVideo(): HTMLVideoElement {
     video.addEventListener('error', () => {
       // 仅预览运行中的错误才静默终止（清空 src 时的正常 abort 不算）
       if (running) stopNow()
+    })
+    // 视频尺寸就绪（videoWidth/videoHeight 可用）时刷新宽高比：
+    // loadedmetadata 阶段尺寸可能还是 0，resize 事件保证拿到真实比例（竖屏/超宽屏自适应）
+    video.addEventListener('resize', () => {
+      if (running) setPreviewRatioFromVideo(video!)
+    })
+    video.addEventListener('loadeddata', () => {
+      if (running) setPreviewRatioFromVideo(video!)
     })
   }
   return video
@@ -139,6 +147,8 @@ function runMontage(v: HTMLVideoElement, duration: number, positions: number[], 
         .play()
         .then(() => {
           if (running) {
+            // 播放时 videoWidth/videoHeight 一定可用：补最后一次比例刷新
+            setPreviewRatioFromVideo(v)
             v.style.opacity = '1'
             setPlaceholderLoading(false) // 视频就绪，隐藏「加载中」占位
           }
