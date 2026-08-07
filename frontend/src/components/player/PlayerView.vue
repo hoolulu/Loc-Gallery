@@ -133,7 +133,42 @@ function onKeydown(e: KeyboardEvent) {
       target.tagName === 'SELECT' ||
       target.isContentEditable)
   if (isEditable) return
-  if (e.key === 'Escape') {
+
+  const moviEl = player.moviPlayer?.getElement() as unknown as
+    | { playbackRate?: number; currentTime?: number; toggleFullscreen?: () => Promise<void> | void }
+    | null
+    | undefined
+
+  // 倍速快捷键：Z 减速 / X 正常速度 / C 加速（0.1 步进）。
+  // movi 的 playbackRate setter 内部会 clamp 到 getMaxAllowedRate（默认上限 2）。
+  // 注意：播放页已设 nohotkeys（html5_disable_movi_hotkeys 默认开），movi 内置
+  // 快捷键（z/x 字幕延迟等）不冲突；焦点在输入框时上面已拦截。
+  if (e.key === 'z' || e.key === 'Z') {
+    e.preventDefault()
+    if (moviEl && typeof moviEl.playbackRate === 'number') {
+      moviEl.playbackRate = Math.max(0.25, roundRate(moviEl.playbackRate) - 0.1)
+      showSpeedTip(moviEl.playbackRate)
+    }
+  } else if (e.key === 'x' || e.key === 'X') {
+    e.preventDefault()
+    if (moviEl && typeof moviEl.playbackRate === 'number') {
+      moviEl.playbackRate = 1
+      showSpeedTip(1)
+    }
+  } else if (e.key === 'c' || e.key === 'C') {
+    e.preventDefault()
+    if (moviEl && typeof moviEl.playbackRate === 'number') {
+      moviEl.playbackRate = Math.min(2, roundRate(moviEl.playbackRate) + 0.1)
+      showSpeedTip(moviEl.playbackRate)
+    }
+  } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    // 左右方向键：快退/快进（Ctrl+左右 = 30 秒，默认 5 秒）
+    e.preventDefault()
+    if (moviEl && typeof moviEl.currentTime === 'number') {
+      const delta = e.ctrlKey ? 30 : 5
+      moviEl.currentTime += e.key === 'ArrowRight' ? delta : -delta
+    }
+  } else if (e.key === 'Escape') {
     e.preventDefault()
     void cancelPlayback()
   } else if (e.key === 'Enter') {
@@ -157,6 +192,19 @@ function onKeydown(e: KeyboardEvent) {
 function onPageHide() {
   const { onPageHide: save } = usePlayback()
   void save()
+}
+
+// 0.1 步进取整，避免浮点累积误差（1.1+0.1 → 1.2 而非 1.2000000000000002）
+function roundRate(r: number) {
+  return Math.round(r * 10) / 10
+}
+
+// 倍速提示：左下角 statusText 显示 1.5 秒后消失
+function showSpeedTip(rate: number) {
+  player.statusText = `速度 ${roundRate(rate)}x`
+  setTimeout(() => {
+    if (player.statusText.startsWith('速度 ')) player.statusText = ''
+  }, 1500)
 }
 
 // 画面区滚轮：下滚快进、上滚回退（幅度见设置 html5_wheel_seek_sec）

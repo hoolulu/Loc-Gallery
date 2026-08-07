@@ -98,8 +98,6 @@ export function createMoviPlayer(
       // 就绪后 movi 可能已按"移动端布局状态"重排中心按钮（96px 覆盖），
       // 每次状态变化都重新钉一次 inline 覆盖，保证三角形/进度条样式不被覆盖。
       if (el?.shadowRoot) applyInlineOverrides(el.shadowRoot)
-      // 就绪后 video 元素才完整，幂等暴露到 light DOM（h5player 才能找到）+ 同步倍速
-      if (el) exposeVideoAndSyncRate(el, host)
       if (!readyFired && (state === 'ready' || state === 'playing')) {
         readyFired = true
         handlers.onReady?.()
@@ -156,101 +154,6 @@ export function createMoviPlayer(
     bindEvents(node)
     host.appendChild(node)
     injectCenterButtonStyle(node)
-    exposeVideoAndSyncRate(node, host)
-  }
-
-  /** 把 movi 内部 <video> 暴露到 light DOM，并同步倍速给 movi。
-   *  背景：h5player 等油猴脚本用 document.querySelector('video') 找视频——列表页
-   *  预览是普通 <video> 所以生效；播放页 movi 的 video 在 shadowRoot 内（默认
-   *  display:none，canvas 渲染）脚本找不到。且 movi 用独立解码时钟（_playbackRate
-   *  驱动 WASM 解码），直接改 video.playbackRate 不会变速——需监听 video 的
-   *  ratechange，同步给元素 playbackRate（MoviElement setter → updatePlaybackRate）。
-   *  幂等：video 已在 light DOM / 已绑 ratechange 则跳过（statechange 会重复调用）。 */
-  function exposeVideoAndSyncRate(node: MoviElement, host: HTMLElement) {
-    const root = node.shadowRoot
-    const video = root?.querySelector<HTMLVideoElement>('video')
-    if (!video) return
-    if (video.parentElement !== host) {
-      // 移到 light DOM：保留 movi 的 inline 样式（display 由 movi 在 canvas/video
-      // 渲染模式间切换），补绝对定位避免在流内占位、保证铺满宿主。
-      video.style.position = 'absolute'
-      video.style.left = '0'
-      video.style.top = '0'
-      video.style.width = '100%'
-      video.style.height = '100%'
-      video.style.objectFit = 'contain'
-      video.style.zIndex = '0'
-      host.appendChild(video)
-    }
-    if (!video.dataset.ctrlSynced) {
-      video.dataset.ctrlSynced = '1'
-      // h5player 等油猴脚本直接操作 <video> 的 playbackRate/currentTime/paused/volume，
-      // movi 是独立解码时钟（video 是空壳、无媒体源），必须把这些操作桥接回 movi 元素。
-      // 注意：video 无媒体时 currentTime 赋值不触发 seeking/seeked，play/pause 也不派发
-      // 事件——所以 seek 用「属性 setter 代理」、播放用「方法代理」；倍速/音量仍走事件
-      // （ratechange/volumechange 在无媒体时也会派发，已实测）。全部带状态差判断防回环。
-      const safe = (fn: () => void) => {
-        try {
-          fn()
-        } catch {
-          // movi 未就绪时忽略
-        }
-      }
-      // 倍速（C/X/Z）：movi setter 会 clamp 到 getMaxAllowedRate（默认上限 2）
-      video.addEventListener('ratechange', () => safe(() => {
-        if (node.playbackRate !== video.playbackRate) node.playbackRate = video.playbackRate
-      }))
-      // 音量（↑/↓/M）
-      video.addEventListener('volumechange', () => safe(() => {
-        if (node.volume !== video.volume) node.volume = video.volume
-        if (node.muted !== video.muted) node.muted = video.muted
-      }))
-      // 快进/快退/逐帧（←/→/Ctrl+←→/D/F）：h5player 给 video.currentTime 赋值，
-      // 无媒体不触发事件 → 代理 setter 直接桥接
-      try {
-        const proto = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'currentTime')
-        if (proto && proto.set) {
-          Object.defineProperty(video, 'currentTime', {
-            configurable: true,
-            get: () => proto.get!.call(video),
-            set: (val: number) => {
-              proto.set!.call(video, val)
-              safe(() => {
-                if (Math.abs(node.currentTime - val) > 0.3) node.currentTime = val
-              })
-            },
-          })
-        }
-      } catch {
-        // 代理失败时退化为事件监听（有媒体源的环境）
-        video.addEventListener('seeked', () => safe(() => {
-          if (Math.abs(node.currentTime - video.currentTime) > 0.3) node.currentTime = video.currentTime
-        }))
-      }
-      // 播放/暂停（空格/K）：h5player 调 video.play()/pause() → 方法代理
-      const origPlay = video.play.bind(video)
-      video.play = (async () => {
-        try {
-          await origPlay()
-        } catch {
-          /* 无媒体时 play() 可能 rejected */
-        }
-        safe(() => {
-          if (node.paused) void node.play()
-        })
-      }) as typeof video.play
-      const origPause = video.pause.bind(video)
-      video.pause = (() => {
-        try {
-          origPause()
-        } catch {
-          /* 忽略 */
-        }
-        safe(() => {
-          if (!node.paused) node.pause()
-        })
-      }) as typeof video.pause
-    }
   }
 
   /** 播放器 UI 定制（shadowRoot 为 open 模式，可注入覆盖样式；appendChild 后
