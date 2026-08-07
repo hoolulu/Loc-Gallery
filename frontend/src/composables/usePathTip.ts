@@ -102,23 +102,30 @@ function afterLayout(tipEl: HTMLElement | null) {
   const body = tipEl.querySelector('.path-tip-body') as HTMLElement | null
   let w = 0
   if (preview) {
-    // 悬浮预览占位是固定 16:9 容器；缩略图模式则按图片自然尺寸
     const img = preview.querySelector('img') as HTMLImageElement | null
-    const pr = preview.getBoundingClientRect()
-    if (pr.width > 0) {
-      w = Math.round(pr.width)
-    } else if (img) {
-      const ir = img.getBoundingClientRect()
-      w = Math.round(ir.width)
-      if (w <= 0 && img.naturalWidth > 0) {
-        const maxW = Math.min(window.innerWidth * 0.88, 920)
-        const maxH = Math.min(window.innerHeight * 0.7, 720)
-        const scale = Math.min(1, maxW / img.naturalWidth, maxH / img.naturalHeight)
-        w = Math.round(img.naturalWidth * scale)
-      }
+    const placeholder = preview.querySelector(
+      '.path-tip-preview--placeholder',
+    ) as HTMLElement | null
+    // 占位（自适应比例）优先：宽度即预览区真实宽度，避免被下方 body 文字撑宽
+    if (placeholder && placeholder.offsetWidth > 0) {
+      w = Math.round(placeholder.offsetWidth)
     } else {
-      // 占位模式兜底：16:9 比例
-      w = Math.round(preview.offsetWidth || 0)
+      const pr = preview.getBoundingClientRect()
+      if (pr.width > 0) {
+        w = Math.round(pr.width)
+      } else if (img) {
+        const ir = img.getBoundingClientRect()
+        w = Math.round(ir.width)
+        if (w <= 0 && img.naturalWidth > 0) {
+          const maxW = Math.min(window.innerWidth * 0.88, 920)
+          const maxH = Math.min(window.innerHeight * 0.7, 720)
+          const scale = Math.min(1, maxW / img.naturalWidth, maxH / img.naturalHeight)
+          w = Math.round(img.naturalWidth * scale)
+        }
+      } else {
+        // 占位模式兜底：16:9 比例
+        w = Math.round(preview.offsetWidth || 0)
+      }
     }
   }
   if (w <= 0) w = 640 // 极端兜底，避免浮层宽度塌陷

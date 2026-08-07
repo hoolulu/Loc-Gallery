@@ -787,6 +787,9 @@ body.has-selection .card-album-badge {
 .path-tip-preview {
   position: relative;
   line-height: 0;
+  /* 宽度跟随占位（按视频比例自适应），不被下方文字撑大：fixed 浮层 shrink-to-fit 时
+     若 preview 是普通 block 会被 body 文字撑宽，导致竖屏视频浮层不收缩 */
+  width: fit-content;
   max-width: min(88vw, 1104px);
 }
 .path-tip-preview img {
