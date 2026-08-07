@@ -158,7 +158,8 @@ export function createMoviPlayer(
    *  ① 中间播放按钮：暂停时只显示三角形（去掉圆形背景），播放中不出现暂停图标；
    *  ② 三角形放大到 150px（原生 50px 的 3 倍）并圆角化（CSS d 覆盖 path，Chromium 106+ 支持）；
    *  ③ 已播放进度条改白色（其余进度条保持 movi 原生样式与交互，截图功能由
-   *     setup 的 thumb 属性提供，与样式无关）。 */
+   *     setup 的 thumb 属性提供，与样式无关）；
+   *  ④ 去掉载入转圈动画（隐藏 .movi-loader-container）。 */
   function injectCenterButtonStyle(node: MoviElement) {
     const root = node.shadowRoot
     if (!root) {
@@ -178,18 +179,25 @@ export function createMoviPlayer(
       .movi-center-icon-pause {
         display: none !important;
       }
-      /* ② 三角形：原生 50px 的 3 倍（150px）且圆角（三尖角用 Q 曲线过渡） */
-      .movi-center-icon-play {
+      /* ② 三角形：原生 50px 的 3 倍（150px）且圆角（三尖角用 Q 曲线过渡）。
+         movi 自身还有 translateX+scale 的 transform（含移动端 !important），
+         这里用更具体的选择器 + !important 保证胜出；width/height 直接撑大 svg。 */
+      .movi-center-play-pause .movi-center-icon-play {
         width: 150px !important;
         height: 150px !important;
         transform: none !important;
       }
-      .movi-center-icon-play path {
+      .movi-center-play-pause .movi-center-icon-play path {
         d: path("M9.5 6.5 L17.8 11.3 Q19.5 12 17.8 12.7 L9.5 17.5 Q8 19 6.5 17.5 L6.5 6.5 Q8 5 9.5 6.5 Z");
       }
-      /* ③ 已播放部分：白色（仅改颜色，轨道/圆点/交互全保持原生） */
+      /* ③ 已播放部分：白色（movi 默认 background: var(--movi-primary)，双保险防渐变） */
       .movi-progress-filled {
         background: #ffffff !important;
+        background-image: none !important;
+      }
+      /* ④ 去掉载入转圈动画（.movi-loader-container 是 64px border-top 旋转圆环） */
+      .movi-loader-container {
+        display: none !important;
       }
     `
     root.appendChild(style)
