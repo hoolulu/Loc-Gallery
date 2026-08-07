@@ -95,6 +95,9 @@ export function createMoviPlayer(
     const onState = (e: Event) => {
       const state = (e as CustomEvent<string>).detail
       handlers.onStateChange?.(state)
+      // 就绪后 movi 可能已按"移动端布局状态"重排中心按钮（96px 覆盖），
+      // 每次状态变化都重新钉一次 inline 覆盖，保证三角形/进度条样式不被覆盖。
+      if (el?.shadowRoot) applyInlineOverrides(el.shadowRoot)
       if (!readyFired && (state === 'ready' || state === 'playing')) {
         readyFired = true
         handlers.onReady?.()
@@ -159,7 +162,12 @@ export function createMoviPlayer(
    *  ② 三角形放大到 150px（原生 50px 的 3 倍）并圆角化（CSS d 覆盖 path，Chromium 106+ 支持）；
    *  ③ 已播放进度条改白色（其余进度条保持 movi 原生样式与交互，截图功能由
    *     setup 的 thumb 属性提供，与样式无关）；
-   *  ④ 去掉载入转圈动画（隐藏 .movi-loader-container）。 */
+   *  ④ 去掉载入转圈动画（隐藏 .movi-loader-container）。
+   *  ⚠️ 关键：movi 在「移动端布局状态」下有 `.movi-center-play-pause svg { width:50px
+   *  !important }` 和 `.movi-center-play-pause { width:96px !important }`（MoviElement.js
+   *  ~11042，点击/控制栏可见等状态会触发），实测会把三角形压到 96px 宽——纯 CSS 覆盖
+   *  不够稳。因此 CSS 注入后必须再用 inline style + important 直接钉死（inline+important
+   *  是最高优先级，任何样式表规则都覆盖不了），并在 ready 时再补一次。 */
   function injectCenterButtonStyle(node: MoviElement) {
     const root = node.shadowRoot
     if (!root) {
@@ -180,14 +188,13 @@ export function createMoviPlayer(
         display: none !important;
       }
       /* ② 三角形：原生 50px 的 3 倍（150px）且圆角（三尖角用 Q 曲线过渡）。
-         movi 自身还有 translateX+scale 的 transform（含移动端 !important），
-         这里用更具体的选择器 + !important 保证胜出；width/height 直接撑大 svg。 */
-      .movi-center-play-pause .movi-center-icon-play {
+         CSS 层仅作常规覆盖；最终尺寸靠下方 inline style 兜底。 */
+      .movi-center-icon-play {
         width: 150px !important;
         height: 150px !important;
         transform: none !important;
       }
-      .movi-center-play-pause .movi-center-icon-play path {
+      .movi-center-icon-play path {
         d: path("M9.5 6.5 L17.8 11.3 Q19.5 12 17.8 12.7 L9.5 17.5 Q8 19 6.5 17.5 L6.5 6.5 Q8 5 9.5 6.5 Z");
       }
       /* ③ 已播放部分：白色（movi 默认 background: var(--movi-primary)，双保险防渐变） */
@@ -201,6 +208,39 @@ export function createMoviPlayer(
       }
     `
     root.appendChild(style)
+    applyInlineOverrides(root)
+  }
+
+  /** 用 inline style + important 钉死关键视觉（最高优先级，movi 样式表无法覆盖）：
+   *  三角形 150px；已播进度条白色。
+   *  ⚠️ 已确认的坑：movi 在「移动端布局状态」（点击/控制栏可见时）会给按钮
+   *  `.movi-center-play-pause { width: 96px }`，按钮是 flex 容器，svg 是 flex item，
+   *  默认 flex-shrink 会把 150px 图标收缩到 96px（实测 96×150）——只设 width/height
+   *  无效，必须同时：① 按钮尺寸放开（auto）② icon 加 flex:none + min-width/min-height。 */
+  function applyInlineOverrides(root: ShadowRoot) {
+    const btn = root.querySelector<HTMLElement>('.movi-center-play-pause')
+    if (btn) {
+      // 放开按钮容器约束，避免 flex 收缩图标
+      btn.style.setProperty('width', 'auto', 'important')
+      btn.style.setProperty('height', 'auto', 'important')
+      btn.style.setProperty('min-width', '0', 'important')
+      btn.style.setProperty('min-height', '0', 'important')
+    }
+    const icon = root.querySelector<HTMLElement>('.movi-center-icon-play')
+    if (icon) {
+      icon.style.setProperty('width', '150px', 'important')
+      icon.style.setProperty('height', '150px', 'important')
+      icon.style.setProperty('min-width', '150px', 'important')
+      icon.style.setProperty('min-height', '150px', 'important')
+      icon.style.setProperty('flex', 'none', 'important')
+      icon.style.setProperty('flex-shrink', '0', 'important')
+      icon.style.setProperty('transform', 'none', 'important')
+    }
+    const filled = root.querySelector<HTMLElement>('.movi-progress-filled')
+    if (filled) {
+      filled.style.setProperty('background', '#ffffff', 'important')
+      filled.style.setProperty('background-image', 'none', 'important')
+    }
   }
 
   function play() {
