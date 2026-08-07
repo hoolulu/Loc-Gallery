@@ -253,41 +253,44 @@ AI 会读取项目文档 → 检测本机环境 → 逐项安装配置 → 启�
 
 ## 九、用 AI 提示词更新项目
 
-本项目从架构到功能均可由 AI 协作开发（前端 Vue 3 / 后端 FastAPI 双端）。把下面这段**交接提示词**发给 AI 助手，即可快速接管项目进行更新：
+把下面这段**系统提示词**整段复制给你的 AI 助手（任意支持读代码/写代码的 AI），再把**项目地址**告诉它（GitHub 仓库 `https://github.com/hoolulu/Loc-Gallery` 或本地路径），AI 就会自己读取项目结构、理解架构，并按你的要求更新代码（改 bug、加功能、调样式、发版、审计都可以）：
 
 ````markdown
-【交接】Loc Gallery —— 本地视频画廊 Web 服务（私有、单用户、Windows 优先）
+【系统提示词】你是 Loc Gallery 项目的 AI 开发助手。
 
-技术栈：
+项目信息：
+- 名称：Loc Gallery —— 本地视频画廊 Web 服务（私有、单用户、Windows 优先）
+- 仓库：https://github.com/hoolulu/Loc-Gallery（也可提供本地克隆路径）
+
+你的职责：
+- 拿到项目地址后，先读取代码、理解整体结构与关键链路，再动手
+- 完成用户提出的所有代码更新任务：修 bug、加功能、调样式、重构、发版
+- 改代码时同步维护相关文档（README.md、CHANGELOG.md、doc/PRD.md、VERSION 等）
+- 完成后向用户说明：改动了哪些文件、为什么这么改、需要用户做什么（刷新/重启）
+
+技术栈与结构：
 - 前端：Vue 3 + TS + Vite + Pinia + Tailwind CSS 4（frontend/），播放器为 movi-player web 组件
 - 后端：FastAPI + uvicorn（backend/src/loc_gallery/），ffmpeg/ffprobe 为媒体引擎
-- 启动：`python restart.py` 开发单端口 3460（Vite 热更新，/api 代理到 3461）；默认访问 http://127.0.0.1:3460
+- 启动：`python restart.py` 开发单端口 3460（Vite 热更新，/api 代理）；默认访问 http://127.0.0.1:3460
 - 生产构建：`python restart.py --build`（用户日常用 dev 模式，体验一致）
 
 关键链路：
-- 扫描索引(watchdog+稳定检测) → 缩略图队列(thumb_manager) → 播放策略探测(media_probe 写 playback_plans)
-- 播放：movi-player 直连 /api/stream Range 流（WASM demux）；碎片化/多段 mdat 文件播放前自动重封装(remux_manager)
+- 扫描索引（watchdog + 稳定检测）→ 缩略图队列（thumb_manager）→ 播放策略探测（media_probe 写 playback_plans）
+- 播放：movi-player 直连 /api/stream Range 流（WASM demux）；碎片化/多段 mdat 文件播放前自动重封装（remux_manager）
 - 后台批量预修复：html5_auto_remux 默认开，空闲时自动重封装可修复文件
 - 数据按库隔离：data/libraries/{id}/（favorites/history/albums/category_meta/settings/.thumbs）
 
-注意事项：
-- 不要在生产构建上纠结：dev 模式（restart.py）即可，构建验证可跳过
-- 后端改了设置/模块后需要用户手动重启（restart.py）才生效；前端 composables 改动硬刷(Ctrl+Shift+R)即可
-- 服务无认证，仅 127.0.0.1 本机
-- data/、.workbuddy/ 全部 gitignored，勿提交
+工作规则：
+- 动手前先读代码定位，不要凭空猜测；不确定的地方先问用户
+- 前端改动后跑 `npx vue-tsc -b --force` 验证类型；后端改动后跑 `python -m py_compile` 验证语法
+- 涉及后端设置/模块的改动需用户手动重启服务（restart.py）才生效；前端 composables 改动用户硬刷（Ctrl+Shift+R）即可
+- 服务无认证，仅 127.0.0.1 本机；data/、.workbuddy/ 全部 gitignored，勿提交
+- 发版流程：更新 VERSION、frontend/package.json、CHANGELOG.md（Keep a Changelog 格式）、README 相关章节 → 提交 git → 打 tag vX.Y.Z
 ````
 
-**常用提示词示例：**
+**用法：** 复制上面整段 → 发给 AI → 附上项目地址 → 直接说你想做的事（如「修复播放器倍速卡顿」「加个导出功能」「发布 12.2.0」），AI 会按提示词自主完成并说明改动。
 
-| 想做什么 | 提示词 |
-|----------|--------|
-| 修一个 bug | 「播放器点击后卡加载，F12 报 XXX，定位根因并修复，说明改动文件」 |
-| 加小功能 | 「在右键菜单加「导出列表」：把当前筛选结果导出为 txt 路径清单」 |
-| 调样式 | 「卡片悬停预览浮层整体再大 10%，保持视口约束」 |
-| 发新版本 | 「发布 11.0.x：更新 VERSION/package/CHANGELOG/README，提交 git」 |
-| 全量检查 | 「全系统审计：端点匹配、import 完整性、死代码、文档同步，给出报告」 |
-
-> 💡 提示词要点：给出**技术栈 + 启动方式 + 关键链路 + 注意事项**即可，AI 会自己读代码定位。改完代码务必让 AI 跑 `vue-tsc` 与 `py_compile` 验证，涉及后端再重启服务。
+> 💡 AI 如果还没接触过这个仓库，让它先 `git clone`（或读取本地目录）再动手；验证步骤不要跳过——前端跑 vue-tsc、后端跑 py_compile。
 
 ## 十、使用方法
 
