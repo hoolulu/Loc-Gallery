@@ -16,8 +16,9 @@
   --lg-bg-header: #0f0f0f;
   --lg-bg-player: #000000;
   --lg-bg-overlay: rgba(0, 0, 0, 0.72);
-  /* 悬停预览「加载中」背景：比 UI 背景略亮，贴近视频平均亮度，淡入视频时不突兀 */
-  --lg-hover-preview-bg: #3a3a3a;
+  /* 悬停预览「加载中」背景：暖灰调（贴近肤色色温）+ 明显增亮，
+     大部分视频以肤色为主（亮度≈200），纯深灰过渡会暗→亮跳变 + 色温跳变 */
+  --lg-hover-preview-bg: #6e6a5e;
   --lg-text-primary: #f1f1f1;
   --lg-text-secondary: #aaaaaa;
   --lg-text-muted: #717171;
