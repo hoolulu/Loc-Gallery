@@ -22,44 +22,44 @@ SETTINGS_FILE = DATA_DIR / "settings.json"
 LOG_FILE = PROJECT_ROOT / "logs" / "server.log"
 PID_FILE = PROJECT_ROOT / ".server.pid"
 
-HLS_CACHE_MAX_BYTES = 2 * 1024 * 1024 * 1024  # 单库 HLS 切片上限 2GB（超出 LRU 淘汰）
-LARGE_FILE_HLS_BYTES = 300 * 1024 * 1024  # 300 MB
-HLS_LARGE_H264 = False  # 大文件 H.264 是否强制 HLS（HTML5）
-HLS_MOOV_END_H264 = False  # 索引在末尾的 H.264 是否强制 HLS（HTML5）
-# 碎片化 MP4：external=本地播放器（省磁盘），hls=边切边播
-HTML5_FRAGMENTED_MP4 = "external"
 HTML5_PLAYLIST_AUTOPLAY = True  # HTML5 播放页列表播完是否自动下一集
 HTML5_RESUME_PLAYBACK = True  # HTML5 是否记忆播放位置并续播
 HTML5_WHEEL_SEEK_SEC = 5  # 播放画面区滚轮每次快进/快退秒数（0=关闭）
-HTML5_MODERN_CODECS_DIRECT = True  # AV1/HEVC/VP9 在 MP4/WebM 中尝试浏览器直连（实验）
 HTML5_PLAYER_PREV_KEY = "."  # 播放页上一个
 HTML5_PLAYER_NEXT_KEY = "/"  # 播放页下一个
 # movi-player 内置键盘快捷键（空格/方向键/z/x 等）。与油猴等全局快捷键脚本冲突时设 False
 # 关闭后键位完全交给宿主脚本接管（on-screen 控件不受影响，仅键盘失效）
 HTML5_DISABLE_MOVI_HOTKEYS = True
+# 悬停缩略图多段视频预览（原生 <video> 直连 Range 流，无切片/无预生成；False 关闭）
+HTML5_HOVER_PREVIEW = True
+# 预览蒙太奇：段数（在 15%~85% 区间均匀分布）与每段秒数
+HTML5_HOVER_PREVIEW_SEGMENTS = 5
+HTML5_HOVER_PREVIEW_SEGMENT_SEC = 5
+# 后台空闲时自动批量重封装 remuxable 文件（多段 mdat/碎片化 MP4 一次修复永久直连）
+HTML5_AUTO_REMUX = True
 
 PORT = int(os.environ.get("LOC_GALLERY_PORT", "3460"))
 HOST = "127.0.0.1"
 
-POTPLAYER_PATH = Path("")
-POTPLAYER_CANDIDATES = [
+# 外部播放器（浏览器无法硬解的编码如 mpeg2/vc1/wmv 时兜底调用；默认自动检测 PotPlayer）
+EXTERNAL_PLAYER_PATH = Path("")
+EXTERNAL_PLAYER_CANDIDATES = [
     Path(r"C:\Program Files\DAUM\PotPlayer\PotPlayerMini64.exe"),
     Path(r"C:\Program Files\DAUM\PotPlayer\PotPlayer64.exe"),
     Path(r"D:\Program Files\DAUM\PotPlayer\PotPlayerMini64.exe"),
     Path(r"D:\Program Files\DAUM\PotPlayer\PotPlayer64.exe"),
     Path(r"C:\Program Files (x86)\DAUM\PotPlayer\PotPlayerMini.exe"),
 ]
-PLAYER_MODE = "html5"
 
 
-def detect_potplayer_path() -> str:
-    """探测本机 PotPlayer 可执行文件路径。"""
-    configured = str(POTPLAYER_PATH or "").strip()
+def detect_external_player_path() -> str:
+    """探测本机外部播放器可执行文件路径（默认找 PotPlayer，可被用户配置覆盖）。"""
+    configured = str(EXTERNAL_PLAYER_PATH or "").strip()
     if configured:
         p = Path(configured)
         if p.is_file():
             return str(p)
-    for candidate in POTPLAYER_CANDIDATES:
+    for candidate in EXTERNAL_PLAYER_CANDIDATES:
         if candidate.is_file():
             return str(candidate)
     return ""
@@ -95,7 +95,6 @@ IGNORE_DIRS = {
 
 # 兼容旧 import
 THUMB_DIR = DATA_DIR / ".thumbs"
-HLS_CACHE_DIR = DATA_DIR / "cache" / "hls"
 PLAYBACK_PLANS_FILE = DATA_DIR / "cache" / "playback_plans.json"
 THUMB_INDEX_FILE = THUMB_DIR / "index.json"
 CATEGORY_META_FILE = DATA_DIR / "category_meta.json"
@@ -134,10 +133,6 @@ def thumb_dir(library_id: str) -> Path:
 
 def thumb_index_file(library_id: str) -> Path:
     return thumb_dir(library_id) / "index.json"
-
-
-def hls_cache_dir(library_id: str) -> Path:
-    return library_data_dir(library_id) / "cache" / "hls"
 
 
 def playback_plans_file(library_id: str) -> Path:

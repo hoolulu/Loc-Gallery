@@ -38,7 +38,7 @@ export const useUiStore = defineStore('ui', () => {
 
   const nonStandardRemuxable = ref(false)
 
-  let nonStandardResolver: ((choice: 'remux' | 'potplayer' | 'cancel') => void) | null = null
+  let nonStandardResolver: ((choice: 'remux' | 'external' | 'cancel') => void) | null = null
 
 
 
@@ -143,7 +143,7 @@ export const useUiStore = defineStore('ui', () => {
 
   function showNonStandardDialog(opts: { reason?: string; remuxable?: boolean }) {
 
-    return new Promise<'remux' | 'potplayer' | 'cancel'>((resolve) => {
+    return new Promise<'remux' | 'external' | 'cancel'>((resolve) => {
 
       nonStandardReason.value = opts.reason || '该视频为碎片化 MP4，浏览器无法直连。'
 
@@ -159,7 +159,7 @@ export const useUiStore = defineStore('ui', () => {
 
 
 
-  function resolveNonStandard(choice: 'remux' | 'potplayer' | 'cancel') {
+  function resolveNonStandard(choice: 'remux' | 'external' | 'cancel') {
 
     nonStandardOpen.value = false
 

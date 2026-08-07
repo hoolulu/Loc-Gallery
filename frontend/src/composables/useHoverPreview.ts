@@ -1,0 +1,191 @@
+import { useSettingsStore } from '@/stores/settings'
+import { streamUrl } from '@/api/client'
+import type { Video } from '@/types'
+
+/**
+ * 悬停多段视频预览（零预生成 / 零切片 / 后端零改动）。
+ *
+ * 预览画面挂载在悬停大图浮层（PathTip 的 .path-tip-preview）内：全局单实例原生
+ * <video>（muted+playsinline）绝对定位覆盖静态 <img>（img 保留撑布局，预览结束
+ * 即恢复），直连 /api/stream/{id} 的 HTTP Range 流。每段只是把 currentTime 设到
+ * 目标位置，浏览器自动拉该段附近 GOP 数据（本机回环成本几乎为零）。
+ * 蒙太奇段数与每段秒数由设置项 html5_hover_preview_segments / _segment_sec 控制
+ * （默认 4 段 × 3 秒），段位在 15%~85% 区间均匀分布，播完循环，直到鼠标移开。
+ *
+ * 失败兜底：error / seek 超时（4s）→ 静默隐藏，不打断浏览、不弹错。
+ */
+
+// 段位区间（占全片比例，避开片头黑场/片尾字幕）
+const RANGE_START = 0.15
+const RANGE_END = 0.85
+const JITTER = 0.03 // 首段位置随机抖动，避免每次看到同一画面
+const START_DELAY = 220 // 悬停多久才启动（与浮层 220ms 节奏一致）
+const STOP_DELAY = 150 // 移开后多久停止（防止跨卡片快速移动时闪烁）
+const SEEK_TIMEOUT = 4000 // 单段 seek 超时兜底
+const MOUNT_RETRIES = 12 // 等浮层渲染的最大重试次数（×40ms ≈ 480ms）
+const MOUNT_RETRY_MS = 40
+
+/** 在 15%~85% 区间均匀分布 N 个段位比例 */
+function computePositions(count: number): number[] {
+  const n = Math.max(1, Math.min(10, Math.round(count) || 1))
+  if (n <= 1) return [RANGE_START]
+  return Array.from({ length: n }, (_, i) => RANGE_START + ((RANGE_END - RANGE_START) * i) / (n - 1))
+}
+
+let video: HTMLVideoElement | null = null
+let activeId = ''
+let running = false
+let pendingStart: ReturnType<typeof setTimeout> | null = null
+let pendingStop: ReturnType<typeof setTimeout> | null = null
+let seekTimer: ReturnType<typeof setTimeout> | null = null
+let segTimer: ReturnType<typeof setTimeout> | null = null
+
+function getVideo(): HTMLVideoElement {
+  if (!video) {
+    video = document.createElement('video')
+    video.className = 'hover-preview-video'
+    video.muted = true
+    video.playsInline = true
+    video.preload = 'metadata'
+    // 初始透明：加载/seek 阶段盖在 <img> 上不闪黑，play() 成功后才显示
+    video.style.opacity = '0'
+    video.addEventListener('error', () => {
+      // 仅预览运行中的错误才静默终止（清空 src 时的正常 abort 不算）
+      if (running) stopNow()
+    })
+  }
+  return video
+}
+
+function stopNow() {
+  running = false
+  if (pendingStart) {
+    clearTimeout(pendingStart)
+    pendingStart = null
+  }
+  if (pendingStop) {
+    clearTimeout(pendingStop)
+    pendingStop = null
+  }
+  if (seekTimer) {
+    clearTimeout(seekTimer)
+    seekTimer = null
+  }
+  if (segTimer) {
+    clearTimeout(segTimer)
+    segTimer = null
+  }
+  if (video) {
+    video.pause()
+    video.style.opacity = '0' // 恢复透明，供下次预览复用
+    video.removeAttribute('src')
+    video.load()
+    video.remove()
+  }
+  activeId = ''
+}
+
+/** 浮层渲染完成后，其预览区才存在于 DOM */
+function findPreviewContainer(): HTMLElement | null {
+  return document.querySelector<HTMLElement>('.path-tip .path-tip-preview')
+}
+
+function runMontage(v: HTMLVideoElement, duration: number, positions: number[], segSec: number) {
+  const targets = positions.map((p, i) => {
+    const jitter = i === 0 ? (Math.random() * 2 - 1) * JITTER : 0
+    return Math.min(0.9, Math.max(0.08, p + jitter)) * duration
+  })
+
+  const playAt = (i: number) => {
+    if (!running) return
+    const pos = targets[i % targets.length]
+    v.currentTime = pos
+    if (seekTimer) clearTimeout(seekTimer)
+    seekTimer = setTimeout(() => stopNow(), SEEK_TIMEOUT)
+    const onSeeked = () => {
+      if (seekTimer) {
+        clearTimeout(seekTimer)
+        seekTimer = null
+      }
+      if (!running) return
+      // play() 成功后画面已就绪，再显示 video（避免加载/seek 阶段黑屏闪烁）
+      void v
+        .play()
+        .then(() => {
+          if (running) v.style.opacity = '1'
+        })
+        .catch(() => {})
+      if (segTimer) clearTimeout(segTimer)
+      segTimer = setTimeout(() => playAt(i + 1), segSec * 1000)
+    }
+    v.addEventListener('seeked', onSeeked, { once: true })
+  }
+
+  playAt(0)
+}
+
+export function useHoverPreview() {
+  const settings = useSettingsStore()
+
+  function startPreview(videoItem: Video) {
+    if (settings.settings?.html5_hover_preview === false) return
+    if (activeId === videoItem.id && running) return
+    if (pendingStop) {
+      clearTimeout(pendingStop)
+      pendingStop = null
+    }
+    if (pendingStart) clearTimeout(pendingStart)
+    pendingStart = setTimeout(() => {
+      pendingStart = null
+      stopNow()
+      activeId = videoItem.id
+      running = true
+
+      const tryMount = (tries = 0) => {
+        if (!running) return
+        const container = findPreviewContainer()
+        if (!container) {
+          // 浮层（PathTip）有自己的 220ms 显示延迟 + nextTick 渲染，稍等再挂载
+          if (tries < MOUNT_RETRIES) {
+            setTimeout(() => tryMount(tries + 1), MOUNT_RETRY_MS)
+          } else {
+            stopNow()
+          }
+          return
+        }
+        const v = getVideo()
+        container.appendChild(v)
+        v.src = streamUrl(videoItem.id)
+        v.load()
+        const onMeta = () => {
+          if (!running) return
+          const dur = v.duration
+          if (!Number.isFinite(dur) || dur <= 0) {
+            stopNow()
+            return
+          }
+          // 段数/每段秒数从设置读取（后端重启前可能缺失，用默认值兜底）
+          const segCount = Number(settings.settings?.html5_hover_preview_segments)
+          const segSec = Number(settings.settings?.html5_hover_preview_segment_sec)
+          const positions = computePositions(Number.isFinite(segCount) && segCount > 0 ? segCount : 5)
+          const secPerSeg = Number.isFinite(segSec) && segSec > 0 ? segSec : 5
+          runMontage(v, dur, positions, secPerSeg)
+        }
+        if (v.readyState >= 1) onMeta()
+        else v.addEventListener('loadedmetadata', onMeta, { once: true })
+      }
+      tryMount()
+    }, START_DELAY)
+  }
+
+  function stopPreview() {
+    if (pendingStart) {
+      clearTimeout(pendingStart)
+      pendingStart = null
+    }
+    if (pendingStop) clearTimeout(pendingStop)
+    pendingStop = setTimeout(() => stopNow(), STOP_DELAY)
+  }
+
+  return { startPreview, stopPreview }
+}

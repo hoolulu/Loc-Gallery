@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { thumbUrl } from '@/api/client'
 import { usePathTip } from '@/composables/usePathTip'
+import { useHoverPreview } from '@/composables/useHoverPreview'
 import { useGalleryStore } from '@/stores/gallery'
 import { useUiStore } from '@/stores/ui'
 import type { Video } from '@/types'
@@ -22,6 +23,7 @@ const emit = defineEmits<{
 const ui = useUiStore()
 const gallery = useGalleryStore()
 const { scheduleShow, onAnchorLeave } = usePathTip()
+const { startPreview, stopPreview } = useHoverPreview()
 
 const isSelected = computed(() => ui.selectedIds.has(props.video.id))
 const albumCount = computed(() => props.video.albumIds?.length || 0)
@@ -73,8 +75,14 @@ function onCheckChange(e: Event) {
   >
     <div
       class="thumb-wrap relative aspect-video bg-[var(--lg-thumb-placeholder-bg)]"
-      @mouseenter="(e) => scheduleShow(video, e.currentTarget as HTMLElement)"
-      @mouseleave="(e) => onAnchorLeave(e, e.currentTarget as HTMLElement)"
+      @mouseenter="(e) => {
+        scheduleShow(video, e.currentTarget as HTMLElement)
+        startPreview(video)
+      }"
+      @mouseleave="(e) => {
+        onAnchorLeave(e, e.currentTarget as HTMLElement)
+        stopPreview()
+      }"
     >
       <img
         v-if="video.thumbReady"

@@ -136,16 +136,6 @@ def _set_job(job: RemuxJob, **kwargs) -> None:
             setattr(job, k, v)
 
 
-def _release_playback_locks(video_id: str) -> None:
-    try:
-        from loc_gallery import hls_manager
-
-        hls_manager.stop_playback(force=True)
-        hls_manager.purge_cache(video_id)
-    except Exception:
-        pass
-
-
 def _notify_library_sse(library_id: str) -> None:
     try:
         from loc_gallery.server import notify_library_sse
@@ -221,7 +211,6 @@ def _worker(job: RemuxJob) -> None:
     _enter_remux_job(job.library_id)
 
     try:
-        _release_playback_locks(job.video_id)
         _set_job(
             job,
             state="running",
@@ -313,3 +302,94 @@ def start_remux(library_id: str, video_id: str) -> dict:
             name=f"remux-{video_id[:8]}",
         ).start()
     return {"ok": True, "started": started, **get_status(library_id, video_id)}
+
+
+# ---------------------------------------------------------------------------
+# 后台批量预修复（html5_auto_remux）
+# 空闲时静默扫描各库 remuxable 文件并逐个重封装（start_remux 内部已限单并行）。
+# 修复是原地替换、一次性的：完成后播放方案自动刷新为 direct，用户点播即秒开。
+# ---------------------------------------------------------------------------
+
+_auto_remux_thread: threading.Thread | None = None
+_auto_remux_stop = threading.Event()
+_AUTO_REMUX_INTERVAL_SEC = 60  # 轮询间隔
+_AUTO_REMUX_PAUSE_SEC = 5  # 每个文件修复完成后稍候再取下一个
+
+
+def start_auto_remux_worker() -> None:
+    """启动后台批量预修复线程（幂等）。"""
+    global _auto_remux_thread
+    if _auto_remux_thread and _auto_remux_thread.is_alive():
+        return
+    _auto_remux_stop.clear()
+    _auto_remux_thread = threading.Thread(
+        target=_auto_remux_loop,
+        daemon=True,
+        name="auto-remux",
+    )
+    _auto_remux_thread.start()
+
+
+def stop_auto_remux_worker() -> None:
+    _auto_remux_stop.set()
+    if _auto_remux_thread and _auto_remux_thread.is_alive():
+        _auto_remux_thread.join(timeout=3)
+
+
+def _auto_remux_loop() -> None:
+    from loc_gallery.library_store import list_libraries
+    from loc_gallery.scanner import get_all
+    from loc_gallery.settings_store import get_setting
+    from loc_gallery.library_context import set_thread_library
+
+    while not _auto_remux_stop.is_set():
+        _auto_remux_stop.wait(_AUTO_REMUX_INTERVAL_SEC)
+        if _auto_remux_stop.is_set():
+            break
+        if not bool(get_setting("html5_auto_remux")):
+            continue
+        try:
+            for lib in list_libraries():
+                if _auto_remux_stop.is_set():
+                    return
+                _scan_library_for_remux(lib.id, get_all, set_thread_library)
+        except Exception:
+            # 后台任务绝不让异常冒泡杀死线程
+            import traceback
+
+            traceback.print_exc()
+
+
+def _scan_library_for_remux(library_id: str, get_all, set_thread_library) -> None:
+    from loc_gallery.settings_store import get_setting
+    from loc_gallery.media_probe import get_playback_plan
+    from loc_gallery.file_stability import is_ready_for_processing
+
+    set_thread_library(library_id)
+    items = get_all(library_id)
+    for item in items:
+        if _auto_remux_stop.is_set():
+            return
+        if not bool(get_setting("html5_auto_remux")):
+            return
+        # 已修复过的文件跳过（start_remux 对 done 任务直接返回，无需重复探测）
+        status = get_status(library_id, item.id)
+        if status.get("state") in ("queued", "running", "done"):
+            continue
+        path = Path(item.path).resolve()
+        if not path.is_file() or not is_ready_for_processing(path):
+            continue
+        plan = get_playback_plan(path)
+        ok, _reason = can_remux_from_plan(plan)
+        if not ok:
+            continue
+        try:
+            result = start_remux(library_id, item.id)
+            if result.get("ok") and result.get("started"):
+                # 已启动一个修复任务；等待其完成后再取下一个（避免排队风暴）
+                _auto_remux_stop.wait(_AUTO_REMUX_PAUSE_SEC)
+                return
+        except Exception:
+            import traceback
+
+            traceback.print_exc()

@@ -47,28 +47,28 @@ def _static_cache_control(relative_path: str) -> str | None:
     return None
 
 from loc_gallery.category_store import get_meta, set_order, set_sort_mode, set_starred, sort_categories
-from loc_gallery.config import HOST, PORT, POTPLAYER_CANDIDATES, POTPLAYER_PATH, VIDEO_EXTENSIONS, WEB_ROOT
+from loc_gallery.config import HOST, PORT, EXTERNAL_PLAYER_CANDIDATES, EXTERNAL_PLAYER_PATH, VIDEO_EXTENSIONS, WEB_ROOT
 from loc_gallery.range_stream import stream_file_with_disconnect
 
 
-def _resolve_potplayer(settings: dict) -> Path:
-    configured = (settings.get("potplayer_path") or "").strip() or str(POTPLAYER_PATH or "").strip()
+def _resolve_external_player(settings: dict) -> Path:
+    configured = (settings.get("external_player_path") or "").strip() or str(EXTERNAL_PLAYER_PATH or "").strip()
     if configured:
         player = Path(configured)
         if player.is_file():
             return player
         if configured not in (".", ".."):
-            raise HTTPException(500, f"PotPlayer 未找到: {player}")
-    for candidate in POTPLAYER_CANDIDATES:
+            raise HTTPException(500, f"外部播放器未找到: {player}")
+    for candidate in EXTERNAL_PLAYER_CANDIDATES:
         if candidate.is_file():
             return candidate
     raise HTTPException(
         500,
-        "未配置 PotPlayer 路径。请在「设置」中填写 PotPlayerMini64.exe，或切换为「网页 HTML5」播放。",
+        "未配置外部播放器路径。请在「设置」中填写播放器 exe 路径（如 VLC、PotPlayer）。",
     )
 
 
-def _launch_potplayer(player: Path, video_path: str) -> None:
+def _launch_external_player(player: Path, video_path: str) -> None:
     try:
         subprocess.Popen(
             [str(player), video_path],
@@ -76,7 +76,7 @@ def _launch_potplayer(player: Path, video_path: str) -> None:
             close_fds=False,
         )
     except OSError as exc:
-        raise HTTPException(500, f"无法启动 PotPlayer: {exc}") from exc
+        raise HTTPException(500, f"无法启动外部播放器: {exc}") from exc
 from loc_gallery.file_stability import is_incomplete_filename, notify_file_activity, set_stable_callback
 from loc_gallery.favorite_store import (
     batch_favorites,
@@ -119,7 +119,6 @@ from loc_gallery.history_store import (
     remove_history,
     save_position,
 )
-from loc_gallery import hls_manager
 from loc_gallery.format_index import (
     enqueue_missing_format_probe,
     filter_items_by_format,
@@ -142,7 +141,9 @@ from loc_gallery.remux_manager import (
     end_remux_batch,
     get_status as remux_status,
     is_remux_watcher_paused,
+    start_auto_remux_worker,
     start_remux,
+    stop_auto_remux_worker,
 )
 from loc_gallery.library_context import set_thread_library
 from loc_gallery.library_store import (
@@ -301,18 +302,18 @@ class SettingsUpdate(BaseModel):
     thumb_jitter_min: int | None = None
     thumb_jitter_max: int | None = None
     default_page_size: int | None = None
-    potplayer_path: str | None = None
-    player_mode: str | None = None
+    external_player_path: str | None = None
     history_retention_days: int | None = None
-    hls_large_h264: bool | None = None
-    hls_moov_end_h264: bool | None = None
-    html5_fragmented_mp4: str | None = None
     html5_playlist_autoplay: bool | None = None
     html5_resume_playback: bool | None = None
     html5_wheel_seek_sec: int | None = None
-    html5_modern_codecs_direct: bool | None = None
     html5_player_prev_key: str | None = None
     html5_player_next_key: str | None = None
+    html5_disable_movi_hotkeys: bool | None = None
+    html5_hover_preview: bool | None = None
+    html5_hover_preview_segments: int | None = None
+    html5_hover_preview_segment_sec: int | None = None
+    html5_auto_remux: bool | None = None
     ui_theme: str | None = None  # dark | light
     scope: str | None = None  # global | library
 
@@ -487,7 +488,8 @@ async def lifespan(app: FastAPI):
     init_manager(sync_videos=False)
     register_progress_callback(lambda: _broadcast("progress", get_active_library_id()))
     _start_watchers()
-    hls_manager.enforce_cache_limits_all_libraries([lib.id for lib in list_libraries()])
+    # 后台批量预修复：空闲时静默重封装 remuxable 文件（html5_auto_remux 开关控制）
+    start_auto_remux_worker()
 
     def _startup_background() -> None:
         from loc_gallery.thumb_manager import complete_startup_sync
@@ -510,9 +512,9 @@ async def lifespan(app: FastAPI):
     yield
 
     set_stable_callback(None)
+    stop_auto_remux_worker()
     shutdown_format_index()
     shutdown_manager()
-    hls_manager.shutdown()
     _stop_watchers()
 
 
@@ -1557,110 +1559,15 @@ async def api_video_remux_status(video_id: str, library_id: str = Depends(resolv
     return remux_status(library_id, video_id)
 
 
-@app.post("/api/play/prepare/{video_id}")
-async def api_play_prepare(video_id: str, library_id: str = Depends(resolve_library_id)):
-    item = get_by_id(library_id, video_id)
-    if not item:
-        raise HTTPException(404, "视频不存在")
-    plan = await _playback_plan(Path(item.path))
-    if plan["mode"] != "hls":
-        return {"ok": True, "mode": plan["mode"], **plan}
-    result = hls_manager.prepare(
-        video_id,
-        Path(item.path),
-        transcode=bool(plan.get("transcode")),
-        input_format=plan.get("input_format"),
-        input_offset=int((plan.get("structure") or {}).get("h264_offset") or 0),
-    )
-    return {"ok": result.get("ok", True), "mode": "hls", **result}
-
-
-@app.get("/api/play/status/{video_id}")
-async def api_play_status(video_id: str, library_id: str = Depends(resolve_library_id)):
-    return hls_manager.get_status(video_id)
-
-
-@app.post("/api/play/stop")
-async def api_play_stop(library_id: str = Depends(resolve_library_id)):
-    had = hls_manager.stop_playback(force=True)
-    return {"ok": True, "was_active": had}
-
-
-@app.post("/api/play/pause")
-async def api_play_pause(library_id: str = Depends(resolve_library_id)):
-    paused = hls_manager.pause_playback_slicing()
-    return {"ok": True, "paused": paused}
-
-
-class PlayCatchupRequest(BaseModel):
-    position_sec: float = 0.0
-
-
-@app.post("/api/play/resume")
-async def api_play_resume(library_id: str = Depends(resolve_library_id)):
-    resumed = hls_manager.resume_playback_slicing()
-    return {"ok": True, "resumed": resumed}
-
-
-@app.post("/api/play/catchup/{video_id}")
-async def api_play_catchup(
-    video_id: str,
-    body: PlayCatchupRequest,
-    library_id: str = Depends(resolve_library_id),
-):
-    item = get_by_id(library_id, video_id)
-    if not item:
-        raise HTTPException(404, "视频不存在")
-    return hls_manager.catchup_from_position(video_id, Path(item.path), body.position_sec)
-
-
-@app.get("/api/hls/{video_id}/{filename}")
-async def api_hls_file(video_id: str, filename: str, library_id: str = Depends(resolve_library_id)):
-    path = hls_manager.resolve_hls_file(video_id, filename)
-    if not path:
-        raise HTTPException(404, "HLS 文件不存在")
-    media = "application/vnd.apple.mpegurl" if filename.endswith(".m3u8") else "video/mp2t"
-    headers = {"Cache-Control": "no-store"}
-    if filename.endswith(".m3u8"):
-        try:
-            body = hls_manager.normalize_playlist_m3u8(path.read_text(encoding="utf-8"))
-        except OSError:
-            raise HTTPException(404, "HLS 文件不存在") from None
-        return Response(content=body, media_type=media, headers=headers)
-    return FileResponse(path, media_type=media, headers=headers)
-
-
-@app.post("/api/play/{video_id}")
-async def api_play(video_id: str, library_id: str = Depends(resolve_library_id)):
-    item = get_by_id(library_id, video_id)
-    if not item:
-        raise HTTPException(404, "视频不存在")
-
-    settings = load_settings(library_id)
-    if (settings.get("player_mode") or "").strip().lower() in ("html5", "smart"):
-        plan = await _playback_plan(Path(item.path))
-        return {
-            "ok": True,
-            "mode": "html5",
-            "playback": plan,
-            "stream_url": f"/api/stream/{video_id}?library_id={library_id}",
-        }
-
-    player = _resolve_potplayer(settings)
-    _launch_potplayer(player, item.path)
-    record_play(library_id, video_id)
-    return {"ok": True, "mode": "potplayer", "path": item.path}
-
-
 @app.post("/api/play-external/{video_id}")
 async def api_play_external(video_id: str, library_id: str = Depends(resolve_library_id)):
-    """始终使用 PotPlayer 打开（HTML5 模式下也可从播放器面板调用）。"""
+    """始终使用外部播放器打开（HTML5 模式下也可从播放器面板调用）。"""
     item = get_by_id(library_id, video_id)
     if not item:
         raise HTTPException(404, "视频不存在")
     settings = load_settings(library_id)
-    player = _resolve_potplayer(settings)
-    _launch_potplayer(player, item.path)
+    player = _resolve_external_player(settings)
+    _launch_external_player(player, item.path)
     record_play(library_id, video_id)
     return {"ok": True, "path": item.path}
 
@@ -1901,29 +1808,6 @@ async def api_get_settings(
     return merged
 
 
-_PLAYBACK_POLICY_KEYS = frozenset({
-    "html5_modern_codecs_direct",
-    "hls_large_h264",
-    "hls_moov_end_h264",
-    "html5_fragmented_mp4",
-})
-
-
-def _playback_policy_changed(payload: dict, before: dict, after: dict) -> bool:
-    for key in _PLAYBACK_POLICY_KEYS:
-        if key in payload and before.get(key) != after.get(key):
-            return True
-    return False
-
-
-def _rebuild_format_indexes_after_policy_change() -> None:
-    from loc_gallery.library_store import list_libraries
-
-    for lib in list_libraries():
-        rebuild_format_index_from_plans(lib.id)
-        enqueue_missing_format_probe(lib.id)
-
-
 @app.post("/api/settings")
 async def api_save_settings(body: SettingsUpdate, library_id: str = Depends(resolve_library_id)):
     scope = body.scope or "library"
@@ -1944,8 +1828,6 @@ async def api_save_settings(body: SettingsUpdate, library_id: str = Depends(reso
         start_idle_scan_background()
     elif not saved.get("thumb_idle_scan") and old_idle:
         stop_idle_scan_background()
-    if _playback_policy_changed(payload, before, saved):
-        _rebuild_format_indexes_after_policy_change()
     return saved
 
 

@@ -1,6 +1,5 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type Hls from 'hls.js'
 import type { SortMode, Video } from '@/types'
 import type { PlaylistContext } from '@/utils/playlist'
 import type { createMoviPlayer } from '@/composables/useMoviPlayer'
@@ -13,7 +12,6 @@ export const usePlayerStore = defineStore('player', () => {
   const playlist = ref<Video[]>([])
   const playlistSort = ref<SortMode>('page')
   const playlistRandomSeed = ref<number | null>(null)
-  const hlsInstance = ref<Hls | null>(null)
   const activeSliceVideoId = ref<string | null>(null)
   const overlayVisible = ref(false)
   const overlayTitle = ref('')
@@ -101,7 +99,6 @@ export const usePlayerStore = defineStore('player', () => {
     playlist,
     playlistSort,
     playlistRandomSeed,
-    hlsInstance,
     activeSliceVideoId,
     overlayVisible,
     overlayTitle,

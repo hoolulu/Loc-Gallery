@@ -3,7 +3,7 @@ import { useUiStore } from '@/stores/ui'
 
 const ui = useUiStore()
 
-function choose(choice: 'remux' | 'potplayer' | 'cancel') {
+function choose(choice: 'remux' | 'external' | 'cancel') {
   ui.resolveNonStandard(choice)
 }
 </script>
@@ -26,8 +26,8 @@ function choose(choice: 'remux' | 'potplayer' | 'cancel') {
       >
         流复制修复后播放
       </button>
-      <button class="rounded border border-[var(--lg-border)] px-4 py-2 text-sm" @click="choose('potplayer')">
-        用 PotPlayer 打开
+      <button class="rounded border border-[var(--lg-border)] px-4 py-2 text-sm" @click="choose('external')">
+        用外部播放器打开
       </button>
       <button class="rounded px-4 py-2 text-sm text-[var(--lg-text-muted)] lg-hover" @click="choose('cancel')">
         取消

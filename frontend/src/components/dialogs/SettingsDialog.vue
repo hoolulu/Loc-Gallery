@@ -272,47 +272,8 @@ watch(
             <!-- 播放 -->
             <template v-else-if="tab === 'playback'">
               <section class="settings-block">
-                <h3 class="settings-block-title">播放方式</h3>
+                <h3 class="settings-block-title">播放</h3>
                 <div class="settings-grid">
-                  <div class="settings-field settings-field--full">
-                    <span class="settings-field-label">播放器</span>
-                    <div class="player-mode-row">
-                      <label class="player-mode-opt">
-                        <input v-model="form.player_mode" type="radio" value="html5" />
-                        HTML5
-                      </label>
-                      <label class="player-mode-opt">
-                        <input v-model="form.player_mode" type="radio" value="potplayer" />
-                        PotPlayer
-                      </label>
-                    </div>
-                  </div>
-                  <label v-if="form.player_mode === 'potplayer'" class="settings-field settings-field--full">
-                    <span class="settings-field-label">PotPlayer 路径</span>
-                    <input v-model="form.potplayer_path" class="settings-input" placeholder="自动检测" />
-                  </label>
-                  <label class="settings-field">
-                    <span class="settings-field-label">大文件 H.264</span>
-                    <select v-model="form.hls_large_h264" class="settings-input">
-                      <option :value="false">直连</option>
-                      <option :value="true">切片</option>
-                    </select>
-                  </label>
-                  <label class="settings-field">
-                    <span class="settings-field-label">moov 末尾 H.264</span>
-                    <select v-model="form.hls_moov_end_h264" class="settings-input">
-                      <option :value="false">直连</option>
-                      <option :value="true">切片</option>
-                    </select>
-                  </label>
-                  <label class="settings-field">
-                    <span class="settings-field-label">碎片化 MP4</span>
-                    <select v-model="form.html5_fragmented_mp4" class="settings-input">
-                      <option value="external">PotPlayer</option>
-                      <option value="hls">边切边播</option>
-                      <option value="remux">尝试修复</option>
-                    </select>
-                  </label>
                   <label class="settings-field">
                     <span class="settings-field-label">续播</span>
                     <select v-model="form.html5_resume_playback" class="settings-input">
@@ -327,13 +288,25 @@ watch(
                       <option :value="false">关</option>
                     </select>
                   </label>
-                  <div class="settings-field settings-field--full">
-                    <span class="settings-field-label">AV1/HEVC/VP9 直连</span>
-                    <select v-model="form.html5_modern_codecs_direct" class="settings-input">
-                      <option :value="true">开启（实验性，失败自动回退）</option>
-                      <option :value="false">关闭（转码播放）</option>
+                  <label class="settings-field">
+                    <span class="settings-field-label">后台自动修复</span>
+                    <select v-model="form.html5_auto_remux" class="settings-input">
+                      <option :value="true">开（空闲时自动重封装可修复文件）</option>
+                      <option :value="false">关</option>
                     </select>
-                    <p class="settings-field-hint">Chromium 94+ 支持 VP9/AV1；HEVC 建议 104+。</p>
+                  </label>
+                  <label class="settings-field">
+                    <span class="settings-field-label">外部播放器路径</span>
+                    <input
+                      v-model="form.external_player_path"
+                      class="settings-input"
+                      placeholder="自动检测 PotPlayer"
+                    />
+                  </label>
+                  <div class="settings-field settings-field--full">
+                    <p class="settings-field-hint">
+                      浏览器无法硬解的视频（如 mpeg2/VC-1/WMV）会提示用外部播放器打开；可填 VLC、MPC-HC 等任意播放器 exe 路径。
+                    </p>
                   </div>
                 </div>
               </section>
@@ -357,6 +330,39 @@ watch(
                         type="number"
                         min="0"
                         max="120"
+                        class="settings-input"
+                      />
+                      <span class="settings-unit">秒</span>
+                    </div>
+                  </label>
+                  <label class="settings-field">
+                    <span class="settings-field-label">悬停预览</span>
+                    <select v-model="form.html5_hover_preview" class="settings-input">
+                      <option :value="true">开（多段视频预览）</option>
+                      <option :value="false">关（仅静态缩略图）</option>
+                    </select>
+                  </label>
+                  <label class="settings-field">
+                    <span class="settings-field-label">预览段数</span>
+                    <div class="settings-unit-row">
+                      <input
+                        v-model.number="form.html5_hover_preview_segments"
+                        type="number"
+                        min="1"
+                        max="10"
+                        class="settings-input"
+                      />
+                      <span class="settings-unit">段</span>
+                    </div>
+                  </label>
+                  <label class="settings-field">
+                    <span class="settings-field-label">每段时长</span>
+                    <div class="settings-unit-row">
+                      <input
+                        v-model.number="form.html5_hover_preview_segment_sec"
+                        type="number"
+                        min="1"
+                        max="15"
                         class="settings-input"
                       />
                       <span class="settings-unit">秒</span>

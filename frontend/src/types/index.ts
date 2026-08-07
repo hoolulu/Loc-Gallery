@@ -111,19 +111,18 @@ export interface Settings {
   thumb_jitter_min?: number
   thumb_jitter_max?: number
   default_page_size: number
-  potplayer_path: string
-  player_mode: 'html5' | 'potplayer' | 'smart'
+  external_player_path: string
   history_retention_days: number
-  hls_large_h264: boolean
-  hls_moov_end_h264: boolean
-  html5_fragmented_mp4: string
   html5_playlist_autoplay: boolean
   html5_resume_playback: boolean
   html5_wheel_seek_sec: number
-  html5_modern_codecs_direct: boolean
   html5_player_prev_key: string
   html5_player_next_key: string
   html5_disable_movi_hotkeys: boolean
+  html5_hover_preview: boolean
+  html5_hover_preview_segments: number
+  html5_hover_preview_segment_sec: number
+  html5_auto_remux: boolean
   ui_theme: 'dark' | 'light'
   ui_preset?: 'netflix' | 'youtube' | 'spotify'
   [key: string]: unknown
@@ -131,13 +130,7 @@ export interface Settings {
 
 export const FORMAT_FILTER_OPTIONS: { value: string; label: string }[] = [
   { value: '', label: '全部格式' },
-  { value: 'remuxable', label: '多段交错·可修复' },
-  { value: 'transcode', label: '特殊编码（可能转码）' },
-  { value: 'interleaved', label: '多段交错' },
-  { value: 'disguised', label: '伪装格式' },
-  { value: 'fragmented', label: '碎片化' },
   { value: 'unsupported', label: '无法播放' },
-  { value: 'non_standard', label: '任意非标准' },
 ]
 
 export type ViewMode = 'browse' | 'favorites' | 'history' | 'albums' | 'album-detail'

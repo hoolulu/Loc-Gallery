@@ -2,6 +2,54 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [11.0.1] - 2026-08-07
+
+### 重大变更
+
+- **格式区分系统精简**：movi-player 可直连绝大多数文件，格式筛选从 8 项精简为「全部 / 无法播放」；卡片角标仅保留「无法播放」（浏览器硬解不支持的编码），其余可播放/可自动修复的格式不再标记
+- **HLS 链路移除**：删除 `/api/hls/*`、播放 prepare/status/stop/pause/resume/catchup 端点与 `hls_manager` 模块（约 786 行）；`media_probe` 的 HLS 切片 / 转码分支简化——AV1/HEVC/VP9 恒尝试直连，非 MP4 容器统一直连，`mode: hls` 仅作「是否可重封装」判断
+- **PotPlayer 改为通用外部播放器**：`potplayer_path` → `external_player_path`，可填 VLC / MPC-HC / PotPlayer 等任意 exe（未填自动探测）；播放失败弹窗按钮改为「用外部播放器打开」
+- **重封装时机优化**：新增后台批量预修复（`html5_auto_remux`，默认开）——空闲时静默扫描各库可修复文件逐个重封装，点播即秒开，不再需要在播放器里等 1-2 分钟
+
+### 新增
+
+- 设置项「后台自动修复」（`html5_auto_remux`），控制空闲时批量重封装可修复文件
+- 悬停预览增强：浮层整体放大 20%；视频加载/seek 阶段保持透明、画面就绪才显示（消除黑屏闪烁）；预览段数与每段秒数可配置（`html5_hover_preview_segments` / `_segment_sec`，默认 5×5）
+
+### 修复
+
+- `scripts/clean_cache.py` 引用已删除的 `hls_manager` 会报错 → 改为仅清理日志与旧版遗留 HLS 缓存
+- 清理历史遗留设置键（`player_mode` / `hls_large_h264` / `hls_moov_end_h264` / `html5_fragmented_mp4` / `html5_modern_codecs_direct`），`settings.json` 旧键自动过滤
+- 前端移除孤儿 API 封装（`regenerateThumb` / `priorityThumbs` / `getFormatStatus`）与 HLS 死代码（`useHlsThrottle` / `hlsInstance` / `hlsPlaylistUrl` 等）
+
+### 移除
+
+- 前端 HLS 相关死代码与依赖引用；后端 `hls_manager.py` 模块
+
+## [11.0.1] - 2026-08-07
+
+### 重大变更
+
+- **格式区分系统精简**：movi-player 可直连绝大多数文件，格式筛选从 8 项精简为「全部 / 无法播放」；卡片角标仅保留「无法播放」（浏览器硬解不支持的编码），其余可播放/可自动修复的格式不再标记
+- **HLS 链路移除**：删除 `/api/hls/*`、播放 prepare/status/stop/pause/resume/catchup 端点与 `hls_manager` 模块（约 786 行）；`media_probe` 的 HLS 切片 / 转码分支简化——AV1/HEVC/VP9 恒尝试直连，非 MP4 容器统一直连，`mode: hls` 仅作「是否可重封装」判断
+- **PotPlayer 改为通用外部播放器**：`potplayer_path` → `external_player_path`，可填 VLC / MPC-HC / PotPlayer 等任意 exe（未填自动探测）；播放失败弹窗按钮改为「用外部播放器打开」
+- **重封装时机优化**：新增后台批量预修复（`html5_auto_remux`，默认开）——空闲时静默扫描各库可修复文件逐个重封装，点播即秒开，不再需要在播放器里等 1-2 分钟
+
+### 新增
+
+- 设置项「后台自动修复」（`html5_auto_remux`），控制空闲时批量重封装可修复文件
+- 悬停预览增强：浮层整体放大 20%；视频加载/seek 阶段保持透明、画面就绪才显示（消除黑屏闪烁）；预览段数与每段秒数可配置（`html5_hover_preview_segments` / `_segment_sec`，默认 5×5）
+
+### 修复
+
+- `scripts/clean_cache.py` 引用已删除的 `hls_manager` 会报错 → 改为仅清理日志与旧版遗留 HLS 缓存
+- 清理历史遗留设置键（`player_mode` / `hls_large_h264` / `hls_moov_end_h264` / `html5_fragmented_mp4` / `html5_modern_codecs_direct`），`settings.json` 旧键自动过滤
+- 前端移除孤儿 API 封装（`regenerateThumb` / `priorityThumbs` / `getFormatStatus`）与 HLS 死代码（`useHlsThrottle` / `hlsInstance` / `hlsPlaylistUrl` 等）
+
+### 移除
+
+- 前端 HLS 相关死代码与依赖引用；后端 `hls_manager.py` 模块
+
 ## [11.0.0] - 2026-08-07
 
 ### 重大变更

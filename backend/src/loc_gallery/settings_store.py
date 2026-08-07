@@ -8,17 +8,16 @@ from pathlib import Path
 from loc_gallery.config import (
     DEFAULT_PAGE_SIZE,
     HISTORY_RETENTION_DAYS,
-    HLS_LARGE_H264,
-    HLS_MOOV_END_H264,
-    HTML5_FRAGMENTED_MP4,
     HTML5_PLAYLIST_AUTOPLAY,
     HTML5_RESUME_PLAYBACK,
     HTML5_WHEEL_SEEK_SEC,
-    HTML5_MODERN_CODECS_DIRECT,
     HTML5_PLAYER_PREV_KEY,
     HTML5_PLAYER_NEXT_KEY,
     HTML5_DISABLE_MOVI_HOTKEYS,
-    PLAYER_MODE,
+    HTML5_HOVER_PREVIEW,
+    HTML5_HOVER_PREVIEW_SEGMENTS,
+    HTML5_HOVER_PREVIEW_SEGMENT_SEC,
+    HTML5_AUTO_REMUX,
     SETTINGS_FILE,
     THUMB_IDLE_SCAN,
     THUMB_PROGRESS_BAR,
@@ -32,7 +31,7 @@ from loc_gallery.config import (
     THUMB_JITTER_PCT,
     THUMB_JITTER_MIN,
     THUMB_JITTER_MAX,
-    detect_potplayer_path,
+    detect_external_player_path,
     library_settings_file,
 )
 
@@ -52,19 +51,18 @@ _DEFAULTS = {
     "thumb_jitter_min": THUMB_JITTER_MIN,
     "thumb_jitter_max": THUMB_JITTER_MAX,
     "default_page_size": DEFAULT_PAGE_SIZE,
-    "potplayer_path": detect_potplayer_path(),
-    "player_mode": PLAYER_MODE,
+    "external_player_path": detect_external_player_path(),
     "history_retention_days": HISTORY_RETENTION_DAYS,
-    "hls_large_h264": HLS_LARGE_H264,
-    "hls_moov_end_h264": HLS_MOOV_END_H264,
-    "html5_fragmented_mp4": HTML5_FRAGMENTED_MP4,
     "html5_playlist_autoplay": HTML5_PLAYLIST_AUTOPLAY,
     "html5_resume_playback": HTML5_RESUME_PLAYBACK,
     "html5_wheel_seek_sec": HTML5_WHEEL_SEEK_SEC,
-    "html5_modern_codecs_direct": HTML5_MODERN_CODECS_DIRECT,
     "html5_player_prev_key": HTML5_PLAYER_PREV_KEY,
     "html5_player_next_key": HTML5_PLAYER_NEXT_KEY,
     "html5_disable_movi_hotkeys": HTML5_DISABLE_MOVI_HOTKEYS,
+    "html5_hover_preview": HTML5_HOVER_PREVIEW,
+    "html5_hover_preview_segments": HTML5_HOVER_PREVIEW_SEGMENTS,
+    "html5_hover_preview_segment_sec": HTML5_HOVER_PREVIEW_SEGMENT_SEC,
+    "html5_auto_remux": HTML5_AUTO_REMUX,
     "ui_theme": "dark",
 }
 
@@ -82,29 +80,28 @@ _LIBRARY_OVERRIDE_KEYS = {
     "thumb_jitter_min",
     "thumb_jitter_max",
     "default_page_size",
-    "potplayer_path",
-    "player_mode",
+    "external_player_path",
     "history_retention_days",
-    "hls_large_h264",
-    "hls_moov_end_h264",
-    "html5_fragmented_mp4",
     "html5_playlist_autoplay",
     "html5_resume_playback",
     "html5_wheel_seek_sec",
-    "html5_modern_codecs_direct",
     "html5_player_prev_key",
     "html5_player_next_key",
     "html5_disable_movi_hotkeys",
+    "html5_hover_preview",
+    "html5_hover_preview_segments",
+    "html5_hover_preview_segment_sec",
+    "html5_auto_remux",
 }
 
 
-def _resolve_potplayer_setting(stored: str) -> str:
+def _resolve_external_player_setting(stored: str) -> str:
     stored = (stored or "").strip()
     if stored:
         path = Path(stored)
         if path.is_file():
             return str(path)
-    return detect_potplayer_path()
+    return detect_external_player_path()
 
 
 def _load_global() -> dict:
@@ -112,8 +109,11 @@ def _load_global() -> dict:
         try:
             data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
             merged = deepcopy(_DEFAULTS)
-            merged.update(data)
-            merged["potplayer_path"] = _resolve_potplayer_setting(merged.get("potplayer_path"))
+            # 只保留已知键，自动清除旧版本遗留（如 player_mode/hls_* 等已废弃项）
+            merged.update({k: v for k, v in data.items() if k in _DEFAULTS})
+            merged["external_player_path"] = _resolve_external_player_setting(
+                merged.get("external_player_path") or merged.get("potplayer_path") or ""
+            )
             return merged
         except (json.JSONDecodeError, OSError):
             pass
@@ -129,7 +129,9 @@ def _load_global() -> dict:
                 merged.update({k: v for k, v in data.items() if k in _DEFAULTS})
         except (json.JSONDecodeError, OSError):
             pass
-    merged["potplayer_path"] = _resolve_potplayer_setting(merged.get("potplayer_path"))
+    merged["external_player_path"] = _resolve_external_player_setting(
+        merged.get("external_player_path") or merged.get("potplayer_path") or ""
+    )
     return merged
 
 
@@ -151,9 +153,6 @@ def load_settings(library_id: str | None = None) -> dict:
         merged = _load_global()
         if library_id:
             merged.update(_load_library_overrides(library_id))
-        mode = (merged.get("player_mode") or "").strip().lower()
-        if mode == "smart":
-            merged["player_mode"] = "html5"
         return merged
 
 

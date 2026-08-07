@@ -11,7 +11,7 @@ from pathlib import Path
 
 from loc_gallery.thumb_manager import ffprobe_path, _get_duration_mpegts
 from loc_gallery.process_util import hidden_subprocess_kwargs
-from loc_gallery.config import LARGE_FILE_HLS_BYTES, playback_plans_file
+from loc_gallery.config import playback_plans_file
 from loc_gallery.file_stability import is_ready_for_processing
 from loc_gallery.library_context import current_library_id, set_thread_library
 from loc_gallery.settings_store import get_setting
@@ -36,10 +36,8 @@ _disk_dirty_libs: set[str] = set()
 _disk_flush_timer: threading.Timer | None = None
 _DISK_FLUSH_SEC = 1.0
 
-
 def _disk_path() -> Path:
     return playback_plans_file(current_library_id())
-
 
 def _load_disk_cache() -> dict[str, dict]:
     lid = current_library_id()
@@ -57,7 +55,6 @@ def _load_disk_cache() -> dict[str, dict]:
     except (json.JSONDecodeError, OSError):
         _disk_caches[lid] = {}
     return _disk_caches[lid]
-
 
 def _schedule_disk_flush() -> None:
     global _disk_flush_timer
@@ -92,20 +89,9 @@ def _schedule_disk_flush() -> None:
         _disk_flush_timer.daemon = True
         _disk_flush_timer.start()
 
-
 def _hls_policy_tag() -> str:
-    large = bool(get_setting("hls_large_h264"))
-    moov = bool(get_setting("hls_moov_end_h264"))
-    frag = str(get_setting("html5_fragmented_mp4") or "external").strip().lower()
-    modern = bool(get_setting("html5_modern_codecs_direct"))
-    if frag not in ("external", "hls"):
-        frag = "external"
-    return f"v{_PLAN_VERSION}:{int(large)}{int(moov)}:{frag}:{int(modern)}"
-
-
-def _modern_codecs_direct_enabled() -> bool:
-    return bool(get_setting("html5_modern_codecs_direct"))
-
+    # 11.0 起播放统一走 movi-player 直连 + 自动重封装，无 HLS 切片/转码策略
+    return f"v{_PLAN_VERSION}:direct"
 
 def _plan_modern_codec_direct(
     codec: str,
@@ -118,7 +104,7 @@ def _plan_modern_codec_direct(
     plan = {
         "mode": "direct",
         "transcode": False,
-        "reason": f"{label}{container_hint}，实验性浏览器直连（失败将自动转码）",
+        "reason": f"{label}{container_hint}，尝试浏览器直连（失败可自动修复或用外部播放器）",
         "codec": codec,
         "experimental_direct": True,
     }
@@ -127,7 +113,6 @@ def _plan_modern_codec_direct(
     if container:
         plan["container"] = container
     return plan
-
 
 def _disk_cache_get(key: str, mtime: float, size: int) -> dict | None:
     entry = _load_disk_cache().get(key)
@@ -144,7 +129,6 @@ def _disk_cache_get(key: str, mtime: float, size: int) -> dict | None:
         return None
     return dict(plan)
 
-
 def _disk_cache_put(key: str, mtime: float, size: int, plan: dict) -> None:
     kind = classify_format_plan(plan) or ""
     with _plan_lock:
@@ -159,7 +143,6 @@ def _disk_cache_put(key: str, mtime: float, size: int, plan: dict) -> None:
             "at": time.time(),
         }
     _schedule_disk_flush()
-
 
 def _mp4_has_box(path: Path, box_type: str, max_bytes: int = 64 * 1024 * 1024) -> bool:
     """在文件前部扫描 ISO BMFF box（用于识别 fMP4 的 moof）。"""
@@ -183,7 +166,6 @@ def _mp4_has_box(path: Path, box_type: str, max_bytes: int = 64 * 1024 * 1024) -
                 break
             pos += box_size
     return False
-
 
 def analyze_mp4_structure(path: Path) -> dict:
     """识别 MP4 布局：标准单 mdat、moov 在末尾、碎片化 fMP4、或多段小 mdat 交错。"""
@@ -233,7 +215,6 @@ def analyze_mp4_structure(path: Path) -> dict:
         "size_bytes": size,
     }
 
-
 def _find_moov_near_end(path: Path, size: int) -> int | None:
     """在文件尾部扫描 moov（moov 在末尾时无需遍历整文件）。"""
     scan = min(size, 32 * 1024 * 1024)
@@ -250,7 +231,6 @@ def _find_moov_near_end(path: Path, size: int) -> int | None:
             return size - scan + off
         off += box_size
     return None
-
 
 def detect_disguised_mpegts(path: Path) -> dict | None:
     """部分站点下载：PNG 文件头 + MPEG-TS 流（与缩略图、PotPlayer 相同解析方式）。"""
@@ -272,10 +252,8 @@ def detect_disguised_mpegts(path: Path) -> dict | None:
         "size_bytes": st.st_size,
     }
 
-
 # 兼容旧引用
 detect_disguised_h264 = detect_disguised_mpegts
-
 
 def sniff_container_kind(path: Path) -> str:
     """根据文件头判断真实容器类型。"""
@@ -298,7 +276,6 @@ def sniff_container_kind(path: Path) -> str:
         return "avi"
     return "unknown"
 
-
 def _plan_needs_rebuild(path: Path, plan: dict) -> bool:
     """旧版错误缓存需重建。"""
     disguised = detect_disguised_mpegts(path)
@@ -319,21 +296,6 @@ def _plan_needs_rebuild(path: Path, plan: dict) -> bool:
     if sniff_container_kind(path) == "image" and plan.get("mode") != "unsupported":
         return True
     return False
-
-
-def _purge_hls_for_path(path: Path) -> None:
-    try:
-        import hashlib
-
-        from loc_gallery.config import VIDEO_ROOT
-        from loc_gallery import hls_manager
-
-        rel = path.resolve().relative_to(VIDEO_ROOT.resolve()).as_posix()
-        video_id = hashlib.md5(rel.encode("utf-8")).hexdigest()
-        hls_manager.purge_cache(video_id)
-    except Exception:
-        pass
-
 
 def probe_video_codec(path: Path) -> str:
     try:
@@ -367,9 +329,7 @@ def probe_video_codec(path: Path) -> str:
     except Exception:
         return "unknown"
 
-
 _kind_cache: dict[str, tuple[float, int, str | None]] = {}  # legacy; unused
-
 
 def _peek_cached_plan_entry(path: Path, mtime: float, size: int) -> dict | None:
     """按索引中的 mtime/size 读播放计划缓存，避免逐文件 stat。"""
@@ -382,7 +342,6 @@ def _peek_cached_plan_entry(path: Path, mtime: float, size: int) -> dict | None:
                 plan.pop("_policy", None)
                 return plan
     return _disk_cache_get(key, mtime, size)
-
 
 def _peek_cached_plan(path: Path) -> dict | None:
     """仅读内存/磁盘缓存，不触发 ffprobe。"""
@@ -402,7 +361,6 @@ def _peek_cached_plan(path: Path) -> dict | None:
                 return plan
         return _disk_cache_get(key, st.st_mtime, st.st_size)
 
-
 def can_remux_from_plan(plan: dict) -> tuple[bool, str]:
     """根据已缓存的播放计划判断是否可流复制修复。"""
     kind = (plan.get("structure") or {}).get("kind")
@@ -414,51 +372,15 @@ def can_remux_from_plan(plan: dict) -> tuple[bool, str]:
         return False, "该视频需要转码，无法流复制重封装"
     return True, ""
 
-
-def _is_interleaved_structure(plan: dict) -> bool:
-    structure = plan.get("structure") or {}
-    kind = structure.get("kind")
-    mdat_count = int(structure.get("mdat_count") or 0)
-    return kind == "fragmented" and mdat_count > 3
-
-
 def classify_format_plan(plan: dict | None) -> str | None:
-    """格式分类（角标/筛选共用）；能直连或仅需后台 HLS 切片的返回 None。"""
+    """格式分类（角标/筛选共用）。11.0 起 movi-player 可直连绝大多数文件，
+    仅浏览器硬解不支持的编码标为 unsupported（其余可播放/可自动修复，不展示角标）。"""
     if not plan:
         return None
     mode = plan.get("mode")
-    if mode in ("error", "pending"):
-        return None
     if mode == "unsupported":
         return "unsupported"
-    if mode == "direct" or plan.get("experimental_direct"):
-        return None
-
-    if can_remux_from_plan(plan)[0]:
-        return "remuxable"
-
-    structure = plan.get("structure") or {}
-    kind = structure.get("kind")
-    interleaved = _is_interleaved_structure(plan)
-
-    if plan.get("disguised") or kind in ("disguised_mpegts", "disguised_h264"):
-        return "disguised"
-
-    if interleaved:
-        return "interleaved"
-
-    if plan.get("transcode"):
-        return "transcode"
-
-    if mode == "external":
-        return "fragmented"
-
-    # HLS 仅切片 / moov 在末尾 / 大文件：可正常播放，不展示角标
-    if mode == "hls" and not plan.get("transcode"):
-        return None
-
     return None
-
 
 _FORMAT_BADGE_LABELS: dict[str, str] = {
     "transcode": "special",
@@ -473,12 +395,10 @@ _FORMAT_BADGE_LABELS: dict[str, str] = {
     "large": "large",
 }
 
-
 def format_badge_display(kind: str | None) -> str | None:
     if not kind:
         return None
     return _FORMAT_BADGE_LABELS.get(kind, kind)
-
 
 def get_format_badge_for_item(
     library_id: str,
@@ -501,7 +421,6 @@ def get_format_badge_for_item(
     kind = get_format_kind_for_item(library_id, video_id, mtime, size)
     return format_badge_display(kind)
 
-
 def get_format_badge(path: Path) -> str | None:
     """已分析过的格式角标；未缓存则返回 None（兼容旧调用）。"""
     plan = _peek_cached_plan(path)
@@ -512,7 +431,6 @@ def get_format_badge(path: Path) -> str | None:
             return None
         plan = _peek_cached_plan_entry(path, st.st_mtime, st.st_size)
     return format_badge_display(classify_format_plan(plan))
-
 
 def get_format_badges(paths: dict[str, Path], library_id: str | None = None) -> dict[str, str]:
     """批量读取角标（仅索引/缓存命中）。"""
@@ -531,8 +449,7 @@ def get_format_badges(paths: dict[str, Path], library_id: str | None = None) -> 
             out[vid] = badge
     return out
 
-
-def invalidate_playback_plan(path: Path, *, purge_hls: bool = True) -> None:
+def invalidate_playback_plan(path: Path, *, purge_hls: bool = False) -> None:
     """清除播放策略缓存（文件被修复/替换后调用）。"""
     key = str(path.resolve())
     with _plan_lock:
@@ -541,9 +458,6 @@ def invalidate_playback_plan(path: Path, *, purge_hls: bool = True) -> None:
         if key in store:
             store.pop(key, None)
             _schedule_disk_flush()
-    if purge_hls:
-        _purge_hls_for_path(path)
-
 
 def seed_direct_playback_plan(path: Path, *, codec: str = "h264") -> dict:
     """流复制修复后的标准 MP4：跳过 ffprobe/结构扫描，直接写入 direct 计划。"""
@@ -564,7 +478,6 @@ def seed_direct_playback_plan(path: Path, *, codec: str = "h264") -> dict:
     out = dict(plan)
     out["cached"] = True
     return out
-
 
 def force_probe_playback_plan(path: Path) -> dict:
     """强制探测文件播放策略，跳过 is_ready_for_processing 检查（重命名/移动后使用）。"""
@@ -597,7 +510,6 @@ def force_probe_playback_plan(path: Path) -> dict:
     out.pop("_policy", None)
     out["cached"] = False
     return out
-
 
 def get_playback_plan(path: Path) -> dict:
     if not path.is_file():
@@ -632,7 +544,6 @@ def get_playback_plan(path: Path) -> dict:
             store = _load_disk_cache()
             store.pop(key, None)
             _plan_cache.pop(key, None)
-            _purge_hls_for_path(path)
 
     plan = _build_playback_plan(path)
     plan["_policy"] = _hls_policy_tag()
@@ -644,7 +555,6 @@ def get_playback_plan(path: Path) -> dict:
     out["cached"] = False
     return out
 
-
 def schedule_probe_for_ids(video_ids: list[str], library_id: str | None = None) -> int:
     """后台预分析播放策略（单队列、限速），写入 playback_plans + format_index。"""
     from loc_gallery.format_index import enqueue_format_probe
@@ -654,9 +564,9 @@ def schedule_probe_for_ids(video_ids: list[str], library_id: str | None = None) 
     lid = library_id or current_library_id()
     return enqueue_format_probe(lid, video_ids)
 
-
 def _plan_non_native_container(path: Path, ext: str, sniff: str) -> dict:
-    """WMV/AVI/MKV 等：浏览器 <video> 不能当 MP4 直连，按编码走 HLS。"""
+    """WMV/AVI/MKV 等非 MP4 容器：movi-player 的 WASM demuxer 可解 MKV/TS 等，
+    统一尝试直连；仅浏览器硬解不支持的编码判为 unsupported（外部播放器兜底）。"""
     codec = probe_video_codec(path)
     label = sniff if sniff and sniff not in ("unknown", "image") else ext.lstrip(".").upper()
 
@@ -670,41 +580,20 @@ def _plan_non_native_container(path: Path, ext: str, sniff: str) -> dict:
 
     if codec in _BROWSER_UNSUPPORTED_VIDEO:
         return {
-            "mode": "hls",
-            "transcode": True,
-            "reason": f"{label} / {codec.upper()}，浏览器不支持，将转码后播放",
-            "codec": codec,
-            "container": label,
-        }
-
-    if codec in _HLS_TRANSCODE_VIDEO:
-        if _modern_codecs_direct_enabled():
-            return _plan_modern_codec_direct(codec, container=label)
-        return {
-            "mode": "hls",
-            "transcode": True,
-            "reason": f"{codec.upper()} 编码，将转码后播放",
-            "codec": codec,
-            "container": label,
-        }
-
-    if codec == "h264":
-        return {
-            "mode": "hls",
-            "transcode": False,
-            "reason": f"非 MP4 容器（{label}），边切边播",
+            "mode": "unsupported",
+            "reason": f"{label} / {codec.upper()}，浏览器不支持，请用外部播放器打开",
             "codec": codec,
             "container": label,
         }
 
     return {
-        "mode": "hls",
-        "transcode": True,
-        "reason": f"非 MP4 容器（{label}），将转码后播放",
+        "mode": "direct",
+        "transcode": False,
+        "reason": f"非 MP4 容器（{label}），尝试直连播放",
         "codec": codec,
         "container": label,
+        "experimental_direct": True,
     }
-
 
 def _build_playback_plan(path: Path) -> dict:
     ext = path.suffix.lower()
@@ -716,7 +605,7 @@ def _build_playback_plan(path: Path) -> dict:
             "transcode": False,
             "input_format": "mpegts",
             "disguised": True,
-            "reason": f"站点伪装格式（MPEG-TS），边切边播（约 {mins} 分钟）",
+            "reason": f"站点伪装格式（MPEG-TS），直连播放（约 {mins} 分钟）",
             "codec": "h264",
             "structure": disguised,
         }
@@ -742,14 +631,7 @@ def _build_playback_plan(path: Path) -> dict:
                     "container": sniff,
                 }
             if codec in _HLS_TRANSCODE_VIDEO:
-                if _modern_codecs_direct_enabled():
-                    return _plan_modern_codec_direct(codec, container=ext[1:].upper())
-                return {
-                    "mode": "hls",
-                    "transcode": True,
-                    "reason": f"{codec.upper()} 编码，将转码后播放",
-                    "codec": codec,
-                }
+                return _plan_modern_codec_direct(codec, container=ext[1:].upper())
             return {
                 "mode": "direct",
                 "reason": f"{ext[1:].upper()} 容器，尝试直接播放",
@@ -770,7 +652,7 @@ def _build_playback_plan(path: Path) -> dict:
     if codec in _BROWSER_UNSUPPORTED_VIDEO:
         return {
             "mode": "unsupported",
-            "reason": f"浏览器不支持 {codec.upper()} 编码，请用 PotPlayer",
+            "reason": f"浏览器不支持 {codec.upper()} 编码，请用外部播放器打开",
             "codec": codec,
         }
 
@@ -778,61 +660,14 @@ def _build_playback_plan(path: Path) -> dict:
     kind = structure["kind"]
 
     if codec in _HLS_TRANSCODE_VIDEO:
-        if _modern_codecs_direct_enabled():
-            return _plan_modern_codec_direct(codec, structure=structure, container=sniff)
-        return {
-            "mode": "hls",
-            "transcode": True,
-            "reason": f"{codec.upper()} 编码，将转码后播放",
-            "codec": codec,
-            "structure": structure,
-        }
+        return _plan_modern_codec_direct(codec, structure=structure, container=sniff)
 
     if kind == "fragmented":
-        interleaved_mdat = (structure.get("mdat_count") or 0) > 3 and not _mp4_has_box(path, "moof")
-        frag_mode = str(get_setting("html5_fragmented_mp4") or "external").strip().lower()
-        if interleaved_mdat:
-            return {
-                "mode": "hls",
-                "transcode": False,
-                "reason": "多段 mdat 交错（部分站点源），边切边播以加快起播",
-                "codec": codec,
-                "structure": structure,
-            }
-        if frag_mode == "hls":
-            return {
-                "mode": "hls",
-                "transcode": False,
-                "reason": "碎片化 MP4，将边切边播",
-                "codec": codec,
-                "structure": structure,
-            }
-        return {
-            "mode": "external",
-            "transcode": False,
-            "reason": "碎片化 MP4，浏览器无法直连；可修复为标准 MP4 或用 PotPlayer",
-            "codec": codec,
-            "structure": structure,
-        }
-
-    size_bytes = structure.get("size_bytes") or 0
-    moov_hls = bool(get_setting("hls_moov_end_h264"))
-    large_hls = bool(get_setting("hls_large_h264"))
-
-    if moov_hls and kind == "moov_end":
+        # 碎片化 / 多段 mdat MP4：movi-player 的 mp4box 无法解析其 moov，播放前自动重封装
         return {
             "mode": "hls",
             "transcode": False,
-            "reason": "索引在文件末尾，边切边播以加快起播",
-            "codec": codec,
-            "structure": structure,
-        }
-
-    if large_hls and size_bytes >= LARGE_FILE_HLS_BYTES:
-        return {
-            "mode": "hls",
-            "transcode": False,
-            "reason": f"大文件（{size_bytes // (1024 * 1024)}MB），边切边播以加快起播",
+            "reason": "碎片化 MP4（部分站点源），播放前自动重封装修复",
             "codec": codec,
             "structure": structure,
         }

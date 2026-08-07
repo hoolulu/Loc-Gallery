@@ -747,7 +747,7 @@ body.has-selection .card-album-badge {
 .path-tip {
   position: fixed;
   z-index: 250;
-  max-width: min(88vw, 920px);
+  max-width: min(88vw, 1104px);
   padding: 0;
   background: var(--lg-bg-elevated);
   border: 1px solid var(--lg-border);
@@ -763,20 +763,33 @@ body.has-selection .card-album-badge {
 .path-tip-preview {
   position: relative;
   line-height: 0;
-  max-width: min(88vw, 920px);
+  max-width: min(88vw, 1104px);
 }
 .path-tip-preview img {
   display: block;
   width: auto;
   height: auto;
-  max-width: min(88vw, 920px);
-  max-height: min(70vh, 720px);
+  max-width: min(88vw, 1104px);
+  max-height: min(70vh, 864px);
   border-radius: 8px 8px 0 0;
 }
+/* 悬停多段视频预览层（useHoverPreview 动态创建，覆盖在预览区 <img> 上，img 保留撑布局） */
+/* opacity 由脚本控制：加载/seek 阶段保持 0，play() 成功后显示，避免黑屏闪烁 */
+.hover-preview-video {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+}
 .path-tip-preview--empty {
-  width: min(72vw, 640px);
-  height: min(40vh, 360px);
-  max-width: min(88vw, 920px);
+  width: min(72vw, 768px);
+  height: min(40vh, 432px);
+  max-width: min(88vw, 1104px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1065,26 +1078,6 @@ body.has-selection .card-album-badge {
   font-size: 0.75rem;
   color: var(--lg-text-muted);
   white-space: nowrap;
-}
-.player-mode-row {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-.player-mode-opt {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.4rem 0.85rem;
-  border-radius: 6px;
-  border: 1px solid var(--lg-border);
-  cursor: pointer;
-  font-size: 0.8125rem;
-}
-.player-mode-opt:has(input:checked) {
-  border-color: var(--lg-accent);
-  color: var(--lg-accent);
-  background: color-mix(in srgb, var(--lg-accent) 8%, transparent);
 }
 
 /* 视频库表格 */

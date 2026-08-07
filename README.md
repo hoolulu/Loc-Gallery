@@ -4,7 +4,7 @@
 
 > **当前版本：11.0.0（主分支）** · Vue 3 架构重构大版本 · 经典 / 影院布局 · 单端口开发热更新
 
-扫描本机视频目录，自动生成缩略图网格，支持分类筛选、收藏、播放记录、**我的专辑**、内嵌 HLS 播放与外部播放器。专为 Windows 本地大库设计：新视频拷入即索引，下载中的文件不误报失败，外部删除自动同步收藏、历史与专辑归属。
+扫描本机视频目录，自动生成缩略图网格，支持分类筛选、收藏、播放记录、**我的专辑**、内嵌 HTML5 播放（movi-player，WASM 解码）与外部播放器兜底。专为 Windows 本地大库设计：新视频拷入即索引，下载中的文件不误报失败，外部删除自动同步收藏、历史与专辑归属。
 
 **默认访问地址：** `http://127.0.0.1:3460`
 
@@ -14,14 +14,14 @@
 
 <table width="100%">
 <tr><td style="white-space: nowrap; width: 1%;"><b>🖱 一键启动</b></td><td>双击 <code>restart.py</code> → 自动停旧进程、装依赖、起服务、打开浏览器</td></tr>
-<tr><td style="white-space: nowrap;"><b>📚 多视频库</b></td><td>顶栏「选择视频库」切换多个本地文件夹；收藏、历史、<strong>专辑</strong>、缩略图、HLS 缓存按库隔离；设置中统一管理</td></tr>
+<tr><td style="white-space: nowrap;"><b>📚 多视频库</b></td><td>顶栏「选择视频库」切换多个本地文件夹；收藏、历史、<strong>专辑</strong>、缩略图按库隔离；设置中统一管理</td></tr>
 <tr><td style="white-space: nowrap;"><b>📂 本地视频库</b></td><td>递归扫描各库根目录，按一级子目录作为「分类」展示</td></tr>
 <tr><td style="white-space: nowrap;"><b>🖼 智能缩略图</b></td><td>按需生成当前页；下载/写入中的文件等待稳定后再处理，不误报失败</td></tr>
 <tr><td style="white-space: nowrap;"><b>📺 剧集连播</b></td><td>播放列表支持文件名自然排序；HTML5 模式按列表顺序自动播下一集</td></tr>
-<tr><td style="white-space: nowrap;"><b>▶ 可靠播放</b></td><td>HTML5 小块流式直传（省硬盘）；HLS copy / 转码；续播与连播可设置；PotPlayer 自动探测</td></tr>
+<tr><td style="white-space: nowrap;"><b>▶ 可靠播放</b></td><td>movi-player 内嵌播放器（WASM demux + 直连 Range 流）；续播与连播可设置；外部播放器自动探测（默认 PotPlayer）</td></tr>
 <tr><td style="white-space: nowrap;"><b>♥ 收藏 & 历史</b></td><td>卡片收藏、最近播放、播放次数与<strong>续播进度</strong>；外部删文件后列表自动清理</td></tr>
 <tr><td style="white-space: nowrap;"><b>📁 我的专辑</b></td><td>自定义专辑合集，视频可多专辑归属；本页生成专辑、播放全部、播放器内加入专辑</td></tr>
-<tr><td style="white-space: nowrap;"><b>🏷 格式筛选</b></td><td>按可修复/特殊格式/HLS/碎片化等筛选；卡片角标；碎片化 MP4 可一键修复</td></tr>
+<tr><td style="white-space: nowrap;"><b>🏷 格式处理</b></td><td>多段 mdat / 碎片化 MP4 播放前自动重封装（可后台批量预修复）；mpeg2/VC-1/WMV 等无法硬解编码自动提示用外部播放器</td></tr>
 <tr><td style="white-space: nowrap;"><b>⏱ 视频时长</b></td><td>卡片显示时长；后台 ffprobe 探测并写入索引，顶栏可查看进度</td></tr>
 <tr><td style="white-space: nowrap;"><b>🔄 实时同步</b></td><td>文件监听 + SSE 推送；新视频自动索引、排队缩略图与播放策略探测</td></tr>
 <tr><td style="white-space: nowrap;"><b>🎨 布局主题</b></td><td>经典 / 影院两种布局，暗色 / 亮色主题；顶栏一键切换</td></tr>
@@ -59,7 +59,7 @@
 
 <p align="center"><img src="doc/screenshots/history.png" width="100%" alt="最近播放" /></p>
 
-**设置** — 视频库管理、全局播放与缩略图选项；自动探测 PotPlayer 路径。
+**设置** — 视频库管理、全局播放与缩略图选项；外部播放器路径（默认自动探测 PotPlayer）。
 
 <p align="center"><img src="doc/screenshots/settings.png" width="100%" alt="设置" /></p>
 
@@ -78,14 +78,14 @@
 - **NAS / 媒体服务器** → 配置重、要常驻服务、个人单机用不上
 - **下载还没完** → 被索引后缩略图失败，满屏报错
 
-Loc Gallery 的做法是：**只在本机跑一个轻量 Web 服务**，浏览器当界面，ffmpeg 当引擎。文件怎么放磁盘就怎么扫，不搬家、不转码入库；能直传就直传，搞不定的再 HLS。下载中的文件会等稳定后再处理，不会污染失败列表。
+Loc Gallery 的做法是：**只在本机跑一个轻量 Web 服务**，浏览器当界面，ffmpeg 当引擎。文件怎么放磁盘就怎么扫，不搬家、不转码入库；播放统一走 movi-player 直连（WASM demux），异常结构（碎片化/多段 mdat）自动重封装修复。下载中的文件会等稳定后再处理，不会污染失败列表。
 
 ## 二、谁适合用
 
 - 在 Windows 上管理**大量本地视频**（多分类目录、多格式混放）
-- 希望**浏览器快速浏览缩略图**，偶尔内嵌播放或调 PotPlayer
+- 希望**浏览器快速浏览缩略图**，内嵌播放或调外部播放器
 - 需要**收藏、播放记录、批量整理**，但不需要多用户 / 公网 / 刮削元数据
-- 视频库里有**伪装格式**（如 PNG 头 + MPEG-TS）或大体积文件需要 HLS 起播
+- 视频库里有**伪装格式**（如 PNG 头 + MPEG-TS）或大体积文件——movi-player 的 WASM demuxer 可直接解
 
 **不适合：** 多用户远程访问、移动端 App、TMDB 刮削、云端同步。
 
@@ -98,10 +98,10 @@ Loc Gallery 的做法是：**只在本机跑一个轻量 Web 服务**，浏览�
 | **布局与主题** | 经典 / 影院布局；暗色 / 亮色主题 |
 | **分类管理** | 拖拽排序、多种排序模式 |
 | **缩略图** | 按需 / 后台补全、队列进度、失败重试、候选挑选 |
-| **播放** | HTML5 小块流式直传 / HLS copy / HLS 转 H.264；列表连播与续播可配置 |
+| **播放** | movi-player 内嵌播放器（WASM demux + `/api/stream` Range 直连）；列表连播与续播可配置；后台自动批量重封装可修复文件 |
 | **收藏 & 历史** | 持久化 JSON；外部删文件自动 prune |
 | **我的专辑** | 按库 `albums.json`；多对多归属；封面默认首条视频缩略图 |
-| **格式筛选** | 顶栏筛选 + 后台 `format_index`；可修复 MP4 remux |
+| **格式处理** | 播放前自动重封装（碎片化/多段 mdat）；后台批量预修复；仅硬解不支持的编码标「无法播放」并提示外部播放器 |
 | **文件管理** | 删除（回收站）、重命名、移动、打开所在文件夹 |
 | **稳定性** | 下载中文件延迟索引；size/mtime 变化时重置缩略图状态 |
 
@@ -116,9 +116,9 @@ Loc Gallery 的做法是：**只在本机跑一个轻量 Web 服务**，浏览�
          ↓
 ② 缩略图   — 当前页高优先级排队 → ffmpeg 抽帧 → data/libraries/{id}/.thumbs/
          ↓
-③ 播放策略 — ffprobe 探测编码/封装 → 写入 playback_plans.json → 选择 direct / HLS
+③ 播放策略 — ffprobe 探测编码/封装 → 写入 playback_plans.json → direct 直连 / 自动重封装
          ↓
-④ 前端展示 — SSE 推送进度 → 网格卡片 + 播放器 + 收藏/历史视图
+④ 前端展示 — SSE 推送进度 → 网格卡片 + movi-player 播放器 + 收藏/历史视图
 ```
 
 **下载中文件的处理：**
@@ -136,28 +136,28 @@ Loc Gallery 的做法是：**只在本机跑一个轻量 Web 服务**，浏览�
 ```
 ┌─────────────────────────────────────────────────────────┐
 │              浏览器 (Vue 3 SPA / Vite)                   │
-│  pages · components · Pinia · hls.js                    │
+│  pages · components · Pinia · movi-player               │
 └────────────────────────┬────────────────────────────────┘
                          │ HTTP / SSE（开发时 Vite 代理 /api）
 ┌────────────────────────▼────────────────────────────────┐
 │              FastAPI (loc_gallery.server)                │
 │  REST API · 静态资源（生产模式）· SSE 事件推送            │
 ├──────────┬──────────┬──────────┬──────────┬─────────────┤
-│  scanner  │thumb_mgr │hls_mgr   │media_probe│library/    │
-│          │          │          │          │favorite/    │
-│          │          │          │          │history/     │
-│          │          │          │          │album_store  │
+│  scanner  │thumb_mgr │remux_mgr │media_probe│library/    │
+│          │          │(自动修复) │          │favorite/   │
+│          │          │          │          │history/    │
+│          │          │          │          │album_store │
 └────┬─────┴────┬─────┴────┬─────┴────┬─────┴──────┬──────┘
      │          │          │          │            │
      ▼          ▼          ▼          ▼            ▼
-  各库视频根   libraries/  cache/hls  playback    favorites.json
-  目录        {id}/.thumbs            _plans.json play_history.json
+  各库视频根   libraries/  (原地替换  playback    favorites.json
+  目录        {id}/.thumbs  修复后)    _plans.json play_history.json
               libraries.json          albums.json
 ```
 
 | 层级 | 技术 |
 |------|------|
-| 前端 | Vue 3、TypeScript、Vite、Pinia、Tailwind CSS 4、hls.js |
+| 前端 | Vue 3、TypeScript、Vite、Pinia、Tailwind CSS 4、movi-player |
 | Web 框架 | FastAPI、uvicorn |
 | 文件监听 | watchdog |
 | 媒体处理 | ffmpeg、ffprobe |
@@ -183,12 +183,12 @@ Loc Gallery 的做法是：**只在本机跑一个轻量 Web 服务**，浏览�
 │   │   ├── scanner.py          # 视频索引
 │   │   ├── thumb_manager.py    # 缩略图队列
 │   │   ├── media_probe.py      # 播放策略探测
-│   │   ├── hls_manager.py      # HLS 切片缓存（单库 2GB LRU）
+│   │   ├── remux_manager.py    # 重封装修复（含后台批量预修复）
 │   │   └── ...
 │   └── tests/                  # 后端测试
 ├── scripts/
 │   ├── setup.py                # 首次依赖安装
-│   ├── clean_cache.py          # 清理 HLS 与日志缓存
+│   ├── clean_cache.py          # 清理运行时日志缓存
 │   ├── service.py              # 启停共享逻辑
 │   └── ports.py                # 端口常量
 ├── config/
@@ -200,7 +200,7 @@ Loc Gallery 的做法是：**只在本机跑一个轻量 Web 服务**，浏览�
     ├── settings.json           # 全局设置
     ├── libraries.json          # 已注册视频库列表
     ├── libraries/
-    │   └── {library_id}/       # 每库独立：收藏、历史、专辑、缩略图、HLS 缓存等
+    │   └── {library_id}/       # 每库独立：收藏、历史、专辑、缩略图等
     └── logs/
 ```
 
@@ -246,7 +246,7 @@ AI 会读取项目文档 → 检测本机环境 → 逐项安装配置 → 启�
 |------|:----:|------|
 | **Windows 10/11** | ✅ | 主要开发与运行环境 |
 | **Python 3.10+** | ✅ | 运行 FastAPI 后端 |
-| **ffmpeg / ffprobe** | ✅ | 缩略图、HLS 切片与播放探测；需在 PATH 中 |
+| **ffmpeg / ffprobe** | ✅ | 缩略图、重封装与播放探测；需在 PATH 中 |
 | **Node.js 18+** | ⚠️ | 开发模式与 `restart.py --build` 时需要；首次 `restart.py` 可自动安装 npm 依赖 |
 
 > **提示：** 服务绑定 `127.0.0.1:3460`，设计为本机使用。PotPlayer 等外部播放器路径请在启动后的**设置页**配置，勿写入公开仓库。
@@ -257,24 +257,24 @@ AI 会读取项目文档 → 检测本机环境 → 逐项安装配置 → 启�
 
 - 顶栏 **选择视频库** 下拉切换；URL 支持 `?lib=` 参数
 - **设置 → 视频库**：管理现有库（别名、路径）、添加新库（别名 + 路径 + 浏览）
-- 收藏、历史、缩略图、HLS 缓存、分类元数据按库隔离；播放/缩略图等支持全局与单库设置
+- 收藏、历史、缩略图、分类元数据按库隔离；播放/缩略图等支持全局与单库设置
 
 ### 播放页与连播
 
-- HTML5 模式下，右侧**播放列表**可按文件名（自然排序）、标题、时间、大小等排序
+- 播放页右侧**播放列表**可按文件名（自然排序）、标题、时间、大小等排序
 - 设置中可开关 **播完自动下一集**、**记忆播放位置（续播）**
-- **续播**：进度写入 `play_history.json`；再次打开从上次位置继续（≥15 秒且距结尾 ≥45 秒）；直连与 HLS 均支持
-- **HTML5 直传读盘**：`/api/stream` 按小块推送，播放缓冲接近视频码率，退出后尽快停止读盘
-- **HLS 切片**：每段 30 秒；播放器暂停时挂起 ffmpeg，继续播放时恢复
+- **续播**：进度写入 `play_history.json`；再次打开从上次位置继续（≥15 秒且距结尾 ≥45 秒）
+- **movi-player 内嵌播放**：`/api/stream` Range 直连 + WASM demux；画面右下角齿轮菜单可切换音轨/字幕
+- **异常文件自动修复**：碎片化 / 多段 mdat 播放前自动重封装（可后台批量预修复，设置「后台自动修复」）
 - 追剧建议：筛选到目标文件夹后，每页选「全部」，列表排序选「文件名 A→Z（自然）」
 
 ### 日常浏览
 
 1. 启动服务后，左侧选择**分类**，下方可展开**子目录树**
 2. 顶栏**搜索框**支持标题、文件名、分类关键词
-3. 点击卡片**播放**；悬停 **♥** 收藏、**📁** 管理专辑
+3. 点击卡片**播放**；悬停卡片可**多段视频预览**（默认开，可调段数/时长）；悬停 ♥ 收藏、📁 管理专辑
 4. **♥ 我的收藏** / **⏱ 最近播放** / **📁 我的专辑** 切换顶栏视图
-5. 格式下拉筛选特殊封装；可修复项右键「修复为标准 MP4」
+5. 格式下拉可筛「无法播放」（浏览器硬解不支持的编码）；播放时自动修复或提示用外部播放器
 6. 顶栏可切换**经典 / 影院**布局与**暗色 / 亮色**主题
 
 ### 我的专辑
@@ -291,23 +291,19 @@ AI 会读取项目文档 → 检测本机环境 → 逐项安装配置 → 启�
 - 默认**仅按需生成当前浏览页**；可在设置中开启「后台补全全库」
 - 可暂停队列、重试失败项、挑选候选帧
 
-### 播放模式
+### 播放器
 
-在**设置**中选择：
-
-| `player_mode` | 行为 |
-|---------------|------|
-| `html5` | 页面内播放器 + hls.js |
-| `potplayer` | 调用外部 PotPlayer（需配置路径） |
+播放统一走 **movi-player 内嵌播放器**（浏览器 WASM demux + 硬解直连）。无法硬解的编码（mpeg2/VC-1/WMV 等）播放时弹窗提示，可一键**用外部播放器打开**（设置「外部播放器路径」，默认自动探测 PotPlayer）。
 
 播放策略自动缓存，常见场景：
 
 | 场景 | 策略 |
 |------|------|
-| 标准 H.264 小 MP4 | 小块流式直传（`/api/stream`） |
-| 大文件 / moov 在末尾 | HLS copy |
-| AV1 / HEVC / VP9 | HLS 转 H.264 |
-| PNG 头 + MPEG-TS 伪装 | HLS copy（`input_format=mpegts`） |
+| 标准 H.264 / H.265 / AV1 / VP9 MP4 | 直连 `/api/stream`（WASM demux） |
+| 碎片化 / 多段 mdat MP4 | 播放前自动重封装（`html5_auto_remux` 可后台预修复） |
+| PNG 头 + MPEG-TS 伪装 | 直连（movi-player 的 demuxer 支持 TS） |
+| 非 MP4 容器（MKV 等） | 尝试直连；失败提示外部播放器 |
+| mpeg2 / VC-1 / WMV 等硬解不支持 | 提示用外部播放器打开 |
 
 ### 文件管理
 
@@ -326,15 +322,14 @@ AI 会读取项目文档 → 检测本机环境 → 逐项安装配置 → 启�
 | `thumb_progress_bar` | auto | 缩略图进度条显示模式 |
 | `default_page_size` | 32 | 每页条数（支持自适应） |
 | `ui_theme` | dark | 界面主题 dark / light |
-| `player_mode` | html5 | html5 / potplayer |
 | `html5_playlist_autoplay` | true | 播完是否按列表连播下一集 |
 | `html5_resume_playback` | true | 是否记忆播放位置并续播 |
 | `html5_wheel_seek_sec` | 5 | 播放区滚轮快进/快退（0=关闭） |
 | `html5_player_prev_key` / `next_key` | `.` / `/` | 上/下一集快捷键 |
-| `html5_modern_codecs_direct` | true | 新编码尝试浏览器直连 |
-| `html5_fragmented_mp4` | external | 碎片化 MP4 处理方式 |
-| `hls_large_h264` / `hls_moov_end_h264` | false | 大文件 / moov 末尾是否 HLS |
-| `potplayer_path` | （自动探测） | 外部播放器路径 |
+| `html5_disable_movi_hotkeys` | true | 关闭 movi-player 内置快捷键（避免与油猴脚本冲突） |
+| `html5_hover_preview` | true | 悬停卡片多段视频预览（可调段数/每段秒数） |
+| `html5_auto_remux` | true | 后台空闲时自动批量重封装可修复文件 |
+| `external_player_path` | （自动探测） | 外部播放器路径（VLC / MPC-HC / PotPlayer 等） |
 | `history_retention_days` | 180 | 播放历史保留天数 |
 
 ## 十一、开发
@@ -421,7 +416,7 @@ python restart.py
 1. 拉取最新 `master`（Git 历史保留，代码为 Vue 3 全新架构）
 2. 执行 `python scripts/setup.py` 或 `python restart.py`（自动装依赖）
 3. **保留** `data/libraries/{库ID}/` 下：`.thumbs/`、`favorites.json`、`play_history.json`、`albums.json`、`category_meta.json`
-4. **可清理**：`data/**/cache/hls/`、`data/logs/`（运行 `python scripts/clean_cache.py`）
+4. **可清理**：`data/logs/` 与旧版遗留的 HLS 缓存（运行 `python scripts/clean_cache.py`）
 5. 默认端口由 **3456** 改为 **3460**
 6. 详细变更见 [CHANGELOG.md](./CHANGELOG.md)
 
@@ -444,7 +439,7 @@ python restart.py
 
 **5. 多个视频库的数据存在哪？**
 
-`data/libraries.json` 登记库列表；每库数据在 `data/libraries/{library_id}/`（收藏、历史、**专辑**、缩略图、HLS 缓存等）。全局设置在 `data/settings.json`。
+`data/libraries.json` 登记库列表；每库数据在 `data/libraries/{library_id}/`（收藏、历史、**专辑**、缩略图等）。全局设置在 `data/settings.json`。
 
 **6. 能暴露到局域网或公网吗？**
 
@@ -452,15 +447,15 @@ python restart.py
 
 **7. 伪装 MPEG-TS 是什么？**
 
-部分文件扩展名为 `.mp4`，文件头却是 PNG 魔数，偏移后为 MPEG-TS 流。探测后使用 `-f mpegts` 切片，详见 PRD 附录。
+部分文件扩展名为 `.mp4`，文件头却是 PNG 魔数，偏移后为 MPEG-TS 流。movi-player 的 WASM demuxer 可直接解析，无需切片。
 
-**8. HLS 缓存占多少磁盘？**
+**8. 无法播放的视频怎么办？**
 
-单库默认上限 **2GB**（LRU 淘汰）。每段 **30 秒**。升级大版本后旧切片可运行 `python scripts/clean_cache.py` 清理并重建。
+浏览器硬解不支持的编码（mpeg2/VC-1/WMV 等）播放时会弹窗提示，可用**外部播放器打开**（设置「外部播放器路径」，默认自动探测 PotPlayer）。碎片化 / 多段 mdat 文件会自动重封装修复，无需手动处理。
 
 **9. 续播进度存在哪？**
 
-`data/libraries/{library_id}/play_history.json` 的 `position_sec` 字段；HTML5 直连与 HLS 均支持。HLS 边切边播时，若目标位置尚未切片完成，可能需要等待缓冲。
+`data/libraries/{library_id}/play_history.json` 的 `position_sec` 字段；movi-player 直连播放与自动修复后均支持。
 
 **10. `restart.py` 和 `restart.py --build` 有什么区别？**
 
@@ -481,7 +476,7 @@ python restart.py
 - **端口 3460 被占用** → 再运行一次 `restart.py`（会先停旧进程）
 - **提示未找到 Vite** → 在 `frontend` 目录执行 `npm install`，或运行 `python scripts/setup.py`
 - **缩略图全失败** → 检查 `ffmpeg -version` 是否在 PATH 中
-- **播放黑屏** → 查看播放策略是否为 `unsupported`，或等待 HLS 切片完成
+- **播放黑屏/卡加载** → 按 F12 看是否有 `[LocGallery]` 或 movi-player 报错；异常文件会自动重封装，硬解不支持的可点「用外部播放器打开」
 
 ## 十五、已知限制
 

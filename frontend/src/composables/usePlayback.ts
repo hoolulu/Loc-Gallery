@@ -22,13 +22,9 @@ import {
 
   startRemux,
 
-  stopPlay,
-
 } from '@/api/play'
 
 import { formatDuration, getSavedPosition } from '@/utils/format'
-
-import { clearHlsSliceThrottle } from './useHlsThrottle'
 import { createMoviPlayer } from './useMoviPlayer'
 import { usePlaylistLoader } from './usePlaylistLoader'
 import { usePlayerUrlSync } from './usePlayerUrlSync'
@@ -62,34 +58,6 @@ export function usePlayback() {
 
 
 
-  function destroyHls() {
-
-    const hls = player.hlsInstance
-
-    if (hls) {
-
-      try {
-
-        hls.stopLoad()
-
-        hls.detachMedia()
-
-        hls.destroy()
-
-      } catch {
-
-        /* ignore */
-
-      }
-
-      player.hlsInstance = null
-
-    }
-
-  }
-
-
-
   function destroyMovi() {
     try {
       player.moviPlayer?.destroy()
@@ -100,11 +68,6 @@ export function usePlayback() {
   }
 
   async function stopSlice() {
-
-    clearHlsSliceThrottle()
-
-    destroyHls()
-
     destroyMovi()
 
     player.activeSliceVideoId = null
@@ -119,19 +82,7 @@ export function usePlayback() {
 
     }
 
-    try {
-
-      await stopPlay()
-
-    } catch {
-
-      /* ignore */
-
-    }
-
   }
-
-
 
   function unbindSaver() {
 
@@ -211,7 +162,6 @@ export function usePlayback() {
 
 
   async function startMovi(id: string, item: Video, session: number, extra: { remuxable?: boolean } = {}) {
-    destroyHls()
     destroyMovi()
 
     const host = player.moviHostEl
@@ -380,7 +330,7 @@ export function usePlayback() {
 
       await runVideoRemux(item.id, item, session)
 
-    } else if (choice === 'potplayer') {
+    } else if (choice === 'external') {
 
       await playExternal(item.id)
 
@@ -491,7 +441,7 @@ export function usePlayback() {
 
       })
 
-      if (choice === 'potplayer') await playExternal(item.id)
+      if (choice === 'external') await playExternal(item.id)
 
       player.closePlayer()
 
