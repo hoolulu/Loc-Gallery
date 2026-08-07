@@ -1,218 +1,3 @@
-# Loc Gallery
-
-**本地视频画廊 Web 服务 — 双击启动，浏览器里浏览、搜索、播放你的整个视频库**
-
-> **当前版本：11.0.1（主分支）** · Vue 3 架构重构大版本 · 经典 / 影院布局 · 单端口开发热更新
-
-扫描本机视频目录，自动生成缩略图网格，支持分类筛选、收藏、播放记录、**我的专辑**、内嵌 HTML5 播放（movi-player，WASM 解码）与外部播放器兜底。专为 Windows 本地大库设计：新视频拷入即索引，下载中的文件不误报失败，外部删除自动同步收藏、历史与专辑归属。
-
-**默认访问地址：** `http://127.0.0.1:3460`
-
----
-
-### ✨ 一分钟看懂
-
-<table width="100%">
-<tr><td style="white-space: nowrap; width: 1%;"><b>🖱 一键启动</b></td><td>双击 <code>restart.py</code> → 自动停旧进程、装依赖、起服务、打开浏览器</td></tr>
-<tr><td style="white-space: nowrap;"><b>📚 多视频库</b></td><td>顶栏「选择视频库」切换多个本地文件夹；收藏、历史、<strong>专辑</strong>、缩略图按库隔离；设置中统一管理</td></tr>
-<tr><td style="white-space: nowrap;"><b>📂 本地视频库</b></td><td>递归扫描各库根目录，按一级子目录作为「分类」展示</td></tr>
-<tr><td style="white-space: nowrap;"><b>🖼 智能缩略图</b></td><td>按需生成当前页；下载/写入中的文件等待稳定后再处理，不误报失败</td></tr>
-<tr><td style="white-space: nowrap;"><b>📺 剧集连播</b></td><td>播放列表支持文件名自然排序；HTML5 模式按列表顺序自动播下一集</td></tr>
-<tr><td style="white-space: nowrap;"><b>▶ 可靠播放</b></td><td>movi-player 内嵌播放器（WASM demux + 直连 Range 流）；续播与连播可设置；外部播放器自动探测（默认 PotPlayer）</td></tr>
-<tr><td style="white-space: nowrap;"><b>♥ 收藏 & 历史</b></td><td>卡片收藏、最近播放、播放次数与<strong>续播进度</strong>；外部删文件后列表自动清理</td></tr>
-<tr><td style="white-space: nowrap;"><b>📁 我的专辑</b></td><td>自定义专辑合集，视频可多专辑归属；本页生成专辑、播放全部、播放器内加入专辑</td></tr>
-<tr><td style="white-space: nowrap;"><b>🏷 格式处理</b></td><td>多段 mdat / 碎片化 MP4 播放前自动重封装（可后台批量预修复）；mpeg2/VC-1/WMV 等无法硬解编码自动提示用外部播放器</td></tr>
-<tr><td style="white-space: nowrap;"><b>⏱ 视频时长</b></td><td>卡片显示时长；后台 ffprobe 探测并写入索引，顶栏可查看进度</td></tr>
-<tr><td style="white-space: nowrap;"><b>🔄 实时同步</b></td><td>文件监听 + SSE 推送；新视频自动索引、排队缩略图与播放策略探测</td></tr>
-<tr><td style="white-space: nowrap;"><b>🎨 布局主题</b></td><td>经典 / 影院两种布局，暗色 / 亮色主题；顶栏一键切换</td></tr>
-</table>
-
-<table width="100%">
-<tr><th>操作</th><th>说明</th></tr>
-<tr><td style="white-space: nowrap;">双击 <code>restart.py</code></td><td>启动 / 重启服务（开发模式，支持前端热更新）</td></tr>
-<tr><td style="white-space: nowrap;"><code>restart.py --build</code></td><td>生产模式：先构建前端再由后端托管</td></tr>
-<tr><td>顶栏「♥ 我的收藏」</td><td>只看已收藏视频</td></tr>
-<tr><td>顶栏「⏱ 最近播放」</td><td>按播放时间倒序浏览</td></tr>
-<tr><td>顶栏「📁 我的专辑」</td><td>专辑列表与详情；右键/批量/播放器「加入专辑」</td></tr>
-<tr><td>顶栏「刷新」</td><td>强制重扫视频库</td></tr>
-<tr><td>卡片悬停 → ♥ / 📁</td><td>收藏 / 管理专辑归属</td></tr>
-<tr><td>「批量」模式</td><td>多选删除、移动、批量收藏、加入专辑、修复 MP4</td></tr>
-</table>
-
-### 界面预览
-
-> 演示数据为风景图占位，非真实视频库内容。10.0.0 为 Vue 3 重构版，界面布局与交互已升级，以下为功能示意截图。
-
-**画廊浏览** — 左侧分类与子目录树，网格分页浏览整个视频库。
-
-<p align="center"><img src="doc/screenshots/gallery.png" width="100%" alt="画廊浏览" /></p>
-
-**内嵌播放** — 页面内播放器与右侧播放列表；支持排序、上一个/下一个、HTML5 连播。
-
-<p align="center"><img src="doc/screenshots/player.png" width="100%" alt="内嵌播放" /></p>
-
-**我的收藏** — 一键筛选已收藏视频，卡片左上角显示红心标记。
-
-<p align="center"><img src="doc/screenshots/favorites.png" width="100%" alt="我的收藏" /></p>
-
-**最近播放** — 按播放时间倒序浏览，快速回到上次看到的内容。
-
-<p align="center"><img src="doc/screenshots/history.png" width="100%" alt="最近播放" /></p>
-
-**设置** — 视频库管理、全局播放与缩略图选项；外部播放器路径（默认自动探测 PotPlayer）。
-
-<p align="center"><img src="doc/screenshots/settings.png" width="100%" alt="设置" /></p>
-
-**批量选择** — 多选后批量收藏、移动、删除，底部浮出操作栏。
-
-<p align="center"><img src="doc/screenshots/batch.png" width="100%" alt="批量选择" /></p>
-
----
-
-## 一、为什么你需要这个
-
-管理本地视频库，常见痛点是：
-
-- **文件夹里找** → 没有预览，文件名又长又乱
-- **播放器自带库** → 分类弱、缩略图慢、特殊格式搞不定
-- **NAS / 媒体服务器** → 配置重、要常驻服务、个人单机用不上
-- **下载还没完** → 被索引后缩略图失败，满屏报错
-
-Loc Gallery 的做法是：**只在本机跑一个轻量 Web 服务**，浏览器当界面，ffmpeg 当引擎。文件怎么放磁盘就怎么扫，不搬家、不转码入库；播放统一走 movi-player 直连（WASM demux），异常结构（碎片化/多段 mdat）自动重封装修复。下载中的文件会等稳定后再处理，不会污染失败列表。
-
-## 二、谁适合用
-
-- 在 Windows 上管理**大量本地视频**（多分类目录、多格式混放）
-- 希望**浏览器快速浏览缩略图**，内嵌播放或调外部播放器
-- 需要**收藏、播放记录、批量整理**，但不需要多用户 / 公网 / 刮削元数据
-- 视频库里有**伪装格式**（如 PNG 头 + MPEG-TS）或大体积文件——movi-player 的 WASM demuxer 可直接解
-
-**不适合：** 多用户远程访问、移动端 App、TMDB 刮削、云端同步。
-
-## 三、核心能力一览
-
-| 模块 | 能力 |
-|------|------|
-| **多视频库** | 注册多个根目录、顶栏切换、按库隔离数据；`data/libraries.json` + `data/libraries/{id}/` |
-| **画廊浏览** | 虚拟滚动网格、搜索、多种排序、子目录树、面包屑 |
-| **布局与主题** | 经典 / 影院布局；暗色 / 亮色主题 |
-| **分类管理** | 拖拽排序、多种排序模式 |
-| **缩略图** | 按需 / 后台补全、队列进度、失败重试、候选挑选 |
-| **播放** | movi-player 内嵌播放器（WASM demux + `/api/stream` Range 直连）；列表连播与续播可配置；后台自动批量重封装可修复文件 |
-| **收藏 & 历史** | 持久化 JSON；外部删文件自动 prune |
-| **我的专辑** | 按库 `albums.json`；多对多归属；封面默认首条视频缩略图 |
-| **格式处理** | 播放前自动重封装（碎片化/多段 mdat）；后台批量预修复；仅硬解不支持的编码标「无法播放」并提示外部播放器 |
-| **文件管理** | 删除（回收站）、重命名、移动、打开所在文件夹 |
-| **稳定性** | 下载中文件延迟索引；size/mtime 变化时重置缩略图状态 |
-
-> 详细功能规格见 [doc/PRD.md](./doc/PRD.md)。
-
-## 四、工作逻辑
-
-从「视频在磁盘上」到「浏览器里能看能播」，整条链路分 4 个阶段：
-
-```
-① 扫描索引 — watchdog 多库监听 + 稳定检测 → scanner 按库缓存 → 内存索引 + 版本号
-         ↓
-② 缩略图   — 当前页高优先级排队 → ffmpeg 抽帧 → data/libraries/{id}/.thumbs/
-         ↓
-③ 播放策略 — ffprobe 探测编码/封装 → 写入 playback_plans.json → direct 直连 / 自动重封装
-         ↓
-④ 前端展示 — SSE 推送进度 → 网格卡片 + movi-player 播放器 + 收藏/历史视图
-```
-
-**下载中文件的处理：**
-
-```
-文件变更事件 → 加入「待稳定」队列 → 等待 size/mtime 不再变化
-         ↓
-通过稳定性检测 → 纳入索引 → 排队缩略图 & 播放探测
-         ↓
-若曾被误标失败 → reconcile 重置为「等待」，不计入失败列表
-```
-
-## 五、系统架构
-
-```
-┌─────────────────────────────────────────────────────────┐
-│              浏览器 (Vue 3 SPA / Vite)                   │
-│  pages · components · Pinia · movi-player               │
-└────────────────────────┬────────────────────────────────┘
-                         │ HTTP / SSE（开发时 Vite 代理 /api）
-┌────────────────────────▼────────────────────────────────┐
-│              FastAPI (loc_gallery.server)                │
-│  REST API · 静态资源（生产模式）· SSE 事件推送            │
-├──────────┬──────────┬──────────┬──────────┬─────────────┤
-│  scanner  │thumb_mgr │remux_mgr │media_probe│library/    │
-│          │          │(自动修复) │          │favorite/   │
-│          │          │          │          │history/    │
-│          │          │          │          │album_store │
-└────┬─────┴────┬─────┴────┬─────┴────┬─────┴──────┬──────┘
-     │          │          │          │            │
-     ▼          ▼          ▼          ▼            ▼
-  各库视频根   libraries/  (原地替换  playback    favorites.json
-  目录        {id}/.thumbs  修复后)    _plans.json play_history.json
-              libraries.json          albums.json
-```
-
-| 层级 | 技术 |
-|------|------|
-| 前端 | Vue 3、TypeScript、Vite、Pinia、Tailwind CSS 4、movi-player |
-| Web 框架 | FastAPI、uvicorn |
-| 文件监听 | watchdog |
-| 媒体处理 | ffmpeg、ffprobe |
-| 运行时 | Python 3.10+、Node.js 18+（开发/构建）、Windows 10/11 |
-
-## 六、目录结构
-
-```
-<项目根目录>/
-├── README.md                   # 本文件
-├── CHANGELOG.md                # 版本更新记录
-├── VERSION                     # 当前版本号
-├── restart.py                  # 一键启动（先停后起，打开浏览器）
-├── dev_backend.py              # 仅启动后端 API（调试用）
-├── frontend/                   # Vue 3 前端
-│   ├── package.json
-│   └── src/
-├── backend/
-│   ├── requirements.txt        # Python 依赖
-│   ├── src/loc_gallery/      # Python 后端包
-│   │   ├── config.py           # 端口、常量；VIDEO_ROOT 为默认库种子
-│   │   ├── server.py           # FastAPI 入口
-│   │   ├── scanner.py          # 视频索引
-│   │   ├── thumb_manager.py    # 缩略图队列
-│   │   ├── media_probe.py      # 播放策略探测
-│   │   ├── remux_manager.py    # 重封装修复（含后台批量预修复）
-│   │   └── ...
-│   └── tests/                  # 后端测试
-├── scripts/
-│   ├── setup.py                # 首次依赖安装
-│   ├── clean_cache.py          # 清理运行时日志缓存
-│   ├── service.py              # 启停共享逻辑
-│   └── ports.py                # 端口常量
-├── config/
-│   └── settings.example.json   # 设置模板
-├── doc/
-│   ├── PRD.md                  # 产品需求文档
-│   └── screenshots/            # README 界面截图
-└── data/                       # 运行时数据（gitignored）
-    ├── settings.json           # 全局设置
-    ├── libraries.json          # 已注册视频库列表
-    ├── libraries/
-    │   └── {library_id}/       # 每库独立：收藏、历史、专辑、缩略图等
-    └── logs/
-```
-
-## 七、环境要求
-
-| 组件 | 要求 |
-|------|------|
-| 操作系统 | Windows 10/11 |
-| Python | 3.10+ |
-| Node.js | 18+（开发模式与 `--build` 生产构建时需要；`restart.py` 首次运行可自动 `npm install`） |
-| ffmpeg / ffprobe | 需在 PATH 中可用（WinGet 安装亦可） |
-
 ## 八、安装与配置
 
 ### 🧠 方式一：AI 傻瓜安装（推荐）
@@ -251,7 +36,45 @@ AI 会读取项目文档 → 检测本机环境 → 逐项安装配置 → 启�
 
 > **提示：** 服务绑定 `127.0.0.1:3460`，设计为本机使用。PotPlayer 等外部播放器路径请在启动后的**设置页**配置，勿写入公开仓库。
 
-## 九、使用方法
+## 九、用 AI 提示词更新项目
+
+本项目从架构到功能均可由 AI 协作开发（前端 Vue 3 / 后端 FastAPI 双端）。把下面这段**交接提示词**发给 AI 助手，即可快速接管项目进行更新：
+
+````markdown
+【交接】Loc Gallery —— 本地视频画廊 Web 服务（私有、单用户、Windows 优先）
+
+技术栈：
+- 前端：Vue 3 + TS + Vite + Pinia + Tailwind CSS 4（frontend/），播放器为 movi-player web 组件
+- 后端：FastAPI + uvicorn（backend/src/loc_gallery/），ffmpeg/ffprobe 为媒体引擎
+- 启动：`python restart.py` 开发单端口 3460（Vite 热更新，/api 代理到 3461）；默认访问 http://127.0.0.1:3460
+- 生产构建：`python restart.py --build`（用户日常用 dev 模式，体验一致）
+
+关键链路：
+- 扫描索引(watchdog+稳定检测) → 缩略图队列(thumb_manager) → 播放策略探测(media_probe 写 playback_plans)
+- 播放：movi-player 直连 /api/stream Range 流（WASM demux）；碎片化/多段 mdat 文件播放前自动重封装(remux_manager)
+- 后台批量预修复：html5_auto_remux 默认开，空闲时自动重封装可修复文件
+- 数据按库隔离：data/libraries/{id}/（favorites/history/albums/category_meta/settings/.thumbs）
+
+注意事项：
+- 不要在生产构建上纠结：dev 模式（restart.py）即可，构建验证可跳过
+- 后端改了设置/模块后需要用户手动重启（restart.py）才生效；前端 composables 改动硬刷(Ctrl+Shift+R)即可
+- 服务无认证，仅 127.0.0.1 本机
+- data/、.workbuddy/ 全部 gitignored，勿提交
+````
+
+**常用提示词示例：**
+
+| 想做什么 | 提示词 |
+|----------|--------|
+| 修一个 bug | 「播放器点击后卡加载，F12 报 XXX，定位根因并修复，说明改动文件」 |
+| 加小功能 | 「在右键菜单加「导出列表」：把当前筛选结果导出为 txt 路径清单」 |
+| 调样式 | 「卡片悬停预览浮层整体再大 10%，保持视口约束」 |
+| 发新版本 | 「发布 11.0.x：更新 VERSION/package/CHANGELOG/README，提交 git」 |
+| 全量检查 | 「全系统审计：端点匹配、import 完整性、死代码、文档同步，给出报告」 |
+
+> 💡 提示词要点：给出**技术栈 + 启动方式 + 关键链路 + 注意事项**即可，AI 会自己读代码定位。改完代码务必让 AI 跑 `vue-tsc` 与 `py_compile` 验证，涉及后端再重启服务。
+
+## 十、使用方法
 
 ### 多视频库
 
@@ -309,7 +132,7 @@ AI 会读取项目文档 → 检测本机环境 → 逐项安装配置 → 启�
 
 「批量」模式下可多选，执行删除（回收站）、移动、批量收藏、加入专辑、修复 MP4。
 
-## 十、设置项（全局）
+## 十一、设置项（全局）
 
 在设置面板中统一保存至 `data/settings.json`（完整列表见 [doc/PRD.md](./doc/PRD.md)）：
 
@@ -332,7 +155,7 @@ AI 会读取项目文档 → 检测本机环境 → 逐项安装配置 → 启�
 | `external_player_path` | （自动探测） | 外部播放器路径（VLC / MPC-HC / PotPlayer 等） |
 | `history_retention_days` | 180 | 播放历史保留天数 |
 
-## 十一、开发
+## 十二、开发
 
 ```powershell
 cd <项目根目录>
@@ -364,44 +187,6 @@ python -m unittest backend.tests.test_album_store backend.tests.test_album_api b
 # 部分测试需先启动服务
 python backend/tests/test_auto_new_video.py
 ```
-
-## 十二、用 AI 提示词更新项目
-
-本项目从架构到功能均可由 AI 协作开发（前端 Vue 3 / 后端 FastAPI 双端）。把下面这段**交接提示词**发给 AI 助手，即可快速接管项目进行更新：
-
-````markdown
-【交接】Loc Gallery —— 本地视频画廊 Web 服务（私有、单用户、Windows 优先）
-
-技术栈：
-- 前端：Vue 3 + TS + Vite + Pinia + Tailwind CSS 4（frontend/），播放器为 movi-player web 组件
-- 后端：FastAPI + uvicorn（backend/src/loc_gallery/），ffmpeg/ffprobe 为媒体引擎
-- 启动：`python restart.py` 开发单端口 3460（Vite 热更新，/api 代理到 3461）；默认访问 http://127.0.0.1:3460
-- 生产构建：`python restart.py --build`（用户日常用 dev 模式，体验一致）
-
-关键链路：
-- 扫描索引(watchdog+稳定检测) → 缩略图队列(thumb_manager) → 播放策略探测(media_probe 写 playback_plans)
-- 播放：movi-player 直连 /api/stream Range 流（WASM demux）；碎片化/多段 mdat 文件播放前自动重封装(remux_manager)
-- 后台批量预修复：html5_auto_remux 默认开，空闲时自动重封装可修复文件
-- 数据按库隔离：data/libraries/{id}/（favorites/history/albums/category_meta/settings/.thumbs）
-
-注意事项：
-- 不要在生产构建上纠结：dev 模式（restart.py）即可，构建验证可跳过
-- 后端改了设置/模块后需要用户手动重启（restart.py）才生效；前端 composables 改动硬刷(Ctrl+Shift+R)即可
-- 服务无认证，仅 127.0.0.1 本机
-- data/、.workbuddy/ 全部 gitignored，勿提交
-````
-
-**常用提示词示例：**
-
-| 想做什么 | 提示词 |
-|----------|--------|
-| 修一个 bug | 「播放器点击后卡加载，F12 报 XXX，定位根因并修复，说明改动文件」 |
-| 加小功能 | 「在右键菜单加「导出列表」：把当前筛选结果导出为 txt 路径清单」 |
-| 调样式 | 「卡片悬停预览浮层整体再大 10%，保持视口约束」 |
-| 发新版本 | 「发布 11.0.x：更新 VERSION/package/CHANGELOG/README，提交 git」 |
-| 全量检查 | 「全系统审计：端点匹配、import 完整性、死代码、文档同步，给出报告」 |
-
-> 💡 提示词要点：给出**技术栈 + 启动方式 + 关键链路 + 注意事项**即可，AI 会自己读代码定位。改完代码务必让 AI 跑 `vue-tsc` 与 `py_compile` 验证，涉及后端再重启服务。
 
 ## 十三、隐私与分享
 
