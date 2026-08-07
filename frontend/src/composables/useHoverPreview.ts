@@ -44,6 +44,42 @@ let seekTimer: ReturnType<typeof setTimeout> | null = null
 let segTimer: ReturnType<typeof setTimeout> | null = null
 // 首帧渲染回调：video 的 playing 事件（真正有帧）触发时显示画面，避免 play() resolve 即显示导致黑屏
 let onFirstFrame: (() => void) | null = null
+
+/** 每次预览新建独立 <video>：复用元素切换 src 会残留缓冲/事件状态，
+ *  导致"先预览别的视频再悬停此视频"时偶发黑屏。新建成本极低。 */
+function createVideo(): HTMLVideoElement {
+  const v = document.createElement('video')
+  v.className = 'hover-preview-video'
+  v.muted = true
+  v.playsInline = true
+  v.preload = 'metadata'
+  // 初始透明：加载/seek 阶段盖在 <img> 上不闪黑，play() 成功后才显示
+  v.style.opacity = '0'
+  v.addEventListener('error', () => {
+    // 仅预览运行中的错误才静默终止（清空 src 时的正常 abort 不算）
+    if (running) {
+      previewFailed.value = true
+      stopNow()
+    }
+  })
+  // 真正有帧渲染（playing）才显示视频；play() resolve 不代表首帧就绪
+  v.addEventListener('playing', () => {
+    if (running && onFirstFrame) {
+      const fn = onFirstFrame
+      onFirstFrame = null
+      fn()
+    }
+  })
+  // 视频尺寸就绪（videoWidth/videoHeight 可用）时刷新宽高比：
+  // loadedmetadata 阶段尺寸可能还是 0，resize 事件保证拿到真实比例（竖屏/超宽屏自适应）
+  v.addEventListener('resize', () => {
+    if (running) setPreviewRatioFromVideo(v)
+  })
+  v.addEventListener('loadeddata', () => {
+    if (running) setPreviewRatioFromVideo(v)
+  })
+  return v
+}
 // 预览区「加载中」占位开关（由 PathTip 消费：加载中显示 spinner，就绪后隐藏）
 const placeholderLoading = ref(true)
 // 视频宽高比（videoWidth/videoHeight，如横屏 1.78、竖屏 0.56）；null=未知（占位保持 16:9）
@@ -61,46 +97,11 @@ function setPreviewRatioFromVideo(v: HTMLVideoElement) {
   if (w > 0 && h > 0 && previewRatio.value !== w / h) previewRatio.value = w / h
 }
 
-function getVideo(): HTMLVideoElement {
-  if (!video) {
-    video = document.createElement('video')
-    video.className = 'hover-preview-video'
-    video.muted = true
-    video.playsInline = true
-    video.preload = 'metadata'
-    // 初始透明：加载/seek 阶段盖在 <img> 上不闪黑，play() 成功后才显示
-    video.style.opacity = '0'
-    video.addEventListener('error', () => {
-      // 仅预览运行中的错误才静默终止（清空 src 时的正常 abort 不算）
-      if (running) {
-        previewFailed.value = true
-        stopNow()
-      }
-    })
-    // 真正有帧渲染（playing）才显示视频；play() resolve 不代表首帧就绪
-    video.addEventListener('playing', () => {
-      if (running && onFirstFrame) {
-        const fn = onFirstFrame
-        onFirstFrame = null
-        fn()
-      }
-    })
-    // 视频尺寸就绪（videoWidth/videoHeight 可用）时刷新宽高比：
-    // loadedmetadata 阶段尺寸可能还是 0，resize 事件保证拿到真实比例（竖屏/超宽屏自适应）
-    video.addEventListener('resize', () => {
-      if (running) setPreviewRatioFromVideo(video!)
-    })
-    video.addEventListener('loadeddata', () => {
-      if (running) setPreviewRatioFromVideo(video!)
-    })
-  }
-  return video
-}
-
 function stopNow() {
   running = false
   setPlaceholderLoading(true)
   previewRatio.value = null // 重置为默认 16:9，供下一轮预览重新计算
+  onFirstFrame = null // 清残留回调，避免复用元素时旧回调被新 playing 误触发
   if (pendingStart) {
     clearTimeout(pendingStart)
     pendingStart = null
@@ -119,15 +120,13 @@ function stopNow() {
   }
   if (video) {
     const el = video
+    video = null
     el.pause()
     el.style.opacity = '0' // 先淡出（CSS 500ms 过渡）再移除，避免瞬间消失突兀
     el.removeAttribute('src')
     el.load()
-    // 等淡出过渡完成后才从 DOM 移除；若期间已开启新预览（复用同一元素）则跳过
-    const container = el.parentElement
-    window.setTimeout(() => {
-      if (!running && el.parentElement === container) el.remove()
-    }, 550)
+    // 等淡出过渡完成后移除元素（元素独立，不复用，不影响新预览）
+    window.setTimeout(() => el.remove(), 550)
   }
   activeId = ''
 }
@@ -160,8 +159,9 @@ function runMontage(v: HTMLVideoElement, duration: number, positions: number[], 
         seekTimer = null
       }
       if (!running) return
-      // play() 只代表开始播放，首帧渲染由 playing 事件回调（onFirstFrame）驱动，
-      // 避免数据未到位时 play resolve 即显示 → 黑屏
+      // 显示时机完全交给 playing 事件（真正有帧渲染才触发）：
+      // play() resolve 不代表首帧就绪，提前显示会黑屏；不做时间兜底，
+      // 因为 seek 后流加载慢时强制显示同样是黑屏——由 SEEK_TIMEOUT 负责失败兜底。
       const showVideo = () => {
         if (!running) return
         // 播放时 videoWidth/videoHeight 一定可用：补最后一次比例刷新
@@ -170,20 +170,6 @@ function runMontage(v: HTMLVideoElement, duration: number, positions: number[], 
         setPlaceholderLoading(false) // 视频就绪，隐藏「加载中」占位
       }
       onFirstFrame = showVideo
-      // 兜底：若 playing 事件错过（如 seek 后已处于播放态），1s 内强制显示
-      const fallback = window.setTimeout(() => {
-        if (onFirstFrame) {
-          onFirstFrame = null
-          showVideo()
-        }
-      }, 1000)
-      const origShow = showVideo
-      const wrapped: typeof showVideo = () => {
-        window.clearTimeout(fallback)
-        onFirstFrame = null
-        origShow()
-      }
-      onFirstFrame = wrapped
       void v.play().catch(() => {})
       if (segTimer) clearTimeout(segTimer)
       segTimer = setTimeout(() => playAt(i + 1), segSec * 1000)
@@ -214,9 +200,11 @@ export function useHoverPreview() {
 
       // video 立即创建并加载（不依赖浮层容器）：metadata 就绪即得到真实比例，
       // PathTip 据此渲染预览区；容器出现后再 append 并开始播放（未挂载时 play 无画面）。
-      const v = getVideo()
+      // 每次新建独立元素，避免复用残留（缓冲/事件状态）导致的偶发黑屏。
+      const v = createVideo()
+      video = v
       setPlaceholderLoading(true) // 新一轮加载，恢复「加载中」占位
-      v.style.opacity = '0' // 复用元素时重置，避免上次淡出未完成直接显示
+      v.style.opacity = '0'
       v.src = streamUrl(videoItem.id)
       v.load()
 
