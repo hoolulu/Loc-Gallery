@@ -2,7 +2,7 @@
 
 **本地视频画廊 Web 服务 — 双击启动，浏览器里浏览、搜索、播放你的整个视频库**
 
-> **当前版本：11.0.0（主分支）** · Vue 3 架构重构大版本 · 经典 / 影院布局 · 单端口开发热更新
+> **当前版本：11.0.1（主分支）** · Vue 3 架构重构大版本 · 经典 / 影院布局 · 单端口开发热更新
 
 扫描本机视频目录，自动生成缩略图网格，支持分类筛选、收藏、播放记录、**我的专辑**、内嵌 HTML5 播放（movi-player，WASM 解码）与外部播放器兜底。专为 Windows 本地大库设计：新视频拷入即索引，下载中的文件不误报失败，外部删除自动同步收藏、历史与专辑归属。
 
@@ -220,7 +220,7 @@ Loc Gallery 的做法是：**只在本机跑一个轻量 Web 服务**，浏览�
 把下面这段提示词复制到 **Cursor / OpenCode / Claude Code** 等 AI 聊天框发送，AI 会自动完成安装与配置：
 
 ```text
-请调研 https://github.com/hoolulu/Loc-Gallery 项目（当前主分支为 10.0.0），按照 README 依次完成本机安装：
+请调研 https://github.com/hoolulu/Loc-Gallery 项目（当前主分支为 11.0.1），按照 README 依次完成本机安装：
 
 1. 克隆仓库到合适目录（Windows）
 2. 确认 Python 3.10+ 可用；执行 python scripts/setup.py 安装依赖（或运行 python restart.py，首次会自动安装）
@@ -365,7 +365,45 @@ python -m unittest backend.tests.test_album_store backend.tests.test_album_api b
 python backend/tests/test_auto_new_video.py
 ```
 
-## 十二、隐私与分享
+## 十二、用 AI 提示词更新项目
+
+本项目从架构到功能均可由 AI 协作开发（前端 Vue 3 / 后端 FastAPI 双端）。把下面这段**交接提示词**发给 AI 助手，即可快速接管项目进行更新：
+
+````markdown
+【交接】Loc Gallery —— 本地视频画廊 Web 服务（私有、单用户、Windows 优先）
+
+技术栈：
+- 前端：Vue 3 + TS + Vite + Pinia + Tailwind CSS 4（frontend/），播放器为 movi-player web 组件
+- 后端：FastAPI + uvicorn（backend/src/loc_gallery/），ffmpeg/ffprobe 为媒体引擎
+- 启动：`python restart.py` 开发单端口 3460（Vite 热更新，/api 代理到 3461）；默认访问 http://127.0.0.1:3460
+- 生产构建：`python restart.py --build`（用户日常用 dev 模式，体验一致）
+
+关键链路：
+- 扫描索引(watchdog+稳定检测) → 缩略图队列(thumb_manager) → 播放策略探测(media_probe 写 playback_plans)
+- 播放：movi-player 直连 /api/stream Range 流（WASM demux）；碎片化/多段 mdat 文件播放前自动重封装(remux_manager)
+- 后台批量预修复：html5_auto_remux 默认开，空闲时自动重封装可修复文件
+- 数据按库隔离：data/libraries/{id}/（favorites/history/albums/category_meta/settings/.thumbs）
+
+注意事项：
+- 不要在生产构建上纠结：dev 模式（restart.py）即可，构建验证可跳过
+- 后端改了设置/模块后需要用户手动重启（restart.py）才生效；前端 composables 改动硬刷(Ctrl+Shift+R)即可
+- 服务无认证，仅 127.0.0.1 本机
+- data/、.workbuddy/ 全部 gitignored，勿提交
+````
+
+**常用提示词示例：**
+
+| 想做什么 | 提示词 |
+|----------|--------|
+| 修一个 bug | 「播放器点击后卡加载，F12 报 XXX，定位根因并修复，说明改动文件」 |
+| 加小功能 | 「在右键菜单加「导出列表」：把当前筛选结果导出为 txt 路径清单」 |
+| 调样式 | 「卡片悬停预览浮层整体再大 10%，保持视口约束」 |
+| 发新版本 | 「发布 11.0.x：更新 VERSION/package/CHANGELOG/README，提交 git」 |
+| 全量检查 | 「全系统审计：端点匹配、import 完整性、死代码、文档同步，给出报告」 |
+
+> 💡 提示词要点：给出**技术栈 + 启动方式 + 关键链路 + 注意事项**即可，AI 会自己读代码定位。改完代码务必让 AI 跑 `vue-tsc` 与 `py_compile` 验证，涉及后端再重启服务。
+
+## 十三、隐私与分享
 
 本项目设计为**纯本地、单用户**使用。分享代码或打包给他人时，请注意：
 
@@ -386,7 +424,7 @@ python backend/tests/test_auto_new_video.py
 
 `.gitignore` 已默认忽略 `data/` 与日志、PID 文件。若初始化 Git 仓库，请勿将上述运行时文件加入版本库。
 
-## 十三、FAQ
+## 十四、FAQ
 
 ### 如何手动安装？
 
@@ -411,7 +449,7 @@ python restart.py
 
 可选：将 `config/settings.example.json` 复制为 `data/settings.json` 后按需修改。
 
-### 从 8.x 升级到 10.0.0 要注意什么？
+### 从旧版本升级要注意什么？
 
 1. 拉取最新 `master`（Git 历史保留，代码为 Vue 3 全新架构）
 2. 执行 `python scripts/setup.py` 或 `python restart.py`（自动装依赖）
@@ -462,7 +500,7 @@ python restart.py
 - `restart.py`：开发模式，Vite 在 3460 端口提供热更新，适合日常使用和改前端
 - `restart.py --build`：先 `npm run build`，再由后端在 3460 托管 `frontend/dist`，适合不需要改前端的稳定运行
 
-## 十四、日志与排错
+## 十五、日志与排错
 
 | 路径 | 内容 |
 |------|------|
@@ -478,12 +516,12 @@ python restart.py
 - **缩略图全失败** → 检查 `ffmpeg -version` 是否在 PATH 中
 - **播放黑屏/卡加载** → 按 F12 看是否有 `[LocGallery]` 或 movi-player 报错；异常文件会自动重封装，硬解不支持的可点「用外部播放器打开」
 
-## 十五、已知限制
+## 十六、已知限制
 
 1. 主要为 Windows 环境优化
 2. 单用户本地，无认证
 3. 大库首次打开当前页时，缩略图按需生成，可能有短暂等待
-4. H.264 转码播放 CPU 占用较高
+4. HEVC/AV1 等现代编码依赖浏览器硬解（Chromium 94+ / 104+），老浏览器可能无法内嵌播放（可用外部播放器兜底）
 
 ## 许可证
 
