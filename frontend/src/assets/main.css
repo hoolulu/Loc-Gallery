@@ -16,6 +16,8 @@
   --lg-bg-header: #0f0f0f;
   --lg-bg-player: #000000;
   --lg-bg-overlay: rgba(0, 0, 0, 0.72);
+  /* 悬停预览「加载中」背景：比 UI 背景略亮，贴近视频平均亮度，淡入视频时不突兀 */
+  --lg-hover-preview-bg: #3a3a3a;
   --lg-text-primary: #f1f1f1;
   --lg-text-secondary: #aaaaaa;
   --lg-text-muted: #717171;
@@ -61,6 +63,8 @@
   --lg-bg-header: #ffffff;
   --lg-bg-player: #000000;
   --lg-bg-overlay: rgba(0, 0, 0, 0.45);
+  /* 亮色模式：预览加载背景保持浅灰（接近占位图底） */
+  --lg-hover-preview-bg: #e8e8e8;
   --lg-text-primary: #0f0f0f;
   --lg-text-secondary: #3f3f3f;
   --lg-text-muted: #5c5c5c;
@@ -800,13 +804,13 @@ body.has-selection .card-album-badge {
   max-height: min(70vh, 864px);
   border-radius: 8px 8px 0 0;
 }
-/* 悬浮预览「加载占位」：深色底 + 居中 spinner；尺寸由 JS 按原视频宽高比自适应（内联 style） */
+/* 悬浮预览「加载占位」：背景比 UI 背景亮一档（贴近视频平均亮度），淡入视频时不突兀 */
 /* 宽高不设 transition（比例瞬变，无缩放动画）；就绪后 opacity 淡出，与视频淡入同帧交叉掩盖 */
 .path-tip-preview--placeholder {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--lg-bg-secondary);
+  background: var(--lg-hover-preview-bg);
   border-radius: 8px 8px 0 0;
   transition: opacity 0.5s ease;
 }
