@@ -16,14 +16,6 @@ const hoverPreviewEnabled = computed(
   () => settings.settings?.html5_hover_preview !== false,
 )
 
-// 浮层显示条件：浮层始终在 visible 后渲染（v-if），但位置挂起在 -9999；
-// 「就绪」才定位：预览开启时等比例就绪（一次定位不跳动），预览关闭时立即定位
-const tipReady = computed(
-  () =>
-    !!item.value &&
-    (!hoverPreviewEnabled.value || !!previewRatio.value || !!previewFailed.value),
-)
-
 // 预览区渲染条件：预览开启且比例就绪（有真实尺寸才渲染，避免空容器挂 video 黑屏）
 const previewAreaVisible = computed(
   () => hoverPreviewEnabled.value && !!previewRatio.value,
@@ -146,13 +138,14 @@ function onImgLoad() {
   void nextTick(() => afterLayout(tipRef.value))
 }
 
-// 浮层就绪（visible 且比例就绪/失败）后执行定位测量
-watch(tipReady, (v) => {
-  if (v && visible.value) void nextTick(() => afterLayout(tipRef.value))
-})
-// 预览开启时 visible 可能先于比例就绪，tipReady 变化已覆盖；此处兼容直接 visible 场景
+// 定位触发（预览开启时只认 previewRatio：占位渲染出真实尺寸后一次定位，避免提前以不完整尺寸定位跳动）：
+// - 预览关闭：visible 即定位（缩略图/文字）
+// - 预览开启：previewRatio 就绪（延迟等占位渲染完成）定位；previewFailed 失败时定位（文字浮层）
 watch(visible, (v) => {
-  if (v && tipReady.value) void nextTick(() => afterLayout(tipRef.value))
+  if (v && !hoverPreviewEnabled.value) void nextTick(() => afterLayout(tipRef.value))
+})
+watch(previewFailed, (v) => {
+  if (v && visible.value) void nextTick(() => afterLayout(tipRef.value))
 })
 </script>
 
