@@ -190,34 +190,14 @@ export function useHoverPreview() {
       running = true
 
       // video 立即创建并加载（不依赖浮层容器）：metadata 就绪即得到真实比例，
-      // PathTip 据此渲染预览区；容器出现后再 append 继续播放。
+      // PathTip 据此渲染预览区；容器出现后再 append 并开始播放（未挂载时 play 无画面）。
       const v = getVideo()
       setPlaceholderLoading(true) // 新一轮加载，恢复「加载中」占位
       v.style.opacity = '0' // 复用元素时重置，避免上次淡出未完成直接显示
       v.src = streamUrl(videoItem.id)
       v.load()
 
-      const onMeta = () => {
-        if (!running) return
-        const dur = v.duration
-        if (!Number.isFinite(dur) || dur <= 0) {
-          previewFailed.value = true
-          stopNow()
-          return
-        }
-        // 拿到真实宽高比，浮层占位据此自适应（竖屏视频不再被压成横屏）
-        setPreviewRatioFromVideo(v)
-        // 段数/每段秒数从设置读取（后端重启前可能缺失，用默认值兜底）
-        const segCount = Number(settings.settings?.html5_hover_preview_segments)
-        const segSec = Number(settings.settings?.html5_hover_preview_segment_sec)
-        const positions = computePositions(Number.isFinite(segCount) && segCount > 0 ? segCount : 5)
-        const secPerSeg = Number.isFinite(segSec) && segSec > 0 ? segSec : 5
-        runMontage(v, dur, positions, secPerSeg)
-      }
-      if (v.readyState >= 1) onMeta()
-      else v.addEventListener('loadedmetadata', onMeta, { once: true })
-
-      // 浮层渲染完成后把 video 挂到预览区（video 已加载，直接播）
+      // 浮层渲染完成后把 video 挂到预览区，挂载成功才开始 seek/play
       const attach = (tries = 0) => {
         if (!running) return
         const container = findPreviewContainer()
@@ -229,7 +209,35 @@ export function useHoverPreview() {
           return
         }
         if (v.parentElement !== container) container.appendChild(v)
+        const dur = v.duration
+        if (!Number.isFinite(dur) || dur <= 0) {
+          previewFailed.value = true
+          stopNow()
+          return
+        }
+        // 挂载完成：读取比例（浮层此时已渲染占位）并开始蒙太奇播放
+        setPreviewRatioFromVideo(v)
+        const segCount = Number(settings.settings?.html5_hover_preview_segments)
+        const segSec = Number(settings.settings?.html5_hover_preview_segment_sec)
+        const positions = computePositions(Number.isFinite(segCount) && segCount > 0 ? segCount : 5)
+        const secPerSeg = Number.isFinite(segSec) && segSec > 0 ? segSec : 5
+        runMontage(v, dur, positions, secPerSeg)
       }
+
+      // metadata 就绪（比例可知）即触发浮层渲染；若加载极快且容器已存在则直接走 attach
+      const onMeta = () => {
+        if (!running) return
+        const dur = v.duration
+        if (!Number.isFinite(dur) || dur <= 0) {
+          previewFailed.value = true
+          stopNow()
+          return
+        }
+        setPreviewRatioFromVideo(v)
+      }
+      if (v.readyState >= 1) onMeta()
+      else v.addEventListener('loadedmetadata', onMeta, { once: true })
+
       attach()
     }, START_DELAY)
   }
