@@ -139,13 +139,9 @@ function stopNow() {
   activeId = ''
 }
 
-/** 浮层渲染完成后，其预览区才存在于 DOM（须等占位元素渲染，否则容器高度 0，video 挂入黑屏） */
+/** 浮层渲染完成后，其预览区才存在于 DOM（PathTip 浮层始终渲染，容器一直在；占位按比例渲染） */
 function findPreviewContainer(): HTMLElement | null {
-  const placeholder = document.querySelector<HTMLElement>(
-    '.path-tip .path-tip-preview--placeholder',
-  )
-  if (placeholder) return placeholder.parentElement
-  return null
+  return document.querySelector<HTMLElement>('.path-tip .path-tip-preview')
 }
 
 function runMontage(v: HTMLVideoElement, duration: number, positions: number[], segSec: number) {
@@ -197,70 +193,50 @@ export function useHoverPreview() {
     pendingStart = setTimeout(() => {
       pendingStart = null
       // 真正启动时才重置失败标记：mouseenter 时重置会被旧预览异步 error 重新污染
-      // （previewFailed=true → tipVisible 提前 → 浮层渲染空预览区 → 黑屏）
       previewFailed.value = false
       stopNow()
       activeId = videoItem.id
       running = true
 
-      // video 立即创建并加载（不依赖浮层容器）：metadata 就绪即得到真实比例，
-      // PathTip 据此渲染预览区；容器出现后再 append 并开始播放（未挂载时 play 无画面）。
-      // 每次新建独立元素，避免复用残留（缓冲/事件状态）导致的偶发黑屏。
-      const v = createVideo()
-      video = v
-      setPlaceholderLoading(true) // 新一轮加载，恢复「加载中」占位
-      v.style.opacity = '0'
-      v.src = streamUrl(videoItem.id)
-      v.load()
-
-      let started = false // 蒙太奇是否已启动（防止 attach/onMeta 重复触发）
-
-      // 挂载 + metadata 均就绪后启动播放
-      const startMontageIfReady = () => {
-        if (!running || started) return
-        if (!v.parentElement) return // 未挂载，等 attach
-        const dur = v.duration
-        if (!Number.isFinite(dur) || dur <= 0) return // metadata 未就绪，等 loadedmetadata
-        started = true
-        setPreviewRatioFromVideo(v)
-        const segCount = Number(settings.settings?.html5_hover_preview_segments)
-        const segSec = Number(settings.settings?.html5_hover_preview_segment_sec)
-        const positions = computePositions(Number.isFinite(segCount) && segCount > 0 ? segCount : 5)
-        const secPerSeg = Number.isFinite(segSec) && segSec > 0 ? segSec : 5
-        runMontage(v, dur, positions, secPerSeg)
-      }
-
-      // 浮层渲染完成后把 video 挂到预览区
-      const attach = (tries = 0) => {
+      // 先等浮层渲染完成（容器存在），再挂载 video 并加载——
+      // video 必须挂载到 DOM 后初始化才可靠（未挂载提前加载会黑屏，97ffc88 回归）
+      const tryMount = (tries = 0) => {
         if (!running) return
         const container = findPreviewContainer()
         if (!container) {
-          // 浮层在比例就绪后才渲染（PathTip 的 tipVisible 条件），稍等再挂载
+          // 浮层（PathTip）有自己的 220ms 显示延迟 + nextTick 渲染，稍等再挂载
           if (tries < MOUNT_RETRIES) {
-            setTimeout(() => attach(tries + 1), MOUNT_RETRY_MS)
+            setTimeout(() => tryMount(tries + 1), MOUNT_RETRY_MS)
           }
           return
         }
-        if (v.parentElement !== container) container.appendChild(v)
-        startMontageIfReady()
-      }
-
-      // metadata 就绪（比例可知）即触发浮层渲染；一律等事件，避免复用元素时
-      // 同步 readyState 拿到上次加载的残留状态导致误判失败
-      const onMeta = () => {
-        if (!running) return
-        const dur = v.duration
-        if (!Number.isFinite(dur) || dur <= 0) {
-          previewFailed.value = true
-          stopNow()
-          return
+        const v = createVideo()
+        video = v
+        setPlaceholderLoading(true) // 新一轮加载，恢复「加载中」占位
+        v.style.opacity = '0'
+        container.appendChild(v)
+        v.src = streamUrl(videoItem.id)
+        v.load()
+        const onMeta = () => {
+          if (!running) return
+          const dur = v.duration
+          if (!Number.isFinite(dur) || dur <= 0) {
+            previewFailed.value = true
+            stopNow()
+            return
+          }
+          // 拿到真实宽高比，浮层占位据此自适应（竖屏视频不再被压成横屏）
+          setPreviewRatioFromVideo(v)
+          // 段数/每段秒数从设置读取（后端重启前可能缺失，用默认值兜底）
+          const segCount = Number(settings.settings?.html5_hover_preview_segments)
+          const segSec = Number(settings.settings?.html5_hover_preview_segment_sec)
+          const positions = computePositions(Number.isFinite(segCount) && segCount > 0 ? segCount : 5)
+          const secPerSeg = Number.isFinite(segSec) && segSec > 0 ? segSec : 5
+          runMontage(v, dur, positions, secPerSeg)
         }
-        setPreviewRatioFromVideo(v)
-        startMontageIfReady()
+        v.addEventListener('loadedmetadata', onMeta, { once: true })
       }
-      v.addEventListener('loadedmetadata', onMeta, { once: true })
-
-      attach()
+      tryMount()
     }, START_DELAY)
   }
 

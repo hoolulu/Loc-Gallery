@@ -16,12 +16,10 @@ const hoverPreviewEnabled = computed(
   () => settings.settings?.html5_hover_preview !== false,
 )
 
-// 浮层显示条件：预览开启时等比例就绪才显示（文字+预览区同时出现，一次定位不跳动；
-// 预览失败时不等待比例，直接显示文字浮层——但预览区仍由 previewRatio 控制，不会渲染空容器）；
-// 预览关闭时立即显示
-const tipVisible = computed(
+// 浮层显示条件：浮层始终在 visible 后渲染（v-if），但位置挂起在 -9999；
+// 「就绪」才定位：预览开启时等比例就绪（一次定位不跳动），预览关闭时立即定位
+const tipReady = computed(
   () =>
-    visible.value &&
     !!item.value &&
     (!hoverPreviewEnabled.value || !!previewRatio.value || !!previewFailed.value),
 )
@@ -148,19 +146,19 @@ function onImgLoad() {
   void nextTick(() => afterLayout(tipRef.value))
 }
 
-// 浮层首次可显示时（visible 已 true、预览比例就绪/失败）执行定位测量
-watch(tipVisible, (v) => {
-  if (v) void nextTick(() => afterLayout(tipRef.value))
+// 浮层就绪（visible 且比例就绪/失败）后执行定位测量
+watch(tipReady, (v) => {
+  if (v && visible.value) void nextTick(() => afterLayout(tipRef.value))
 })
-// 预览开启时 visible 可能先于比例就绪，tipVisible 变化已覆盖；此处兼容直接 visible 场景
+// 预览开启时 visible 可能先于比例就绪，tipReady 变化已覆盖；此处兼容直接 visible 场景
 watch(visible, (v) => {
-  if (v && tipVisible.value) void nextTick(() => afterLayout(tipRef.value))
+  if (v && tipReady.value) void nextTick(() => afterLayout(tipRef.value))
 })
 </script>
 
 <template>
   <div
-    v-if="tipVisible && item"
+    v-if="visible && item"
     ref="tipRef"
     class="path-tip"
     :class="{ 'path-tip--measuring': measuring }"
