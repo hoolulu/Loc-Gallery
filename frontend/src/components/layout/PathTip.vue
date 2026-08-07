@@ -157,9 +157,10 @@ watch(visible, (v) => {
       ✕
     </button>
     <div class="path-tip-preview">
-      <!-- 悬浮预览启用：加载占位（按原视频比例自适应），视频就绪后由 useHoverPreview 在其上淡入 -->
+      <!-- 悬浮预览启用：预览区仅在视频比例就绪后渲染（直接以正确比例出现，
+           不经过 16:9 占位 → 真实比例的横→竖变化）；就绪后 spinner → 视频淡入 -->
       <div
-        v-if="hoverPreviewEnabled"
+        v-if="hoverPreviewEnabled && previewRatio"
         class="path-tip-preview--placeholder"
         :class="{ 'path-tip-preview--placeholder-idle': !placeholderLoading }"
         :style="placeholderStyle"
