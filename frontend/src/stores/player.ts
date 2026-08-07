@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import type Hls from 'hls.js'
 import type { SortMode, Video } from '@/types'
 import type { PlaylistContext } from '@/utils/playlist'
+import type { createMoviPlayer } from '@/composables/useMoviPlayer'
 
 export const usePlayerStore = defineStore('player', () => {
   const open = ref(false)
@@ -21,6 +22,17 @@ export const usePlayerStore = defineStore('player', () => {
   const overlayIndeterminate = ref(false)
   const statusText = ref('')
   const videoEl = ref<HTMLVideoElement | null>(null)
+  const canvasEl = ref<HTMLCanvasElement | null>(null)
+  const subtitleEl = ref<HTMLDivElement | null>(null)
+  const moviPlayer = ref<ReturnType<typeof createMoviPlayer> | null>(null)
+  // 宿主 div：命令式创建的 <movi-player> web 组件节点挂在这里
+  const moviHostEl = ref<HTMLElement | null>(null)
+  // 播放进度/状态（供自定义控制栏绑定）
+  const currentTime = ref(0)
+  const duration = ref(0)
+  const isPaused = ref(true)
+  const volume = ref(1)
+  const muted = ref(false)
   const playlistContext = ref<PlaylistContext | null>(null)
   const playlistLoadedThrough = ref(0)
   const playlistTotalPages = ref(0)
@@ -98,6 +110,15 @@ export const usePlayerStore = defineStore('player', () => {
     overlayIndeterminate,
     statusText,
     videoEl,
+    canvasEl,
+    subtitleEl,
+    moviPlayer,
+    moviHostEl,
+    currentTime,
+    duration,
+    isPaused,
+    volume,
+    muted,
     playlistContext,
     playlistLoadedThrough,
     playlistTotalPages,

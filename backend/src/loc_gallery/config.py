@@ -34,6 +34,9 @@ HTML5_WHEEL_SEEK_SEC = 5  # 播放画面区滚轮每次快进/快退秒数（0=�
 HTML5_MODERN_CODECS_DIRECT = True  # AV1/HEVC/VP9 在 MP4/WebM 中尝试浏览器直连（实验）
 HTML5_PLAYER_PREV_KEY = "."  # 播放页上一个
 HTML5_PLAYER_NEXT_KEY = "/"  # 播放页下一个
+# movi-player 内置键盘快捷键（空格/方向键/z/x 等）。与油猴等全局快捷键脚本冲突时设 False
+# 关闭后键位完全交给宿主脚本接管（on-screen 控件不受影响，仅键盘失效）
+HTML5_DISABLE_MOVI_HOTKEYS = True
 
 PORT = int(os.environ.get("LOC_GALLERY_PORT", "3460"))
 HOST = "127.0.0.1"

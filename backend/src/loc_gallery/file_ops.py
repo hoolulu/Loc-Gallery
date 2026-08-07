@@ -136,7 +136,11 @@ def rename_video(library_id: str, video_id: str, new_name: str) -> VideoItem:
     if stem.lower() == old_path.stem.lower():
         return item
 
-    new_path = old_path.with_name(f"{stem}{old_path.suffix}")
+    # 用户可能直接传了带扩展名的完整文件名（如 "xxx.mp4"），避免追加成 "xxx.mp4.mp4"
+    suffix = old_path.suffix
+    if suffix and stem.lower().endswith(suffix.lower()):
+        stem = stem[: -len(suffix)]
+    new_path = old_path.with_name(f"{stem}{suffix}")
     if new_path.exists():
         raise ValueError("同名文件已存在")
 

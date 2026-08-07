@@ -1,5 +1,3 @@
-import Hls from 'hls.js'
-
 import { useLibraryStore } from '@/stores/library'
 
 import { usePlayerStore } from '@/stores/player'
@@ -14,15 +12,9 @@ import {
 
   getPlayInfo,
 
-  getPlayStatus,
-
   getRemuxStatus,
 
-  hlsPlaylistUrl,
-
   playExternal,
-
-  preparePlay,
 
   recordPlay,
 
@@ -36,7 +28,8 @@ import {
 
 import { formatDuration, getSavedPosition } from '@/utils/format'
 
-import { bindHlsSliceThrottle, clearHlsSliceThrottle } from './useHlsThrottle'
+import { clearHlsSliceThrottle } from './useHlsThrottle'
+import { createMoviPlayer } from './useMoviPlayer'
 import { usePlaylistLoader } from './usePlaylistLoader'
 import { usePlayerUrlSync } from './usePlayerUrlSync'
 import { resetPlayerRestore } from './usePlayerRestore'
@@ -97,11 +90,22 @@ export function usePlayback() {
 
 
 
+  function destroyMovi() {
+    try {
+      player.moviPlayer?.destroy()
+    } catch {
+      /* ignore */
+    }
+    player.moviPlayer = null
+  }
+
   async function stopSlice() {
 
     clearHlsSliceThrottle()
 
     destroyHls()
+
+    destroyMovi()
 
     player.activeSliceVideoId = null
 
@@ -153,184 +157,6 @@ export function usePlayback() {
 
 
 
-  function bindSaver(video: HTMLVideoElement, id: string) {
-
-    unbindSaver()
-
-    const resume = settings.settings?.html5_resume_playback !== false
-
-    const onTimeupdate = () => {
-
-      if (!resume) return
-
-      if (saveTimer) clearTimeout(saveTimer)
-
-      saveTimer = setTimeout(() => {
-
-        void savePosition(id, video.currentTime, video.duration || undefined)
-
-      }, 2500)
-
-    }
-
-    const onPause = () => {
-
-      if (!resume || video.currentTime < 1) return
-
-      void savePosition(id, video.currentTime, video.duration || undefined)
-
-    }
-
-    const onEnded = () => {
-
-      void savePosition(id, video.duration || video.currentTime, video.duration || undefined)
-
-      void (async () => {
-
-        await stopSlice()
-
-        if (settings.settings?.html5_playlist_autoplay !== false && player.open) {
-
-          await playAdjacent(1)
-
-        }
-
-      })()
-
-    }
-
-    video.addEventListener('timeupdate', onTimeupdate)
-
-    video.addEventListener('pause', onPause)
-
-    video.addEventListener('ended', onEnded)
-
-    video._handlers = { onTimeupdate, onPause, onEnded }
-
-  }
-
-
-
-  async function seekResume(video: HTMLVideoElement, item: Video) {
-
-    const resume = settings.settings?.html5_resume_playback !== false
-
-    const target = getSavedPosition(item.playPosition, item.playDuration, resume)
-
-    if (!target) return null
-
-    try {
-
-      video.currentTime = target
-
-    } catch {
-
-      return null
-
-    }
-
-    player.statusText = `从 ${formatDuration(target)} 继续播放`
-
-    return target
-
-  }
-
-
-
-  async function waitCanPlay(video: HTMLVideoElement, session: number, timeoutMs = 120000) {
-
-    if (player.isStale(session)) throw new Error('已切换视频')
-
-    return new Promise<void>((resolve, reject) => {
-
-      const cleanup = () => {
-
-        clearTimeout(timer)
-
-        video.removeEventListener('canplay', onReady)
-
-        video.removeEventListener('error', onError)
-
-      }
-
-      const onReady = () => {
-
-        cleanup()
-
-        resolve()
-
-      }
-
-      const onError = () => {
-
-        cleanup()
-
-        reject(new Error('视频加载失败'))
-
-      }
-
-      if (video.readyState >= 3) {
-
-        resolve()
-
-        return
-
-      }
-
-      const timer = setTimeout(() => {
-
-        cleanup()
-
-        reject(new Error('视频缓冲超时'))
-
-      }, timeoutMs)
-
-      video.addEventListener('canplay', onReady)
-
-      video.addEventListener('error', onError, { once: true })
-
-    })
-
-  }
-
-
-
-  async function waitHlsReady(id: string, session: number, transcode = false) {
-
-    const limit = (transcode ? 300 : 180) * 1000
-
-    const start = Date.now()
-
-    while (Date.now() - start < limit) {
-
-      if (player.isStale(session)) throw new Error('已切换视频')
-
-      const st = await getPlayStatus(id)
-
-      if (st.ready) return st
-
-      if (st.state === 'error') throw new Error(st.error || 'HLS 准备失败')
-
-      player.showOverlay(
-
-        transcode ? '正在转码' : '正在切片',
-
-        `已等待 ${Math.round((Date.now() - start) / 1000)}s`,
-
-        { indeterminate: !st.segments, progress: st.segments ? 50 : null },
-
-      )
-
-      await new Promise((r) => setTimeout(r, 600))
-
-    }
-
-    throw new Error('准备超时')
-
-  }
-
-
-
   async function waitRemuxDone(id: string, session: number) {
 
     const start = Date.now()
@@ -377,151 +203,116 @@ export function usePlayback() {
 
     if (player.isStale(session)) return
 
-    await startDirect(id, item, session)
+    // 修复后的文件已可被 mp4box 正常解析；传 remuxable:false 防止 watchdog 再次触发重封装
+    await startMovi(id, item, session, { remuxable: false })
 
   }
 
 
 
-  async function startDirect(id: string, item: Video, session: number) {
-
+  async function startMovi(id: string, item: Video, session: number, extra: { remuxable?: boolean } = {}) {
     destroyHls()
+    destroyMovi()
 
-    const video = videoEl()
+    const host = player.moviHostEl
+    if (!host) return
 
-    if (!video) return
+    const url = streamUrl(id, library.activeLibraryId)
+    let readyFired = false
+    let watchdog: ReturnType<typeof setTimeout> | null = null
+    player.showOverlay('加载视频', '正在分析…', { indeterminate: true })
 
-    video.src = streamUrl(id, library.activeLibraryId)
+    const resume = settings.settings?.html5_resume_playback !== false
+    const resumeAt = getSavedPosition(item.playPosition, item.playDuration, resume) || 0
 
-    player.showOverlay('加载视频', '正在缓冲…', { indeterminate: true })
-
-    await waitCanPlay(video, session)
-
-    if (player.isStale(session)) return
-
-    await seekResume(video, item)
-
-    await video.play().catch(() => {})
-
-    player.hideOverlay()
-
-    bindSaver(video, id)
-
-    void recordPlay(id)
-
-    updateMediaSession(item)
-    prefetchIfNeeded()
-  }
-
-  async function startHls(id: string, item: Video, session: number, transcode = false) {
-
-    destroyHls()
-
-    const video = videoEl()
-
-    if (!video) return
-
-    const url = hlsPlaylistUrl(id, library.activeLibraryId)
-
-    const resumeAt = getSavedPosition(item.playPosition, item.playDuration) || 0
-
-    player.showOverlay(transcode ? '转码播放' : 'HLS 播放', '连接切片流…', { indeterminate: true })
-
-
-
-    if (Hls.isSupported()) {
-
-      await new Promise<void>((resolve, reject) => {
-
-        const timer = setTimeout(() => reject(new Error('HLS 清单加载超时')), 45000)
-
-        const hls = new Hls({ enableWorker: true, startPosition: resumeAt })
-
-        player.hlsInstance = hls
-
-        hls.loadSource(url)
-
-        hls.attachMedia(video)
-
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-
-          clearTimeout(timer)
-
-          resolve()
-
-        })
-
-        hls.on(Hls.Events.ERROR, (_, data) => {
-
-          if (data?.fatal) {
-
-            clearTimeout(timer)
-
-            reject(new Error('HLS 播放失败'))
-
+    const mp = createMoviPlayer(
+      host,
+      url,
+      {
+        onReady: () => {
+          readyFired = true
+          if (watchdog) clearTimeout(watchdog)
+          if (player.isStale(session)) return
+          player.moviPlayer = mp
+          player.currentTime = 0
+          player.duration = mp.getDuration()
+          player.isPaused = false
+          player.volume = 1
+          player.muted = false
+          player.hideOverlay()
+          // 当前为 ready 但还没播放时显式播放；已 playing 则跳过（避免重复 play 报错）
+          if (mp.getPaused()) void mp.play()
+          if (resumeAt > 0) {
+            player.statusText = `从 ${formatDuration(resumeAt)} 继续播放`
+            // 续播提示 3 秒后自动消失
+            setTimeout(() => {
+              if (player.statusText.startsWith('从 ')) player.statusText = ''
+            }, 3000)
           }
+          void recordPlay(id)
+          updateMediaSession(item)
+          prefetchIfNeeded()
+        },
+        onTime: (t) => {
+          player.currentTime = t
+          player.duration = mp.getDuration() || player.duration
+          if (!resume) return
+          if (saveTimer) clearTimeout(saveTimer)
+          saveTimer = setTimeout(() => {
+            void savePosition(id, t, mp.getDuration() || undefined)
+          }, 2500)
+        },
+        onEnded: () => {
+          void savePosition(id, mp.getDuration() || mp.getCurrentTime(), mp.getDuration() || undefined)
+          void (async () => {
+            await stopSlice()
+            if (settings.settings?.html5_playlist_autoplay !== false && player.open) {
+              await playAdjacent(1)
+            }
+          })()
+        },
+        onStateChange: (state) => {
+          player.isPaused = state !== 'playing'
+        },
+        onError: (err: unknown) => {
+          const msg =
+            err instanceof Error ? err.message : typeof err === 'string' ? err : '未知播放错误'
+          player.hideOverlay()
+          player.statusText = `播放失败：${msg}`
+          setTimeout(() => {
+            if (player.statusText.startsWith('播放失败')) player.statusText = ''
+          }, 15000)
+        },
+      },
+      { startAt: resumeAt, noHotkeys: settings.settings?.html5_disable_movi_hotkeys !== false },
+    )
 
-        })
-
-      })
-
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-
-      video.src = url
-
+    // 元素创建即触发加载，无需 await load()；就绪回调在 statechange(ready/playing) 中处理后续。
+    if (player.isStale(session)) {
+      mp.destroy()
+      player.moviPlayer = null
     } else {
-
-      throw new Error('浏览器不支持 HLS')
-
+      // 保底诊断：若 12 秒内未进入就绪状态，说明播放器未初始化
+      // （多为自定义元素未注册、WASM 解码器或视频流加载失败）。
+      watchdog = setTimeout(async () => {
+        if (readyFired || player.isStale(session)) return
+        // 挂起未就绪：多为 movi-player 的 mp4box demuxer 无法解析该文件 moov
+        // （多段 mdat / sdtp 等，media_probe 已标记 remuxable）。自动走重封装修复，
+        // 避免永久卡"加载中"。修复后文件原地替换，mtime/size 变化会失效 plan 缓存。
+        if (extra.remuxable) {
+          destroyMovi()
+          player.moviPlayer = null
+          await runVideoRemux(id, item, session)
+          return
+        }
+        player.showOverlay(
+          '播放器无响应',
+          '12 秒内未进入就绪状态。请按 F12 打开控制台，查看是否有 [LocGallery] 或 movi-player 的红色报错（常见于 .wasm 解码器 / 视频流加载失败），截图发我即可定位。',
+          { indeterminate: false },
+        )
+      }, 12000)
     }
-
-
-
-    await waitCanPlay(video, session, transcode ? 180000 : 120000)
-
-    if (player.isStale(session)) return
-
-    await seekResume(video, item)
-
-    await video.play().catch(() => {})
-
-    player.hideOverlay()
-
-    bindSaver(video, id)
-
-    bindHlsSliceThrottle(video, id, session)
-
-    void recordPlay(id)
-
-    updateMediaSession(item)
-    prefetchIfNeeded()
   }
-
-  async function startWebHls(id: string, item: Video, session: number, info: PlayInfo) {
-
-    const transcode = info.mode === 'hls' && !!info.transcode
-
-    player.activeSliceVideoId = id
-
-    player.showOverlay('准备播放', '启动切片任务…', { indeterminate: true })
-
-    const prep = await preparePlay(id)
-
-    if (player.isStale(session)) return
-
-    if (!prep.ready && !prep.cached) {
-
-      await waitHlsReady(id, session, transcode)
-
-    }
-
-    if (player.isStale(session)) return
-
-    await startHls(id, item, session, transcode)
-
-  }
-
-
 
   function updateMediaSession(item: Video) {
 
@@ -653,24 +444,28 @@ export function usePlayback() {
 
 
       if (info.mode === 'hls') {
-
-        await startWebHls(item.id, item, session, info)
-
+        // 多段 mdat / 碎片化 MP4（media_probe 标记 remuxable）不能被 movi-player
+        // 的 mp4box 直接解析（会永久卡 loading），先重封装修复再播；普通大文件
+        // 的 hls 方案（remuxable=false）仍直连播放。
+        if (info.remuxable) {
+          await runVideoRemux(item.id, item, session)
+        } else {
+          await startMovi(item.id, item, session, { remuxable: false })
+        }
         return
-
       }
 
 
 
       try {
 
-        await startDirect(item.id, item, session)
+        await startMovi(item.id, item, session, { remuxable: !!info.remuxable })
 
       } catch (err) {
 
         if (info.experimental_direct) {
 
-          await startWebHls(item.id, item, session, { ...info, mode: 'hls', transcode: true })
+          await startMovi(item.id, item, session, { remuxable: !!info.remuxable })
 
         } else {
 
@@ -740,17 +535,17 @@ export function usePlayback() {
 
   function wheelSeek(deltaY: number) {
 
-    const video = videoEl()
+    const mp = player.moviPlayer
 
-    if (!video || !player.open) return
+    if (!mp || !player.open) return
 
     const step = settings.settings?.html5_wheel_seek_sec ?? 5
 
     const dir = deltaY > 0 ? 1 : -1
 
-    const next = Math.max(0, Math.min(video.duration || 0, video.currentTime + dir * step))
+    const next = Math.max(0, Math.min(mp.getDuration() || 0, mp.getCurrentTime() + dir * step))
 
-    video.currentTime = next
+    mp.seek(next)
 
   }
 
@@ -758,15 +553,15 @@ export function usePlayback() {
 
   async function onPageHide() {
 
-    const video = videoEl()
+    const mp = player.moviPlayer
 
     const id = player.playingId
 
-    if (video && id && video.currentTime > 1) {
+    if (mp && id && mp.getCurrentTime() > 1) {
 
       try {
 
-        await savePosition(id, video.currentTime, video.duration || undefined)
+        await savePosition(id, mp.getCurrentTime(), mp.getDuration() || undefined)
 
       } catch {
 

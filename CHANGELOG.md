@@ -2,6 +2,35 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [11.0.0] - 2026-08-07
+
+### 重大变更
+
+- **播放器内核升级**：全面切换为 movi-player `<movi-player>` web 组件（canvas 渲染 + 完整控件 + Shadow DOM 字幕渲染），直连流 + WASM 解码，替代早期 HLS `<video>` 播放路径
+- **播放器架构重构**：`useMoviPlayer` 命令式集成，以 `statechange` 状态机驱动就绪 / 播放 / 错误处理；续播、字幕自动选中文等由封装层统一管理
+- **快捷键策略调整**：新增「播放器内置快捷键」开关并**默认关闭**——键位完全交由页面级脚本（如油猴 HTML5 增强）接管，消除按键冲突
+
+### 新增
+
+- 设置项「播放器内置快捷键」（`html5_disable_movi_hotkeys`），可随时切回播放器接管
+- 右键菜单「复制文件路径」（列表页与播放页右侧播放列表均可用）
+- `/api/stream` 支持 HEAD 请求（movi-player HttpSource 探测文件大小 / Range 支持）
+
+### 修复
+
+- **播放器永久卡"加载中"**：movi-player 构造函数违规设置 `tabindex` 属性，导致 `document.createElement('movi-player')` 抛 `NotSupportedError`（部分 Chromium 静默返回不可用元素）→ 创建时校验产物并回退 `new MoviElement()`；同步修复 `src` 须在挂载前设置、就绪信号改用 `statechange` 等
+- **特定站点源无法播放**：多段 mdat / 碎片化 MP4（如 123AV「Uncensored Leaked」HLS 转存）的 moov 无法被 movi-player 解析 → `remuxable` 文件播放前自动重封装修复，12 秒兜底自动触发
+- **滚轮快进 / 回退失效**：恢复画面区滚轮绑定（步长由 `html5_wheel_seek_sec` 控制，0 关闭）
+- **重命名双重扩展名**：输入带 `.mp4` 的完整文件名会生成 `xxx.mp4.mp4` → 后端智能去重、前端按去扩展名的 stem 传参
+- **续播提示**：左下角"从 X 继续播放"提示 3 秒后自动消失
+
+### 移除
+
+- 播放器工具栏音轨 / 字幕下拉框（由 movi-player 齿轮菜单接管）
+- 旧 HLS `<video>` 播放路径（startHls / waitHlsReady / startWebHls / bindSaver 等）
+
+---
+
 ## [10.0.2] - 2026-08-05
 
 ### 修复

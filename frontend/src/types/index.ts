@@ -123,6 +123,7 @@ export interface Settings {
   html5_modern_codecs_direct: boolean
   html5_player_prev_key: string
   html5_player_next_key: string
+  html5_disable_movi_hotkeys: boolean
   ui_theme: 'dark' | 'light'
   ui_preset?: 'netflix' | 'youtube' | 'spotify'
   [key: string]: unknown

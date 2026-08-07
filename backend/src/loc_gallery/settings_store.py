@@ -17,6 +17,7 @@ from loc_gallery.config import (
     HTML5_MODERN_CODECS_DIRECT,
     HTML5_PLAYER_PREV_KEY,
     HTML5_PLAYER_NEXT_KEY,
+    HTML5_DISABLE_MOVI_HOTKEYS,
     PLAYER_MODE,
     SETTINGS_FILE,
     THUMB_IDLE_SCAN,
@@ -63,6 +64,7 @@ _DEFAULTS = {
     "html5_modern_codecs_direct": HTML5_MODERN_CODECS_DIRECT,
     "html5_player_prev_key": HTML5_PLAYER_PREV_KEY,
     "html5_player_next_key": HTML5_PLAYER_NEXT_KEY,
+    "html5_disable_movi_hotkeys": HTML5_DISABLE_MOVI_HOTKEYS,
     "ui_theme": "dark",
 }
 
@@ -92,6 +94,7 @@ _LIBRARY_OVERRIDE_KEYS = {
     "html5_modern_codecs_direct",
     "html5_player_prev_key",
     "html5_player_next_key",
+    "html5_disable_movi_hotkeys",
 }
 
 

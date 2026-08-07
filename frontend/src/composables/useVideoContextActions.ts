@@ -16,6 +16,7 @@ export function videoContextMenuItems(): ContextMenuItem[] {
     { label: '重命名', action: 'rename' },
     { label: '移动到分类', action: 'move' },
     { label: '打开所在文件夹', action: 'open-folder' },
+    { label: '复制文件路径', action: 'copy-path' },
     { label: '删除', action: 'delete', danger: true },
   ]
 }
@@ -23,6 +24,32 @@ export function videoContextMenuItems(): ContextMenuItem[] {
 export function showVideoContextMenu(e: MouseEvent, videoId: string) {
   const ui = useUiStore()
   ui.showContextMenu(e, videoContextMenuItems(), { targetId: videoId, targetType: 'video' })
+}
+
+/** 复制文本到剪贴板：优先 Async Clipboard API，失败时回退 execCommand('copy') */
+async function copyTextToClipboard(text: string): Promise<boolean> {
+  if (!text) return false
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch {
+    /* 降级到 execCommand */
+  }
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    const ok = document.execCommand('copy')
+    ta.remove()
+    return ok
+  } catch {
+    return false
+  }
 }
 
 function findVideo(id: string, gallery: ReturnType<typeof useGalleryStore>, player: ReturnType<typeof usePlayerStore>): Video | undefined {
@@ -68,6 +95,11 @@ export function setupVideoContextActions() {
       ui.openAlbumPicker([id])
     } else if (detail.action === 'open-folder') {
       await openFolder(id)
+    } else if (detail.action === 'copy-path') {
+      const item = findVideo(id, gallery, player)
+      const path = item?.path || item?.filename || ''
+      await copyTextToClipboard(path)
+      ui.showToast(path ? '文件路径已复制' : '未找到文件路径')
     } else if (detail.action === 'regen-thumb') {
       await regenerateThumbSmart(id)
       await gallery.loadVideos()
@@ -75,8 +107,14 @@ export function setupVideoContextActions() {
       const item = findVideo(id, gallery, player)
       const name = prompt('新文件名', item?.filename || item?.title || '')
       if (name) {
-        await renameVideo(id, name)
-        patchVideoInPlayer(id, { filename: name, title: name.replace(/\.[^.]+$/, '') })
+        // 后端始终保留原扩展名：按 stem（去掉扩展名）传参，避免 "xxx.mp4" 被追加成 "xxx.mp4.mp4"
+        const suffix = item?.filename?.match(/\.[^.]+$/)?.[0] || ''
+        const stem =
+          suffix && name.toLowerCase().endsWith(suffix.toLowerCase())
+            ? name.slice(0, -suffix.length)
+            : name
+        await renameVideo(id, stem)
+        patchVideoInPlayer(id, { filename: stem + suffix, title: stem })
         await gallery.loadVideos()
         ui.showToast('已重命名')
       }

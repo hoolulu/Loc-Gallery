@@ -21,7 +21,7 @@ const { loadMore } = usePlaylistLoader()
 const { scheduleShow, onAnchorLeave } = usePathTip()
 
 const playlistOpen = ref(true)
-const videoBinding = ref<HTMLVideoElement | null>(null)
+const moviHost = ref<HTMLElement | null>(null)
 const playlistScrollRef = ref<HTMLElement | null>(null)
 const sentinelRef = ref<HTMLElement | null>(null)
 const playlistItemRefs = ref<Record<string, HTMLElement>>({})
@@ -29,6 +29,11 @@ let observer: IntersectionObserver | null = null
 
 const current = computed(() => player.playingItem)
 const playlistSortOptions = PLAYLIST_SORT_OPTIONS
+
+// 宿主 div 就绪后告诉 store，供 startMovi 命令式创建 <movi-player>
+watch(moviHost, (el) => {
+  player.moviHostEl = el
+})
 
 const playlistIndex = computed(() =>
   player.playingId ? player.playlist.findIndex((v) => v.id === player.playingId) : -1,
@@ -52,8 +57,8 @@ const playlistToggleTitle = computed(() =>
   playlistOpen.value ? '隐藏右侧播放列表' : '显示右侧播放列表',
 )
 
-watch(videoBinding, (el) => {
-  player.videoEl = el
+watch([() => player.open, sentinelRef], () => {
+  if (player.open) setTimeout(bindPlaylistObserver, 50)
 })
 
 function bindPlaylistObserver() {
@@ -67,10 +72,6 @@ function bindPlaylistObserver() {
   )
   observer.observe(sentinelRef.value)
 }
-
-watch([() => player.open, sentinelRef], () => {
-  if (player.open) setTimeout(bindPlaylistObserver, 50)
-})
 
 function scrollPlaylistToActive() {
   const id = player.playingId
@@ -114,7 +115,9 @@ onUnmounted(() => {
   document.removeEventListener('keydown', onKeydown)
   window.removeEventListener('pagehide', onPageHide)
   observer?.disconnect()
-  player.videoEl = null
+  player.moviPlayer?.destroy()
+  player.moviPlayer = null
+  player.moviHostEl = null
 })
 
 function onKeydown(e: KeyboardEvent) {
@@ -136,6 +139,7 @@ function onPageHide() {
   void save()
 }
 
+// 画面区滚轮：下滚快进、上滚回退（幅度见设置 html5_wheel_seek_sec）
 function onWheel(e: WheelEvent) {
   if (!player.open) return
   e.preventDefault()
@@ -172,7 +176,8 @@ async function onPlaylistSortChange(e: Event) {
     <div class="flex min-h-0 flex-1">
       <div class="flex min-h-0 min-w-0 flex-1 flex-col">
         <div class="player-stage min-h-0 flex-1" @wheel.prevent="onWheel">
-          <video ref="videoBinding" controls playsinline />
+          <!-- <movi-player> web 组件挂载点：自带 canvas 渲染 + 控件 + 字幕 -->
+          <div ref="moviHost" class="player-movi-host absolute inset-0"></div>
 
           <div
             v-if="player.overlayVisible"

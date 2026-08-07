@@ -1464,6 +1464,31 @@ async def api_thumb(video_id: str, library_id: str = Depends(resolve_library_id)
     )
 
 
+@app.head("/api/stream/{video_id}")
+async def api_stream_head(
+    video_id: str,
+    library_id: str = Depends(resolve_library_id),
+):
+    """HEAD 请求：返回文件大小与媒体类型，不流式传输正文（供 movi-player HttpSource 探测用）。"""
+    item = get_by_id(library_id, video_id)
+    if not item:
+        raise HTTPException(404, "视频不存在")
+    path = Path(item.path)
+    if not path.is_file():
+        raise HTTPException(404, "文件不存在")
+    size = path.stat().st_size
+    media_type, _ = mimetypes.guess_type(str(path))
+    if not media_type or not media_type.startswith("video/"):
+        media_type = "application/octet-stream"
+    return Response(
+        status_code=200,
+        headers={
+            "Content-Type": media_type,
+            "Content-Length": str(size),
+            "Accept-Ranges": "bytes",
+        },
+    )
+
 @app.get("/api/stream/{video_id}")
 async def api_stream(
     request: Request,

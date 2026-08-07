@@ -1254,6 +1254,13 @@ body.has-selection .card-album-badge {
   outline: none;
   box-shadow: none;
 }
+/* <movi-player> web 组件填充宿主区域（字幕/控件由组件 Shadow DOM 自带） */
+.player-movi-el {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #000;
+}
 
 /* 播放列表侧栏 */
 .player-playlist {
