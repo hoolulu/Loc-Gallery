@@ -156,10 +156,8 @@ export function createMoviPlayer(
   /** 播放器 UI 定制（shadowRoot 为 open 模式，可注入覆盖样式；appendChild 后
    *  组件已注入自身样式，覆盖规则带 !important 保证胜出）：
    *  ① 中间播放按钮：暂停时只显示三角形（去掉圆形背景），播放中不出现暂停图标；
-   *  ② 三角形放大一倍并圆角化（CSS d 覆盖 path，Chromium 106+ 支持）；
-   *  ③ 进度条感应区加高（mousemove/mouseleave 绑在 .movi-progress-bar 上，
-   *     感应区=bar 盒模型高度；用 padding+background-clip 做视觉细条、盒模型宽高）；
-   *  ④ 已播放部分改偏白。 */
+   *  ② 三角形放大一倍并圆角化（CSS d 覆盖 path，Chromium 106+ 支持）。
+   *  进度条保持 movi 原生样式（截图功能由 setup 的 thumb 属性提供，与样式无关）。 */
   function injectCenterButtonStyle(node: MoviElement) {
     const root = node.shadowRoot
     if (!root) {
@@ -187,37 +185,6 @@ export function createMoviPlayer(
       }
       .movi-center-icon-play path {
         d: path("M9.5 6.5 L17.8 11.3 Q19.5 12 17.8 12.7 L9.5 17.5 Q8 19 6.5 17.5 L6.5 6.5 Q8 5 9.5 6.5 Z");
-      }
-      /* ③ 进度条感应区：盒模型 18px（悬停 20px）保证 hover 不易滑出；
-         bar 背景用 content-box 收窄成 8px 视觉细条；buffer/filled 同样收窄居中 */
-      :host {
-        --movi-progress-height: 18px;
-        --movi-progress-height-hover: 20px;
-      }
-      .movi-progress-bar {
-        padding: 5px 0 !important;
-        background-clip: content-box !important;
-      }
-      .movi-progress-container {
-        padding: 14px 0 22px !important;
-      }
-      .movi-progress-buffer {
-        top: 50% !important;
-        transform: translateY(-50%) !important;
-        height: 8px !important;
-      }
-      .movi-progress-filled {
-        top: 50% !important;
-        transform: translateY(-50%) !important;
-        height: 8px !important;
-      }
-      .movi-progress-handle {
-        width: 24px !important;
-        height: 24px !important;
-      }
-      /* ④ 已播放部分：偏白（默认 var(--movi-primary) 主题色） */
-      .movi-progress-filled {
-        background: #f2f2f2 !important;
       }
     `
     root.appendChild(style)
