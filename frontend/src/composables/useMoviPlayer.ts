@@ -98,6 +98,8 @@ export function createMoviPlayer(
       // 就绪后 movi 可能已按"移动端布局状态"重排中心按钮（96px 覆盖），
       // 每次状态变化都重新钉一次 inline 覆盖，保证三角形/进度条样式不被覆盖。
       if (el?.shadowRoot) applyInlineOverrides(el.shadowRoot)
+      // 就绪后 video 元素才完整，幂等暴露到 light DOM（h5player 才能找到）+ 同步倍速
+      if (el) exposeVideoAndSyncRate(el, host)
       if (!readyFired && (state === 'ready' || state === 'playing')) {
         readyFired = true
         handlers.onReady?.()
@@ -154,6 +156,44 @@ export function createMoviPlayer(
     bindEvents(node)
     host.appendChild(node)
     injectCenterButtonStyle(node)
+    exposeVideoAndSyncRate(node, host)
+  }
+
+  /** 把 movi 内部 <video> 暴露到 light DOM，并同步倍速给 movi。
+   *  背景：h5player 等油猴脚本用 document.querySelector('video') 找视频——列表页
+   *  预览是普通 <video> 所以生效；播放页 movi 的 video 在 shadowRoot 内（默认
+   *  display:none，canvas 渲染）脚本找不到。且 movi 用独立解码时钟（_playbackRate
+   *  驱动 WASM 解码），直接改 video.playbackRate 不会变速——需监听 video 的
+   *  ratechange，同步给元素 playbackRate（MoviElement setter → updatePlaybackRate）。
+   *  幂等：video 已在 light DOM / 已绑 ratechange 则跳过（statechange 会重复调用）。 */
+  function exposeVideoAndSyncRate(node: MoviElement, host: HTMLElement) {
+    const root = node.shadowRoot
+    const video = root?.querySelector<HTMLVideoElement>('video')
+    if (!video) return
+    if (video.parentElement !== host) {
+      // 移到 light DOM：保留 movi 的 inline 样式（display 由 movi 在 canvas/video
+      // 渲染模式间切换），补绝对定位避免在流内占位、保证铺满宿主。
+      video.style.position = 'absolute'
+      video.style.left = '0'
+      video.style.top = '0'
+      video.style.width = '100%'
+      video.style.height = '100%'
+      video.style.objectFit = 'contain'
+      video.style.zIndex = '0'
+      host.appendChild(video)
+    }
+    if (!video.dataset.rateSynced) {
+      video.dataset.rateSynced = '1'
+      video.addEventListener('ratechange', () => {
+        try {
+          if (node.playbackRate !== video.playbackRate) {
+            node.playbackRate = video.playbackRate
+          }
+        } catch {
+          // movi 未就绪时忽略
+        }
+      })
+    }
   }
 
   /** 播放器 UI 定制（shadowRoot 为 open 模式，可注入覆盖样式；appendChild 后
