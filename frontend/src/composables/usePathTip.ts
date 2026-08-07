@@ -16,7 +16,8 @@ let timer: ReturnType<typeof setTimeout> | null = null
 let anchorEl: HTMLElement | null = null
 
 function isPinMode() {
-  return useSettingsStore().settings?.html5_hover_tip_pin !== false
+  // 默认移开鼠标自动消失（pin=false）；仅显式开启时才是钉住模式
+  return useSettingsStore().settings?.html5_hover_tip_pin === true
 }
 
 function positionTip(tipW: number, tipH: number) {

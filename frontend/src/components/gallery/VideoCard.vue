@@ -24,8 +24,8 @@ const emit = defineEmits<{
 const ui = useUiStore()
 const gallery = useGalleryStore()
 const settings = useSettingsStore()
-const { scheduleShow, onAnchorLeave, pinned } = usePathTip()
-const { startPreview, stopPreview } = useHoverPreview()
+const { scheduleShow, onAnchorLeave, pinned, hide } = usePathTip()
+const { startPreview, stopPreview, stopPreviewNow } = useHoverPreview()
 
 const isSelected = computed(() => ui.selectedIds.has(props.video.id))
 const albumCount = computed(() => props.video.albumIds?.length || 0)
@@ -58,6 +58,10 @@ function onCardClick() {
     ui.toggleSelect(props.video.id)
     return
   }
+  // 进入播放页：立即关闭预览浮层与预览视频（含钉住模式），
+  // 避免点击卡片后预览浮层残留（视频还在播放）。
+  stopPreviewNow()
+  hide()
   emit('play', props.video.id)
 }
 

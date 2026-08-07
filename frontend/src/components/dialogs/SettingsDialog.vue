@@ -298,8 +298,8 @@ watch(
                   <label class="settings-field">
                     <span class="settings-field-label">预览浮层消失方式</span>
                     <select v-model="form.html5_hover_tip_pin" class="settings-input">
-                      <option :value="true">按关闭按钮才消失（默认）</option>
-                      <option :value="false">移开鼠标自动消失</option>
+                      <option :value="true">按关闭按钮才消失</option>
+                      <option :value="false">移开鼠标自动消失（默认）</option>
                     </select>
                   </label>
                   <label class="settings-field">

@@ -35,8 +35,8 @@ HTML5_HOVER_PREVIEW = True
 # 预览蒙太奇：段数（在 15%~85% 区间均匀分布）与每段秒数
 HTML5_HOVER_PREVIEW_SEGMENTS = 5
 HTML5_HOVER_PREVIEW_SEGMENT_SEC = 5
-# 悬停预览浮层是否「钉住」：True=移开鼠标不自动消失，需点关闭按钮；False=移开自动消失
-HTML5_HOVER_TIP_PIN = True
+# 悬停预览浮层是否「钉住」：True=移开鼠标不自动消失，需点关闭按钮；False=移开自动消失（默认）
+HTML5_HOVER_TIP_PIN = False
 # 进度条悬停显示时间点截图（movi-player 原生 thumb：WASM 解码目标帧，零预生成/零磁盘）
 HTML5_SEEK_PREVIEW = True
 # 后台空闲时自动批量重封装 remuxable 文件（多段 mdat/碎片化 MP4 一次修复永久直连）
