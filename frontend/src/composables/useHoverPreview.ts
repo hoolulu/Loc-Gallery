@@ -42,6 +42,8 @@ let pendingStart: ReturnType<typeof setTimeout> | null = null
 let pendingStop: ReturnType<typeof setTimeout> | null = null
 let seekTimer: ReturnType<typeof setTimeout> | null = null
 let segTimer: ReturnType<typeof setTimeout> | null = null
+// 首帧渲染回调：video 的 playing 事件（真正有帧）触发时显示画面，避免 play() resolve 即显示导致黑屏
+let onFirstFrame: (() => void) | null = null
 // 预览区「加载中」占位开关（由 PathTip 消费：加载中显示 spinner，就绪后隐藏）
 const placeholderLoading = ref(true)
 // 视频宽高比（videoWidth/videoHeight，如横屏 1.78、竖屏 0.56）；null=未知（占位保持 16:9）
@@ -73,6 +75,14 @@ function getVideo(): HTMLVideoElement {
       if (running) {
         previewFailed.value = true
         stopNow()
+      }
+    })
+    // 真正有帧渲染（playing）才显示视频；play() resolve 不代表首帧就绪
+    video.addEventListener('playing', () => {
+      if (running && onFirstFrame) {
+        const fn = onFirstFrame
+        onFirstFrame = null
+        fn()
       }
     })
     // 视频尺寸就绪（videoWidth/videoHeight 可用）时刷新宽高比：
@@ -150,18 +160,31 @@ function runMontage(v: HTMLVideoElement, duration: number, positions: number[], 
         seekTimer = null
       }
       if (!running) return
-      // play() 成功后画面已就绪，再显示 video（避免加载/seek 阶段黑屏闪烁）
-      void v
-        .play()
-        .then(() => {
-          if (running) {
-            // 播放时 videoWidth/videoHeight 一定可用：补最后一次比例刷新
-            setPreviewRatioFromVideo(v)
-            v.style.opacity = '1'
-            setPlaceholderLoading(false) // 视频就绪，隐藏「加载中」占位
-          }
-        })
-        .catch(() => {})
+      // play() 只代表开始播放，首帧渲染由 playing 事件回调（onFirstFrame）驱动，
+      // 避免数据未到位时 play resolve 即显示 → 黑屏
+      const showVideo = () => {
+        if (!running) return
+        // 播放时 videoWidth/videoHeight 一定可用：补最后一次比例刷新
+        setPreviewRatioFromVideo(v)
+        v.style.opacity = '1'
+        setPlaceholderLoading(false) // 视频就绪，隐藏「加载中」占位
+      }
+      onFirstFrame = showVideo
+      // 兜底：若 playing 事件错过（如 seek 后已处于播放态），1s 内强制显示
+      const fallback = window.setTimeout(() => {
+        if (onFirstFrame) {
+          onFirstFrame = null
+          showVideo()
+        }
+      }, 1000)
+      const origShow = showVideo
+      const wrapped: typeof showVideo = () => {
+        window.clearTimeout(fallback)
+        onFirstFrame = null
+        origShow()
+      }
+      onFirstFrame = wrapped
+      void v.play().catch(() => {})
       if (segTimer) clearTimeout(segTimer)
       segTimer = setTimeout(() => playAt(i + 1), segSec * 1000)
     }
