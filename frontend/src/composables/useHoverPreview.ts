@@ -44,9 +44,17 @@ let seekTimer: ReturnType<typeof setTimeout> | null = null
 let segTimer: ReturnType<typeof setTimeout> | null = null
 // 预览区「加载中」占位开关（由 PathTip 消费：加载中显示 spinner，就绪后隐藏）
 const placeholderLoading = ref(true)
+// 视频宽高比（videoWidth/videoHeight，如横屏 1.78、竖屏 0.56）；null=未知（占位保持 16:9）
+const previewRatio = ref<number | null>(null)
 
 function setPlaceholderLoading(v: boolean) {
   placeholderLoading.value = v
+}
+
+function setPreviewRatioFromVideo(v: HTMLVideoElement) {
+  const w = v.videoWidth
+  const h = v.videoHeight
+  if (w > 0 && h > 0) previewRatio.value = w / h
 }
 
 function getVideo(): HTMLVideoElement {
@@ -69,6 +77,7 @@ function getVideo(): HTMLVideoElement {
 function stopNow() {
   running = false
   setPlaceholderLoading(true)
+  previewRatio.value = null // 重置为默认 16:9，供下一轮预览重新计算
   if (pendingStart) {
     clearTimeout(pendingStart)
     pendingStart = null
@@ -186,6 +195,8 @@ export function useHoverPreview() {
             stopNow()
             return
           }
+          // 拿到真实宽高比，浮层占位据此自适应（竖屏视频不再被压成横屏）
+          setPreviewRatioFromVideo(v)
           // 段数/每段秒数从设置读取（后端重启前可能缺失，用默认值兜底）
           const segCount = Number(settings.settings?.html5_hover_preview_segments)
           const segSec = Number(settings.settings?.html5_hover_preview_segment_sec)
@@ -222,5 +233,5 @@ export function useHoverPreview() {
     stopNow()
   }
 
-  return { startPreview, stopPreview, stopPreviewNow, placeholderLoading }
+  return { startPreview, stopPreview, stopPreviewNow, placeholderLoading, previewRatio }
 }

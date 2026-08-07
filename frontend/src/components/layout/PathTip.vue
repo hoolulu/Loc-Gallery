@@ -8,13 +8,40 @@ import { formatDuration, formatSize, formatBadgeLabel } from '@/utils/format'
 
 const settings = useSettingsStore()
 const { visible, item, tipLeft, tipTop, measuring, pinned, afterLayout, closeTip } = usePathTip()
-const { placeholderLoading, stopPreviewNow } = useHoverPreview()
+const { placeholderLoading, stopPreviewNow, previewRatio } = useHoverPreview()
 const tipRef = ref<HTMLElement | null>(null)
 
 // 悬浮预览启用：预览区渲染「加载占位」而非缩略图，视频就绪后在其上淡入播放
 const hoverPreviewEnabled = computed(
   () => settings.settings?.html5_hover_preview !== false,
 )
+
+// 占位尺寸按原视频宽高比自适应：约束最大宽/高，竖屏（比例<1）宽度随高度反推
+const PREVIEW_MAX_W = () => Math.min(window.innerWidth * 0.88, 1104)
+const PREVIEW_MAX_H = () => Math.min(window.innerHeight * 0.7, 864)
+const placeholderStyle = computed(() => {
+  const ratio = previewRatio.value
+  const maxW = PREVIEW_MAX_W()
+  const maxH = PREVIEW_MAX_H()
+  if (!ratio || ratio <= 0) {
+    // 未知比例：默认 16:9 占位
+    return { width: `${maxW}px`, aspectRatio: '16 / 9', maxWidth: `${maxW}px`, maxHeight: `${maxH}px` }
+  }
+  // 以宽度优先：w = maxW，h = w / ratio；若 h 超 maxH 则 h = maxH，w = h * ratio
+  let w = maxW
+  let h = maxW / ratio
+  if (h > maxH) {
+    h = maxH
+    w = maxH * ratio
+  }
+  return { width: `${Math.round(w)}px`, height: `${Math.round(h)}px` }
+})
+
+// 视频比例变化（竖屏/横屏）后重新测量浮层尺寸并定位
+// 等占位尺寸过渡（0.18s）完成后再测，避免取到过渡中间值
+watch(previewRatio, () => {
+  window.setTimeout(() => void nextTick(() => afterLayout(tipRef.value)), 200)
+})
 
 function onCloseTip() {
   stopPreviewNow()
@@ -130,11 +157,12 @@ watch(visible, (v) => {
       ✕
     </button>
     <div class="path-tip-preview">
-      <!-- 悬浮预览启用：深色加载占位（16:9 固定），视频就绪后由 useHoverPreview 在其上淡入 -->
+      <!-- 悬浮预览启用：加载占位（按原视频比例自适应），视频就绪后由 useHoverPreview 在其上淡入 -->
       <div
         v-if="hoverPreviewEnabled"
         class="path-tip-preview--placeholder"
         :class="{ 'path-tip-preview--placeholder-idle': !placeholderLoading }"
+        :style="placeholderStyle"
       >
         <span v-if="placeholderLoading" class="hover-preview-spinner" />
       </div>
