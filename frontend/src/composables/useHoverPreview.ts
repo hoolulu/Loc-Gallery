@@ -112,14 +112,10 @@ function stopNow() {
   running = false
   setPlaceholderLoading(true)
   previewRatio.value = null // 重置为默认 16:9，供下一轮预览重新计算
-  if (pendingStart) {
-    clearTimeout(pendingStart)
-    pendingStart = null
-  }
-  if (pendingStop) {
-    clearTimeout(pendingStop)
-    pendingStop = null
-  }
+  // 注意：不动 pendingStart/pendingStop！它们属于「下一次预览」的调度，
+  // 由 startPreview/stopPreview/stopPreviewNow 管理。若在这里 clearTimeout，
+  // 快速切换时旧预览的 error/seek 超时触发 stopNow 会把新预览的 pendingStart
+  // 误杀 → 新预览永不启动 → 黑屏（确定性 bug，卡片间移动必现）。
   if (seekTimer) {
     clearTimeout(seekTimer)
     seekTimer = null
