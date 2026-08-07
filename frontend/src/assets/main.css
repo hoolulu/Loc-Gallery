@@ -801,13 +801,18 @@ body.has-selection .card-album-badge {
   border-radius: 8px 8px 0 0;
 }
 /* 悬浮预览「加载占位」：深色底 + 居中 spinner；尺寸由 JS 按原视频宽高比自适应（内联 style） */
+/* 宽高不设 transition（比例瞬变，无缩放动画）；就绪后 opacity 淡出，与视频淡入同帧交叉掩盖 */
 .path-tip-preview--placeholder {
   display: flex;
   align-items: center;
   justify-content: center;
   background: var(--lg-bg-secondary);
   border-radius: 8px 8px 0 0;
-  transition: width 0.18s ease, height 0.18s ease;
+  transition: opacity 0.5s ease;
+}
+.path-tip-preview--placeholder-idle {
+  /* 视频已就绪：占位淡出（尺寸保留撑布局），视频在其上淡入 */
+  opacity: 0;
 }
 .path-tip-preview--placeholder-idle {
   /* 占位在预览间隙也保留（撑起浮层比例），无 spinner */
