@@ -4,7 +4,7 @@
 
 > Vue 3 架构 · 经典 / 影院布局 · 单端口开发热更新
 
-扫描本机视频目录，自动生成缩略图网格，支持分类筛选、收藏、播放记录、**我的专辑**、内嵌 HTML5 播放（movi-player，WASM 解码）与外部播放器兜底。专为 Windows 本地大库设计：新视频拷入即索引，下载中的文件不误报失败，外部删除自动同步收藏、历史与专辑归属。
+扫描本机视频目录，自动生成缩略图网格，支持分类筛选、收藏、播放记录、**我的专辑**、内嵌播放器（movi-player，WASM demux + 硬解直连）与外部播放器兜底。专为 Windows 本地大库设计：新视频拷入即索引，下载中的文件不误报失败，外部删除自动同步收藏、历史与专辑归属。
 
 **默认访问地址：** `http://127.0.0.1:3460`
 
@@ -17,7 +17,7 @@
 <tr><td style="white-space: nowrap;"><b>📚 多视频库</b></td><td>顶栏「选择视频库」切换多个本地文件夹；收藏、历史、<strong>专辑</strong>、缩略图按库隔离；设置中统一管理</td></tr>
 <tr><td style="white-space: nowrap;"><b>📂 本地视频库</b></td><td>递归扫描各库根目录，按一级子目录作为「分类」展示</td></tr>
 <tr><td style="white-space: nowrap;"><b>🖼 智能缩略图</b></td><td>按需生成当前页；下载/写入中的文件等待稳定后再处理，不误报失败</td></tr>
-<tr><td style="white-space: nowrap;"><b>📺 剧集连播</b></td><td>播放列表支持文件名自然排序；HTML5 模式按列表顺序自动播下一集</td></tr>
+<tr><td style="white-space: nowrap;"><b>📺 剧集连播</b></td><td>播放列表支持文件名自然排序；播放器按列表顺序自动播下一集</td></tr>
 <tr><td style="white-space: nowrap;"><b>▶ 可靠播放</b></td><td>movi-player 内嵌播放器（WASM demux + 直连 Range 流）；续播与连播可设置；外部播放器自动探测（默认 PotPlayer）</td></tr>
 <tr><td style="white-space: nowrap;"><b>♥ 收藏 & 历史</b></td><td>卡片收藏、最近播放、播放次数与<strong>续播进度</strong>；外部删文件后列表自动清理</td></tr>
 <tr><td style="white-space: nowrap;"><b>📁 我的专辑</b></td><td>自定义专辑合集，视频可多专辑归属；本页生成专辑、播放全部、播放器内加入专辑</td></tr>
@@ -299,7 +299,7 @@ AI 会读取项目文档 → 检测本机环境 → 逐项安装配置 → 启�
 
 1. 启动服务后，左侧选择**分类**，下方可展开**子目录树**
 2. 顶栏**搜索框**支持标题、文件名、分类关键词
-3. 点击卡片**播放**；悬停卡片可**多段视频预览**（默认开，可调段数/时长；预览区按原视频宽高比自适应，竖屏视频不再被压成横屏；默认**钉住模式**——鼠标移开后浮层保留、视频继续播，点右上角 ✕ 或点浮层外任意位置关闭）；悬停 ♥ 收藏、📁 管理专辑
+3. 点击卡片**播放**；悬停卡片可**多段视频预览**（默认开，可调段数/时长；预览区按原视频宽高比自适应，竖屏视频不再被压成横屏；默认**移开鼠标自动消失**，可改为钉住——浮层保留、视频继续播，点右上角 ✕ 或点浮层外任意位置关闭）；悬停 ♥ 收藏、📁 管理专辑
 4. **♥ 我的收藏** / **⏱ 最近播放** / **📁 我的专辑** 切换顶栏视图
 5. 格式下拉可筛「无法播放」（浏览器硬解不支持的编码）；播放时自动修复或提示用外部播放器
 6. 顶栏可切换**经典 / 影院**布局与**暗色 / 亮色**主题
@@ -360,12 +360,17 @@ AI 会读取项目文档 → 检测本机环境 → 逐项安装配置 → 启�
 | `thumb_workers` | 3 | 缩略图并发数（修改后需重启服务） |
 | `thumb_idle_scan` | false | 后台补全全库缩略图 |
 | `thumb_progress_bar` | auto | 缩略图进度条显示模式 |
-| `default_page_size` | 32 | 每页条数（支持自适应） |
+| `thumb_candidate_count` | 6 | 单视频候选截图帧数 |
+| `thumb_auto_select_best` | false | 自动选最优候选帧 |
+| `thumb_batch_auto_select` | true | 批量生成时自动选帧 |
+| `thumb_jitter_pct` / `min` / `max` | 10 / 6 / 94 | 截图时间点抖动范围 |
+| `default_page_size` | 32 | 每页条数（UI 提供 40/80/自定义） |
 | `ui_theme` | dark | 界面主题 dark / light |
 | `html5_playlist_autoplay` | true | 播完是否按列表连播下一集 |
 | `html5_resume_playback` | true | 是否记忆播放位置并续播 |
 | `html5_wheel_seek_sec` | 5 | 播放区滚轮快进/快退（0=关闭） |
 | `html5_player_prev_key` / `next_key` | `.` / `/` | 上/下一集快捷键 |
+| `html5_seek_preview` | true | 进度条悬停显示时间点截图（movi 原生 thumb） |
 | `html5_hover_preview` | true | 悬停卡片多段视频预览（可调段数/每段秒数） |
 | `html5_hover_preview_segments` | 5 | 悬停预览蒙太奇段数（15%~85% 区间均匀分布） |
 | `html5_hover_preview_segment_sec` | 5 | 每段预览秒数 |
