@@ -1368,10 +1368,18 @@ def enqueue_missing_durations(library_id: str, *, limit: int = 0) -> int:
 
 
 def _duration_worker_loop() -> None:
+    # 每处理一批后统一 flush，避免对每个文件全量写盘
+    _last_flush_at = 0.0
     while not _stop_worker:
         try:
             qitem = _duration_queue.get(timeout=1.5)
         except queue.Empty:
+            if _last_flush_at and time.time() - _last_flush_at > 1.0:
+                with _lock:
+                    lids = list(_dirty_libs)
+                for lid in lids:
+                    _flush_index_sync(lid)
+                _last_flush_at = 0.0
             continue
         library_id, video_id = qitem.library_id, qitem.video_id
         key = (library_id, video_id)
@@ -1383,6 +1391,10 @@ def _duration_worker_loop() -> None:
                     _duration_probing.add(key)
                 try:
                     probe_and_cache_duration(item)
+                    now = time.time()
+                    if now - _last_flush_at >= 1.0:
+                        _flush_index_sync(library_id)
+                        _last_flush_at = now
                 finally:
                     with _lock:
                         _duration_probing.discard(key)
