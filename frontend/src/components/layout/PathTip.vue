@@ -7,14 +7,19 @@ import { useHoverPreview } from '@/composables/useHoverPreview'
 import { formatDuration, formatSize, formatBadgeLabel } from '@/utils/format'
 
 const settings = useSettingsStore()
-const { visible, item, tipLeft, tipTop, measuring, afterLayout } = usePathTip()
-const { placeholderLoading } = useHoverPreview()
+const { visible, item, tipLeft, tipTop, measuring, pinned, afterLayout, closeTip } = usePathTip()
+const { placeholderLoading, stopPreviewNow } = useHoverPreview()
 const tipRef = ref<HTMLElement | null>(null)
 
 // 悬浮预览启用：预览区渲染「加载占位」而非缩略图，视频就绪后在其上淡入播放
 const hoverPreviewEnabled = computed(
   () => settings.settings?.html5_hover_preview !== false,
 )
+
+function onCloseTip() {
+  stopPreviewNow()
+  closeTip()
+}
 
 function getPathDir(path: string, filename: string) {
   if (!path) return ''
@@ -102,6 +107,14 @@ watch(visible, (v) => {
     :style="{ left: `${tipLeft}px`, top: `${tipTop}px` }"
     :title="item.path"
   >
+    <button
+      v-if="pinned"
+      class="path-tip-close"
+      title="关闭预览"
+      @click="onCloseTip"
+    >
+      ✕
+    </button>
     <div class="path-tip-preview">
       <!-- 悬浮预览启用：深色加载占位（16:9 固定），视频就绪后由 useHoverPreview 在其上淡入 -->
       <div

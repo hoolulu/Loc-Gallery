@@ -209,5 +209,18 @@ export function useHoverPreview() {
     pendingStop = setTimeout(() => stopNow(), STOP_DELAY)
   }
 
-  return { startPreview, stopPreview, placeholderLoading }
+  /** 立即停止预览（关闭按钮等需要即刻生效的场景）。 */
+  function stopPreviewNow() {
+    if (pendingStart) {
+      clearTimeout(pendingStart)
+      pendingStart = null
+    }
+    if (pendingStop) {
+      clearTimeout(pendingStop)
+      pendingStop = null
+    }
+    stopNow()
+  }
+
+  return { startPreview, stopPreview, stopPreviewNow, placeholderLoading }
 }

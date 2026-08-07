@@ -17,6 +17,7 @@ from loc_gallery.config import (
     HTML5_HOVER_PREVIEW,
     HTML5_HOVER_PREVIEW_SEGMENTS,
     HTML5_HOVER_PREVIEW_SEGMENT_SEC,
+    HTML5_HOVER_TIP_PIN,
     HTML5_AUTO_REMUX,
     SETTINGS_FILE,
     THUMB_IDLE_SCAN,
@@ -62,6 +63,7 @@ _DEFAULTS = {
     "html5_hover_preview": HTML5_HOVER_PREVIEW,
     "html5_hover_preview_segments": HTML5_HOVER_PREVIEW_SEGMENTS,
     "html5_hover_preview_segment_sec": HTML5_HOVER_PREVIEW_SEGMENT_SEC,
+    "html5_hover_tip_pin": HTML5_HOVER_TIP_PIN,
     "html5_auto_remux": HTML5_AUTO_REMUX,
     "ui_theme": "dark",
 }
@@ -91,6 +93,7 @@ _LIBRARY_OVERRIDE_KEYS = {
     "html5_hover_preview",
     "html5_hover_preview_segments",
     "html5_hover_preview_segment_sec",
+    "html5_hover_tip_pin",
     "html5_auto_remux",
 }
 

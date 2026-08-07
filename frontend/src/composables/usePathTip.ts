@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { useSettingsStore } from '@/stores/settings'
 import type { Video } from '@/types'
 
 const visible = ref(false)
@@ -8,9 +9,15 @@ const inPlaylist = ref(false)
 const tipLeft = ref(0)
 const tipTop = ref(0)
 const measuring = ref(false)
+// 钉住状态：浮层已显示，鼠标移开后不自动消失，需点关闭按钮
+const pinned = ref(false)
 
 let timer: ReturnType<typeof setTimeout> | null = null
 let anchorEl: HTMLElement | null = null
+
+function isPinMode() {
+  return useSettingsStore().settings?.html5_hover_tip_pin !== false
+}
 
 function positionTip(tipW: number, tipH: number) {
   const rect = anchorRect.value
@@ -48,6 +55,8 @@ function positionTip(tipW: number, tipH: number) {
 
 function scheduleShow(video: Video, anchor: HTMLElement, playlist = false) {
   if (!video.path) return
+  // 钉住模式下浮层保留，不随新卡片 hover 更新（需先点关闭）
+  if (pinned.value) return
   if (anchorEl === anchor && visible.value) return
   hide()
   anchorEl = anchor
@@ -69,11 +78,21 @@ function hide() {
   visible.value = false
   item.value = null
   measuring.value = false
+  pinned.value = false
 }
 
 function onAnchorLeave(e: MouseEvent, anchor: HTMLElement) {
   const related = e.relatedTarget as Node | null
   if (related && anchor.contains(related)) return
+  // 钉住模式：鼠标移开不隐藏，转为钉住状态（浮层保留，点关闭按钮才消失）
+  if (isPinMode() && visible.value) {
+    pinned.value = true
+    return
+  }
+  hide()
+}
+
+function closeTip() {
   hide()
 }
 
@@ -125,8 +144,10 @@ export function usePathTip() {
     tipLeft,
     tipTop,
     measuring,
+    pinned,
     scheduleShow,
     hide,
+    closeTip,
     onAnchorLeave,
     afterLayout,
   }

@@ -4,6 +4,7 @@ import { thumbUrl } from '@/api/client'
 import { usePathTip } from '@/composables/usePathTip'
 import { useHoverPreview } from '@/composables/useHoverPreview'
 import { useGalleryStore } from '@/stores/gallery'
+import { useSettingsStore } from '@/stores/settings'
 import { useUiStore } from '@/stores/ui'
 import type { Video } from '@/types'
 import { formatBadgeLabel } from '@/utils/format'
@@ -22,7 +23,8 @@ const emit = defineEmits<{
 
 const ui = useUiStore()
 const gallery = useGalleryStore()
-const { scheduleShow, onAnchorLeave } = usePathTip()
+const settings = useSettingsStore()
+const { scheduleShow, onAnchorLeave, pinned } = usePathTip()
 const { startPreview, stopPreview } = useHoverPreview()
 
 const isSelected = computed(() => ui.selectedIds.has(props.video.id))
@@ -77,11 +79,14 @@ function onCheckChange(e: Event) {
       class="thumb-wrap relative aspect-video bg-[var(--lg-thumb-placeholder-bg)]"
       @mouseenter="(e) => {
         scheduleShow(video, e.currentTarget as HTMLElement)
-        startPreview(video)
+        // 钉住中（浮层保留）不启动新卡片预览；否则正常启动
+        if (!pinned) startPreview(video)
       }"
       @mouseleave="(e) => {
-        onAnchorLeave(e, e.currentTarget as HTMLElement)
-        stopPreview()
+        const anchor = e.currentTarget as HTMLElement
+        onAnchorLeave(e, anchor)
+        // 钉住模式：浮层保留（含预览视频继续播放），由关闭按钮统一停止
+        if (settings.settings?.html5_hover_tip_pin === false) stopPreview()
       }"
     >
       <img

@@ -757,6 +757,30 @@ body.has-selection .card-album-badge {
   line-height: 1.45;
   overflow: hidden;
 }
+/* 钉住模式关闭按钮（浮层整体 pointer-events:none，按钮单独放行） */
+.path-tip-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 5;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 0.8rem;
+  line-height: 1;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: background 0.15s ease;
+}
+.path-tip-close:hover {
+  background: rgba(0, 0, 0, 0.8);
+}
 .path-tip--measuring {
   visibility: hidden;
 }
