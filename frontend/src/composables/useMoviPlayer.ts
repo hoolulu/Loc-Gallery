@@ -153,10 +153,12 @@ export function createMoviPlayer(
     injectCenterButtonStyle(node)
   }
 
-  /** 中间播放按钮定制：暂停时只显示三角形（去掉圆形背景/边框/阴影），
-   *  播放中不出现暂停图标（movi 原生在播放中会切换成 pause 图标并短暂闪现）。
-   *  shadowRoot 为 open 模式，可注入覆盖样式；appendChild 后组件已注入自身样式，
-   *  覆盖规则带 !important 保证胜出。 */
+  /** 播放器 UI 定制（shadowRoot 为 open 模式，可注入覆盖样式；appendChild 后
+   *  组件已注入自身样式，覆盖规则带 !important 保证胜出）：
+   *  ① 中间播放按钮：暂停时只显示三角形（去掉圆形背景），播放中不出现暂停图标；
+   *  ② 三角形放大一倍并圆角化（CSS d 覆盖 path，Chromium 106+ 支持）；
+   *  ③ 进度条默认/悬停高度翻倍（--movi-progress-height 变量），handle 同步放大；
+   *  ④ 已播放部分改灰白。 */
   function injectCenterButtonStyle(node: MoviElement) {
     const root = node.shadowRoot
     if (!root) {
@@ -166,7 +168,7 @@ export function createMoviPlayer(
     }
     const style = document.createElement('style')
     style.textContent = `
-      /* 中间播放按钮：仅三角形，无圆形背景 */
+      /* ① 中间播放按钮：仅三角形，无圆形背景 */
       .movi-center-play-pause {
         background: transparent !important;
         border: none !important;
@@ -175,6 +177,31 @@ export function createMoviPlayer(
       /* 播放中不出现暂停图标（乐观切换的 pause 也被禁用） */
       .movi-center-icon-pause {
         display: none !important;
+      }
+      /* ② 三角形：放大一倍（50px→100px）且圆角（三尖角用 Q 曲线过渡） */
+      .movi-center-icon-play {
+        width: 100px !important;
+        height: 100px !important;
+        transform: none !important;
+      }
+      .movi-center-icon-play path {
+        d: path("M9.5 6.5 L17.8 11.3 Q19.5 12 17.8 12.7 L9.5 17.5 Q8 19 6.5 17.5 L6.5 6.5 Q8 5 9.5 6.5 Z");
+      }
+      /* ③ 进度条：默认高度 4→8px，悬停 6→12px（增大一倍，好悬停）；命中区加宽 */
+      :host {
+        --movi-progress-height: 8px;
+        --movi-progress-height-hover: 12px;
+      }
+      .movi-progress-container {
+        padding: 14px 0 22px !important;
+      }
+      .movi-progress-handle {
+        width: 24px !important;
+        height: 24px !important;
+      }
+      /* ④ 已播放部分：改灰白（默认 var(--movi-primary) 主题色） */
+      .movi-progress-filled {
+        background: #d6d6d6 !important;
       }
     `
     root.appendChild(style)
