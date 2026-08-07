@@ -150,6 +150,34 @@ export function createMoviPlayer(
     el = node
     bindEvents(node)
     host.appendChild(node)
+    injectCenterButtonStyle(node)
+  }
+
+  /** 中间播放按钮定制：暂停时只显示三角形（去掉圆形背景/边框/阴影），
+   *  播放中不出现暂停图标（movi 原生在播放中会切换成 pause 图标并短暂闪现）。
+   *  shadowRoot 为 open 模式，可注入覆盖样式；appendChild 后组件已注入自身样式，
+   *  覆盖规则带 !important 保证胜出。 */
+  function injectCenterButtonStyle(node: MoviElement) {
+    const root = node.shadowRoot
+    if (!root) {
+      // 极端情况：connectedCallback 未同步创建 shadowRoot，延迟一帧重试
+      requestAnimationFrame(() => injectCenterButtonStyle(node))
+      return
+    }
+    const style = document.createElement('style')
+    style.textContent = `
+      /* 中间播放按钮：仅三角形，无圆形背景 */
+      .movi-center-play-pause {
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+      }
+      /* 播放中不出现暂停图标（乐观切换的 pause 也被禁用） */
+      .movi-center-icon-pause {
+        display: none !important;
+      }
+    `
+    root.appendChild(style)
   }
 
   function play() {
