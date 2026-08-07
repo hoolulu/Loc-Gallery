@@ -76,11 +76,16 @@ function stopNow() {
     segTimer = null
   }
   if (video) {
-    video.pause()
-    video.style.opacity = '0' // 恢复透明，供下次预览复用
-    video.removeAttribute('src')
-    video.load()
-    video.remove()
+    const el = video
+    el.pause()
+    el.style.opacity = '0' // 先淡出（CSS 220ms 过渡）再移除，避免瞬间消失突兀
+    el.removeAttribute('src')
+    el.load()
+    // 等淡出过渡完成后才从 DOM 移除；若期间已开启新预览（复用同一元素）则跳过
+    const container = el.parentElement
+    window.setTimeout(() => {
+      if (!running && el.parentElement === container) el.remove()
+    }, 260)
   }
   activeId = ''
 }
@@ -90,10 +95,20 @@ function findPreviewContainer(): HTMLElement | null {
   return document.querySelector<HTMLElement>('.path-tip .path-tip-preview')
 }
 
-function runMontage(v: HTMLVideoElement, duration: number, positions: number[], segSec: number) {
+function runMontage(
+  v: HTMLVideoElement,
+  duration: number,
+  positions: number[],
+  segSec: number,
+  anchorRatio?: number,
+) {
+  // 首段对齐缩略图截帧位置（默认为 thumb_position，如 0.6）：缩略图→预览首帧画面
+  // 几乎一致，配合淡入过渡呈现"静图动起来"；后续段仍按 15%~85% 均匀蒙太奇。
+  const anchor = anchorRatio && anchorRatio > 0.05 && anchorRatio < 0.95 ? anchorRatio : positions[0]
   const targets = positions.map((p, i) => {
-    const jitter = i === 0 ? (Math.random() * 2 - 1) * JITTER : 0
-    return Math.min(0.9, Math.max(0.08, p + jitter)) * duration
+    const base = i === 0 ? anchor : p
+    const jitter = (Math.random() * 2 - 1) * (i === 0 ? 0.02 : JITTER)
+    return Math.min(0.9, Math.max(0.05, base + jitter)) * duration
   })
 
   const playAt = (i: number) => {
@@ -154,6 +169,7 @@ export function useHoverPreview() {
           return
         }
         const v = getVideo()
+        v.style.opacity = '0' // 复用元素时重置，避免上次淡出未完成直接显示
         container.appendChild(v)
         v.src = streamUrl(videoItem.id)
         v.load()
@@ -169,7 +185,9 @@ export function useHoverPreview() {
           const segSec = Number(settings.settings?.html5_hover_preview_segment_sec)
           const positions = computePositions(Number.isFinite(segCount) && segCount > 0 ? segCount : 5)
           const secPerSeg = Number.isFinite(segSec) && segSec > 0 ? segSec : 5
-          runMontage(v, dur, positions, secPerSeg)
+          // 缩略图默认在 thumb_position 截帧；首段预览对齐该位置实现无缝过渡
+          const anchorRatio = Number(settings.settings?.thumb_position)
+          runMontage(v, dur, positions, secPerSeg, Number.isFinite(anchorRatio) ? anchorRatio : undefined)
         }
         if (v.readyState >= 1) onMeta()
         else v.addEventListener('loadedmetadata', onMeta, { once: true })

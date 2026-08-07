@@ -774,7 +774,7 @@ body.has-selection .card-album-badge {
   border-radius: 8px 8px 0 0;
 }
 /* 悬停多段视频预览层（useHoverPreview 动态创建，覆盖在预览区 <img> 上，img 保留撑布局） */
-/* opacity 由脚本控制：加载/seek 阶段保持 0，play() 成功后显示，避免黑屏闪烁 */
+/* opacity 由脚本控制：加载/seek 阶段保持 0，play() 成功后过渡到 1（淡入，避免黑屏闪烁） */
 .hover-preview-video {
   position: absolute;
   inset: 0;
@@ -784,6 +784,8 @@ body.has-selection .card-album-badge {
   object-fit: cover;
   background: #000;
   opacity: 0;
+  transition: opacity 0.22s ease;
+  will-change: opacity;
   pointer-events: none;
 }
 .path-tip-preview--empty {
