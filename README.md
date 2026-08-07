@@ -458,7 +458,7 @@ python restart.py
 1. 拉取最新 `master`（Git 历史保留，代码为 Vue 3 全新架构）
 2. 执行 `python scripts/setup.py` 或 `python restart.py`（自动装依赖）
 3. **保留** `data/libraries/{库ID}/` 下：`.thumbs/`、`favorites.json`、`play_history.json`、`albums.json`、`category_meta.json`
-4. **可清理**：`data/logs/` 与旧版遗留的 HLS 缓存（运行 `python scripts/clean_cache.py`）
+4. **可清理**：`data/logs/` 与旧版遗留的 HLS 切片缓存（已废弃链路，如有可清理；运行 `python scripts/clean_cache.py`）
 5. 默认端口由 **3456** 改为 **3460**
 6. 详细变更见 [CHANGELOG.md](./CHANGELOG.md)
 
@@ -525,7 +525,7 @@ python restart.py
 1. 主要为 Windows 环境优化
 2. 单用户本地，无认证
 3. 大库首次打开当前页时，缩略图按需生成，可能有短暂等待
-4. HEVC/AV1 等现代编码依赖浏览器硬解（Chromium 94+ / 104+），老浏览器可能无法内嵌播放（可用外部播放器兜底）
+4. HEVC/AV1 等现代编码由 movi-player（WASM demux + WebCodecs 硬解）直连播放，不依赖旧版 Chromium 的内置视频解码；系统缺少对应解码器/GPU 能力时可用外部播放器兜底
 
 ## 许可证
 

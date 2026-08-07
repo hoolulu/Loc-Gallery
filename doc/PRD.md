@@ -40,7 +40,7 @@ Loc Gallery 是一款**本地视频画廊 Web 应用**：在浏览器中浏览�
 | 层级 | 技术 |
 |------|------|
 | 前端 | Vue 3、TypeScript、Vite、Pinia、Vue Router、Tailwind CSS 4 |
-| 播放 | HTML5 Video、hls.js |
+| 播放 | movi-player web 组件（WASM demux + WebCodecs 硬解直连） |
 | 后端 | Python 3、FastAPI、uvicorn |
 | 媒体处理 | ffmpeg、ffprobe |
 | 实时推送 | Server-Sent Events（SSE） |
@@ -152,7 +152,7 @@ FastAPI 服务 (loc_gallery)
 | mode | 行为 |
 |------|------|
 | `direct` | movi-player 直连 `/api/stream/{id}`（WASM demux） |
-| `hls` | 保留：仅标记可重封装（碎片化/多段 mdat），前端自动修复后直连 |
+| `remux` | 碎片化/多段 mdat：标记为可重封装，前端自动修复后直连 |
 | `unsupported` | 硬解不支持（mpeg2/VC-1/WMV 等）→ 提示用外部播放器打开 |
 
 策略考虑因素：容器（MP4/WebM/MKV/TS…）、视频编码（H.264/HEVC/AV1/VP9…）、MP4 结构（碎片化、多段 mdat）；文件大小不再影响策略（统一直连）。
@@ -218,7 +218,7 @@ FastAPI 服务 (loc_gallery)
 | 碎片化 | 碎片化 MP4，建议 PotPlayer 或修复 |
 | 无法播放 | 浏览器不支持的编码 |
 
-**不显示角标**：标准 H.264 直连、现代编码实验性直连、仅需 HLS 切片不转码等情况。
+**不显示角标**：标准 H.264 与 HEVC/AV1/VP9 现代编码直连、可自动修复的碎片化 MP4 等情况。
 
 格式筛选与角标分类共用后端 `format_index`；列表展示时优先按最新播放计划重新分类，避免索引过期。
 
@@ -261,7 +261,7 @@ FastAPI 服务 (loc_gallery)
 
 **建议保留（用户数据）**：`.thumbs/`、`favorites.json`、`play_history.json`、`albums.json`、`category_meta.json`、库级 `settings.json`。
 
-**可安全清理（可再生缓存）**：`cache/hls/`（HLS 播放切片，单库默认上限 2GB，LRU 淘汰）、`cache/playback_plans.json`、`cache/format_index.json`（会重新探测）、`data/logs/`。
+**可安全清理（可再生缓存）**：`cache/playback_plans.json`、`cache/format_index.json`（会重新探测）、`data/logs/`；旧版遗留的 `cache/hls/`（HLS 切片，已废弃）如有也可清理。
 
 清理命令：`python scripts/clean_cache.py`
 
@@ -284,7 +284,7 @@ REST 基础路径：`/api`
 | 视频 | `GET /api/videos`，`GET /api/videos/{id}`，删除/重命名/移动 |
 | 收藏/历史 | toggle、summary、record、position、clear |
 | 专辑 | CRUD、视频增删排序、封面 |
-| 播放 | `GET /api/play/info/{id}`，`POST /api/play/prepare/{id}`，stream、hls、external |
+| 播放 | `GET /api/play/info/{id}`，`GET /api/stream/{id}`（Range 直连），`POST /api/play-external/{id}`（外部播放器），`GET /api/play/badges` |
 | 缩略图 | status、regenerate、candidates、pick、failed |
 | 设置 | `GET/POST /api/settings`，`POST /api/service/restart` |
 | 维护 | `POST /api/rescan` |
@@ -299,9 +299,9 @@ REST 基础路径：`/api`
 |------|------|
 | 安全 | 仅绑定 127.0.0.1；不对外暴露 |
 | 性能 | 列表 API 批量读取索引；虚拟滚动；缩略图懒加载 |
-| 可靠性 | 播放会话 generation 防止竞态；HLS 缓存上限 5GB |
+| 可靠性 | 播放会话 generation 防止竞态 |
 | 可维护性 | 前后端分离；Pinia 状态集中；播放/探测逻辑在后端单点决策 |
-| 兼容性 | 以 Chromium 内核浏览器为主；HEVC 等依赖系统解码能力 |
+| 兼容性 | 以 Chromium 内核浏览器为主；movi-player 经 WASM demux + WebCodecs 直连 H.264/HEVC/AV1/VP9，解码依赖系统/GPU 能力，缺失时外部播放器兜底 |
 
 ---
 
@@ -343,7 +343,6 @@ python restart.py --build
 |------|------|
 | 视频库 | 一个本地根目录及其下所有已索引视频 |
 | 播放计划 | 后端对单文件给出的播放方式决策 |
-| HLS | HTTP Live Streaming，用于边切边播或转码播放 |
 | 流复制修复 | remux，不重新编码仅重封装容器 |
 | SSE | 服务端向浏览器推送扫描/缩略图等进度 |
 
