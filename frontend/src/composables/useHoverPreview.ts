@@ -1,3 +1,4 @@
+import { ref } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
 import { streamUrl } from '@/api/client'
 import type { Video } from '@/types'
@@ -6,11 +7,13 @@ import type { Video } from '@/types'
  * 悬停多段视频预览（零预生成 / 零切片 / 后端零改动）。
  *
  * 预览画面挂载在悬停大图浮层（PathTip 的 .path-tip-preview）内：全局单实例原生
- * <video>（muted+playsinline）绝对定位覆盖静态 <img>（img 保留撑布局，预览结束
- * 即恢复），直连 /api/stream/{id} 的 HTTP Range 流。每段只是把 currentTime 设到
- * 目标位置，浏览器自动拉该段附近 GOP 数据（本机回环成本几乎为零）。
+ * <video>（muted+playsinline）绝对定位覆盖预览区。预览区不再渲染缩略图，而是
+ * 显示深色「加载中」占位（PathTip 渲染，placeholderLoading 状态驱动 spinner），
+ * 视频就绪（play 成功）后在占位之上 500ms 淡入播放——视觉上是「区域亮起视频」，
+ * 无缩略图→视频的内容替换感。直连 /api/stream/{id} 的 HTTP Range 流，每段只是
+ * 把 currentTime 设到目标位置，浏览器自动拉该段附近 GOP 数据。
  * 蒙太奇段数与每段秒数由设置项 html5_hover_preview_segments / _segment_sec 控制
- * （默认 4 段 × 3 秒），段位在 15%~85% 区间均匀分布，播完循环，直到鼠标移开。
+ * （默认 5 段 × 5 秒），段位在 15%~85% 区间均匀分布，播完循环，直到鼠标移开。
  *
  * 失败兜底：error / seek 超时（4s）→ 静默隐藏，不打断浏览、不弹错。
  */
@@ -39,6 +42,12 @@ let pendingStart: ReturnType<typeof setTimeout> | null = null
 let pendingStop: ReturnType<typeof setTimeout> | null = null
 let seekTimer: ReturnType<typeof setTimeout> | null = null
 let segTimer: ReturnType<typeof setTimeout> | null = null
+// 预览区「加载中」占位开关（由 PathTip 消费：加载中显示 spinner，就绪后隐藏）
+const placeholderLoading = ref(true)
+
+function setPlaceholderLoading(v: boolean) {
+  placeholderLoading.value = v
+}
 
 function getVideo(): HTMLVideoElement {
   if (!video) {
@@ -59,6 +68,7 @@ function getVideo(): HTMLVideoElement {
 
 function stopNow() {
   running = false
+  setPlaceholderLoading(true)
   if (pendingStart) {
     clearTimeout(pendingStart)
     pendingStart = null
@@ -119,7 +129,10 @@ function runMontage(v: HTMLVideoElement, duration: number, positions: number[], 
       void v
         .play()
         .then(() => {
-          if (running) v.style.opacity = '1'
+          if (running) {
+            v.style.opacity = '1'
+            setPlaceholderLoading(false) // 视频就绪，隐藏「加载中」占位
+          }
         })
         .catch(() => {})
       if (segTimer) clearTimeout(segTimer)
@@ -161,6 +174,7 @@ export function useHoverPreview() {
           return
         }
         const v = getVideo()
+        setPlaceholderLoading(true) // 新一轮加载，恢复「加载中」占位
         v.style.opacity = '0' // 复用元素时重置，避免上次淡出未完成直接显示
         container.appendChild(v)
         v.src = streamUrl(videoItem.id)
@@ -195,5 +209,5 @@ export function useHoverPreview() {
     pendingStop = setTimeout(() => stopNow(), STOP_DELAY)
   }
 
-  return { startPreview, stopPreview }
+  return { startPreview, stopPreview, placeholderLoading }
 }

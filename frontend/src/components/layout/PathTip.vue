@@ -1,11 +1,20 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { thumbUrl } from '@/api/client'
+import { useSettingsStore } from '@/stores/settings'
 import { usePathTip } from '@/composables/usePathTip'
+import { useHoverPreview } from '@/composables/useHoverPreview'
 import { formatDuration, formatSize, formatBadgeLabel } from '@/utils/format'
 
+const settings = useSettingsStore()
 const { visible, item, tipLeft, tipTop, measuring, afterLayout } = usePathTip()
+const { placeholderLoading } = useHoverPreview()
 const tipRef = ref<HTMLElement | null>(null)
+
+// 悬浮预览启用：预览区渲染「加载占位」而非缩略图，视频就绪后在其上淡入播放
+const hoverPreviewEnabled = computed(
+  () => settings.settings?.html5_hover_preview !== false,
+)
 
 function getPathDir(path: string, filename: string) {
   if (!path) return ''
@@ -93,17 +102,29 @@ watch(visible, (v) => {
     :style="{ left: `${tipLeft}px`, top: `${tipTop}px` }"
     :title="item.path"
   >
-    <div v-if="item.thumbReady || item.thumbVersion" class="path-tip-preview">
-      <img
-        :src="thumbUrl(item.id, item.thumbVersion)"
-        alt=""
-        decoding="async"
-        @load="onImgLoad"
-      />
+    <div class="path-tip-preview">
+      <!-- 悬浮预览启用：深色加载占位（16:9 固定），视频就绪后由 useHoverPreview 在其上淡入 -->
+      <div
+        v-if="hoverPreviewEnabled"
+        class="path-tip-preview--placeholder"
+        :class="{ 'path-tip-preview--placeholder-idle': !placeholderLoading }"
+      >
+        <span v-if="placeholderLoading" class="hover-preview-spinner" />
+      </div>
+      <!-- 悬浮预览关闭：回到缩略图展示 -->
+      <template v-else>
+        <img
+          v-if="item.thumbReady || item.thumbVersion"
+          :src="thumbUrl(item.id, item.thumbVersion)"
+          alt=""
+          decoding="async"
+          @load="onImgLoad"
+        />
+        <div v-else class="path-tip-preview--empty">暂无缩略图</div>
+      </template>
       <span v-if="item.formatBadge" class="thumb-format-badge">{{ formatBadgeLabel(item.formatBadge) }}</span>
       <span v-if="item.durationSec" class="thumb-duration">{{ formatDuration(item.durationSec) }}</span>
     </div>
-    <div v-else class="path-tip-preview path-tip-preview--empty">暂无缩略图</div>
     <div class="path-tip-body">
       <div v-if="dirSegments.length" class="path-tip-dir">
         <template v-for="(seg, i) in dirSegments" :key="i">

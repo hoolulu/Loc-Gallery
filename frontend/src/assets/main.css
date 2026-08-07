@@ -773,8 +773,36 @@ body.has-selection .card-album-badge {
   max-height: min(70vh, 864px);
   border-radius: 8px 8px 0 0;
 }
-/* 悬停多段视频预览层（useHoverPreview 动态创建，覆盖在预览区 <img> 上，img 保留撑布局） */
-/* opacity 由脚本控制：加载/seek 阶段保持 0，play() 成功后缓慢过渡到 1（长淡入，从缩略图渐变到首段） */
+/* 悬浮预览「加载占位」：固定 16:9，深色底 + 居中 spinner，视频就绪后在它之上淡入 */
+.path-tip-preview--placeholder {
+  width: min(88vw, 1104px);
+  max-height: min(70vh, 864px);
+  aspect-ratio: 16 / 9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--lg-bg-secondary);
+  border-radius: 8px 8px 0 0;
+}
+.path-tip-preview--placeholder-idle {
+  /* 占位在预览间隙也保留（撑起浮层比例），无 spinner */
+  background: color-mix(in srgb, var(--lg-bg-secondary) 70%, transparent);
+}
+.hover-preview-spinner {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--lg-text-muted) 25%, transparent);
+  border-top-color: var(--lg-accent);
+  animation: hover-preview-spin 0.8s linear infinite;
+}
+@keyframes hover-preview-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* 悬停多段视频预览层（useHoverPreview 动态创建，覆盖在预览区占位上） */
+/* opacity 由脚本控制：加载/seek 阶段保持 0，play() 成功后缓慢过渡到 1（长淡入） */
 .hover-preview-video {
   position: absolute;
   inset: 0;
