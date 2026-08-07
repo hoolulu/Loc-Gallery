@@ -25,8 +25,8 @@ const JITTER = 0.03 // 首段位置随机抖动，避免每次看到同一画面
 const START_DELAY = 220 // 悬停多久才启动（与浮层 220ms 节奏一致）
 const STOP_DELAY = 150 // 移开后多久停止（防止跨卡片快速移动时闪烁）
 const SEEK_TIMEOUT = 4000 // 单段 seek 超时兜底
-const MOUNT_RETRIES = 12 // 等浮层渲染的最大重试次数（×40ms ≈ 480ms）
-const MOUNT_RETRY_MS = 40
+const MOUNT_RETRIES = 40 // 等浮层渲染的最大重试次数（×50ms ≈ 2s，覆盖 metadata 就绪+渲染时序）
+const MOUNT_RETRY_MS = 50
 
 /** 在 15%~85% 区间均匀分布 N 个段位比例 */
 function computePositions(count: number): number[] {
@@ -46,6 +46,8 @@ let segTimer: ReturnType<typeof setTimeout> | null = null
 const placeholderLoading = ref(true)
 // 视频宽高比（videoWidth/videoHeight，如横屏 1.78、竖屏 0.56）；null=未知（占位保持 16:9）
 const previewRatio = ref<number | null>(null)
+// 预览是否确认失败（error / seek 超时 / 时长无效）：PathTip 据此决定浮层无需等待比例即可显示
+const previewFailed = ref(false)
 
 function setPlaceholderLoading(v: boolean) {
   placeholderLoading.value = v
@@ -68,7 +70,10 @@ function getVideo(): HTMLVideoElement {
     video.style.opacity = '0'
     video.addEventListener('error', () => {
       // 仅预览运行中的错误才静默终止（清空 src 时的正常 abort 不算）
-      if (running) stopNow()
+      if (running) {
+        previewFailed.value = true
+        stopNow()
+      }
     })
     // 视频尺寸就绪（videoWidth/videoHeight 可用）时刷新宽高比：
     // loadedmetadata 阶段尺寸可能还是 0，resize 事件保证拿到真实比例（竖屏/超宽屏自适应）
@@ -135,7 +140,10 @@ function runMontage(v: HTMLVideoElement, duration: number, positions: number[], 
     const pos = targets[i % targets.length]
     v.currentTime = pos
     if (seekTimer) clearTimeout(seekTimer)
-    seekTimer = setTimeout(() => stopNow(), SEEK_TIMEOUT)
+    seekTimer = setTimeout(() => {
+      previewFailed.value = true
+      stopNow()
+    }, SEEK_TIMEOUT)
     const onSeeked = () => {
       if (seekTimer) {
         clearTimeout(seekTimer)
@@ -169,6 +177,7 @@ export function useHoverPreview() {
   function startPreview(videoItem: Video) {
     if (settings.settings?.html5_hover_preview === false) return
     if (activeId === videoItem.id && running) return
+    previewFailed.value = false // 新一轮预览重置失败标记
     if (pendingStop) {
       clearTimeout(pendingStop)
       pendingStop = null
@@ -180,44 +189,48 @@ export function useHoverPreview() {
       activeId = videoItem.id
       running = true
 
-      const tryMount = (tries = 0) => {
+      // video 立即创建并加载（不依赖浮层容器）：metadata 就绪即得到真实比例，
+      // PathTip 据此渲染预览区；容器出现后再 append 继续播放。
+      const v = getVideo()
+      setPlaceholderLoading(true) // 新一轮加载，恢复「加载中」占位
+      v.style.opacity = '0' // 复用元素时重置，避免上次淡出未完成直接显示
+      v.src = streamUrl(videoItem.id)
+      v.load()
+
+      const onMeta = () => {
+        if (!running) return
+        const dur = v.duration
+        if (!Number.isFinite(dur) || dur <= 0) {
+          previewFailed.value = true
+          stopNow()
+          return
+        }
+        // 拿到真实宽高比，浮层占位据此自适应（竖屏视频不再被压成横屏）
+        setPreviewRatioFromVideo(v)
+        // 段数/每段秒数从设置读取（后端重启前可能缺失，用默认值兜底）
+        const segCount = Number(settings.settings?.html5_hover_preview_segments)
+        const segSec = Number(settings.settings?.html5_hover_preview_segment_sec)
+        const positions = computePositions(Number.isFinite(segCount) && segCount > 0 ? segCount : 5)
+        const secPerSeg = Number.isFinite(segSec) && segSec > 0 ? segSec : 5
+        runMontage(v, dur, positions, secPerSeg)
+      }
+      if (v.readyState >= 1) onMeta()
+      else v.addEventListener('loadedmetadata', onMeta, { once: true })
+
+      // 浮层渲染完成后把 video 挂到预览区（video 已加载，直接播）
+      const attach = (tries = 0) => {
         if (!running) return
         const container = findPreviewContainer()
         if (!container) {
-          // 浮层（PathTip）有自己的 220ms 显示延迟 + nextTick 渲染，稍等再挂载
+          // 浮层在比例就绪后才渲染（PathTip 的 tipVisible 条件），稍等再挂载
           if (tries < MOUNT_RETRIES) {
-            setTimeout(() => tryMount(tries + 1), MOUNT_RETRY_MS)
-          } else {
-            stopNow()
+            setTimeout(() => attach(tries + 1), MOUNT_RETRY_MS)
           }
           return
         }
-        const v = getVideo()
-        setPlaceholderLoading(true) // 新一轮加载，恢复「加载中」占位
-        v.style.opacity = '0' // 复用元素时重置，避免上次淡出未完成直接显示
-        container.appendChild(v)
-        v.src = streamUrl(videoItem.id)
-        v.load()
-        const onMeta = () => {
-          if (!running) return
-          const dur = v.duration
-          if (!Number.isFinite(dur) || dur <= 0) {
-            stopNow()
-            return
-          }
-          // 拿到真实宽高比，浮层占位据此自适应（竖屏视频不再被压成横屏）
-          setPreviewRatioFromVideo(v)
-          // 段数/每段秒数从设置读取（后端重启前可能缺失，用默认值兜底）
-          const segCount = Number(settings.settings?.html5_hover_preview_segments)
-          const segSec = Number(settings.settings?.html5_hover_preview_segment_sec)
-          const positions = computePositions(Number.isFinite(segCount) && segCount > 0 ? segCount : 5)
-          const secPerSeg = Number.isFinite(segSec) && segSec > 0 ? segSec : 5
-          runMontage(v, dur, positions, secPerSeg)
-        }
-        if (v.readyState >= 1) onMeta()
-        else v.addEventListener('loadedmetadata', onMeta, { once: true })
+        if (v.parentElement !== container) container.appendChild(v)
       }
-      tryMount()
+      attach()
     }, START_DELAY)
   }
 
@@ -243,5 +256,12 @@ export function useHoverPreview() {
     stopNow()
   }
 
-  return { startPreview, stopPreview, stopPreviewNow, placeholderLoading, previewRatio }
+  return {
+    startPreview,
+    stopPreview,
+    stopPreviewNow,
+    placeholderLoading,
+    previewRatio,
+    previewFailed,
+  }
 }

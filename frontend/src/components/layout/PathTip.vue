@@ -8,12 +8,21 @@ import { formatDuration, formatSize, formatBadgeLabel } from '@/utils/format'
 
 const settings = useSettingsStore()
 const { visible, item, tipLeft, tipTop, measuring, pinned, afterLayout, closeTip } = usePathTip()
-const { placeholderLoading, stopPreviewNow, previewRatio } = useHoverPreview()
+const { placeholderLoading, stopPreviewNow, previewRatio, previewFailed } = useHoverPreview()
 const tipRef = ref<HTMLElement | null>(null)
 
 // 悬浮预览启用：预览区渲染「加载占位」而非缩略图，视频就绪后在其上淡入播放
 const hoverPreviewEnabled = computed(
   () => settings.settings?.html5_hover_preview !== false,
+)
+
+// 浮层显示条件：预览开启时等比例就绪或确认失败才显示（文字+预览区同时出现，
+// 浮层一次定位不跳动）；预览关闭时立即显示
+const tipVisible = computed(
+  () =>
+    visible.value &&
+    !!item.value &&
+    (!hoverPreviewEnabled.value || !!previewRatio.value || !!previewFailed.value),
 )
 
 // 占位尺寸按原视频宽高比自适应：约束最大宽/高，竖屏（比例<1）宽度随高度反推
@@ -133,14 +142,19 @@ function onImgLoad() {
   void nextTick(() => afterLayout(tipRef.value))
 }
 
-watch(visible, (v) => {
+// 浮层首次可显示时（visible 已 true、预览比例就绪/失败）执行定位测量
+watch(tipVisible, (v) => {
   if (v) void nextTick(() => afterLayout(tipRef.value))
+})
+// 预览开启时 visible 可能先于比例就绪，tipVisible 变化已覆盖；此处兼容直接 visible 场景
+watch(visible, (v) => {
+  if (v && tipVisible.value) void nextTick(() => afterLayout(tipRef.value))
 })
 </script>
 
 <template>
   <div
-    v-if="visible && item"
+    v-if="tipVisible && item"
     ref="tipRef"
     class="path-tip"
     :class="{ 'path-tip--measuring': measuring }"
