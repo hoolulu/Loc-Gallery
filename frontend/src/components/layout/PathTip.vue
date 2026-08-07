@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { thumbUrl } from '@/api/client'
 import { useSettingsStore } from '@/stores/settings'
 import { usePathTip } from '@/composables/usePathTip'
@@ -20,6 +20,20 @@ function onCloseTip() {
   stopPreviewNow()
   closeTip()
 }
+
+// 钉住模式：点击浮层外部任意位置等同关闭（与关闭按钮行为一致）
+function onDocClick(e: MouseEvent) {
+  if (!pinned) return
+  const target = e.target as Node | null
+  if (tipRef.value && target && tipRef.value.contains(target)) return
+  onCloseTip()
+}
+
+watch(pinned, (v) => {
+  if (v) document.addEventListener('click', onDocClick)
+  else document.removeEventListener('click', onDocClick)
+})
+onUnmounted(() => document.removeEventListener('click', onDocClick))
 
 function getPathDir(path: string, filename: string) {
   if (!path) return ''
