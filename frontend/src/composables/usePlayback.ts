@@ -234,7 +234,7 @@ export function usePlayback() {
           }, 15000)
         },
       },
-      { startAt: resumeAt, noHotkeys: settings.settings?.html5_disable_movi_hotkeys !== false },
+      { startAt: resumeAt, noHotkeys: settings.settings?.html5_disable_movi_hotkeys !== false, seekPreview: settings.settings?.html5_seek_preview !== false },
     )
 
     // 元素创建即触发加载，无需 await load()；就绪回调在 statechange(ready/playing) 中处理后续。

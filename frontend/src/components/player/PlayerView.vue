@@ -124,9 +124,29 @@ function onKeydown(e: KeyboardEvent) {
   if (!player.open) return
   const prevKey = settings.settings?.html5_player_prev_key || '.'
   const nextKey = settings.settings?.html5_player_next_key || '/'
+  // 输入框/文本域/可编辑元素中不处理快捷键（避免搜索框等场景误触发）
+  const target = e.target as HTMLElement | null
+  const isEditable =
+    target &&
+    (target.tagName === 'INPUT' ||
+      target.tagName === 'TEXTAREA' ||
+      target.tagName === 'SELECT' ||
+      target.isContentEditable)
+  if (isEditable) return
   if (e.key === 'Escape') {
     e.preventDefault()
     void cancelPlayback()
+  } else if (e.key === 'Enter') {
+    // 回车 = 全屏切换：等价于点击播放器全屏按钮，再次按回车恢复窗口。
+    // movi-player 的 toggleFullscreen 为运行时公共方法（d.ts 标 private，断言调用）。
+    e.preventDefault()
+    const el = player.moviPlayer?.getElement() as unknown as
+      | { toggleFullscreen?: () => Promise<void> | void }
+      | null
+      | undefined
+    if (el && typeof el.toggleFullscreen === 'function') {
+      void el.toggleFullscreen()
+    }
   } else if (e.key === prevKey) {
     void playAdjacent(-1)
   } else if (e.key === nextKey) {

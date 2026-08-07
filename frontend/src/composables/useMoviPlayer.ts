@@ -78,7 +78,7 @@ export function createMoviPlayer(
   host: HTMLElement,
   url: string,
   handlers: MoviPlaybackHandlers = {},
-  opts: { startAt?: number; noHotkeys?: boolean } = {},
+  opts: { startAt?: number; noHotkeys?: boolean; seekPreview?: boolean } = {},
 ) {
   let el: MoviElement | null = null
   let activeAudioTrackId: number | null = null
@@ -137,6 +137,11 @@ export function createMoviPlayer(
     // 避免与油猴等全局快捷键脚本冲突（其 keydown 处理会 preventDefault 吞掉按键）。
     if (opts.noHotkeys) {
       node.setAttribute('nohotkeys', '')
+    }
+    // thumb：开启进度条悬停时间点截图（movi-player 原生：第二个 WASM 上下文
+    // Range seek 解码目标帧，零预生成/零磁盘；由设置 html5_seek_preview 控制）。
+    if (opts.seekPreview) {
+      node.setAttribute('thumb', '')
     }
     // 关键：src 必须在 appendChild（触发 connectedCallback）之前作为 attribute 设置，
     // 否则 connectedCallback 内 getAttribute('src') 为 null → 不调用 initializePlayer()，

@@ -314,6 +314,7 @@ class SettingsUpdate(BaseModel):
     html5_hover_preview_segments: int | None = None
     html5_hover_preview_segment_sec: int | None = None
     html5_hover_tip_pin: bool | None = None
+    html5_seek_preview: bool | None = None
     html5_auto_remux: bool | None = None
     ui_theme: str | None = None  # dark | light
     scope: str | None = None  # global | library

@@ -303,6 +303,13 @@ watch(
                     </select>
                   </label>
                   <label class="settings-field">
+                    <span class="settings-field-label">进度条悬停截图</span>
+                    <select v-model="form.html5_seek_preview" class="settings-input">
+                      <option :value="true">开（悬停进度条显示时间点画面）</option>
+                      <option :value="false">关</option>
+                    </select>
+                  </label>
+                  <label class="settings-field">
                     <span class="settings-field-label">外部播放器路径</span>
                     <input
                       v-model="form.external_player_path"

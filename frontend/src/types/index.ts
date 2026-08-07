@@ -123,6 +123,7 @@ export interface Settings {
   html5_hover_preview_segments: number
   html5_hover_preview_segment_sec: number
   html5_hover_tip_pin: boolean
+  html5_seek_preview: boolean
   html5_auto_remux: boolean
   ui_theme: 'dark' | 'light'
   ui_preset?: 'netflix' | 'youtube' | 'spotify'
