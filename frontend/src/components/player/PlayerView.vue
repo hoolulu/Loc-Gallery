@@ -136,12 +136,20 @@ function onKeydown(e: KeyboardEvent) {
   if (isEditable) return
 
   const moviEl = player.moviPlayer?.getElement() as unknown as
-    | { playbackRate?: number; currentTime?: number; toggleFullscreen?: () => Promise<void> | void }
+    | {
+        playbackRate?: number
+        currentTime?: number
+        paused?: boolean
+        play?: () => void | Promise<void>
+        pause?: () => void
+        toggleFullscreen?: () => Promise<void> | void
+      }
     | null
     | undefined
 
   // 倍速快捷键：Z 减速 / X 正常速度 / C 加速（0.1 步进）。
-  // movi 的 playbackRate setter 内部会 clamp 到 getMaxAllowedRate（默认上限 2）。
+  // movi 的 playbackRate setter 内部会 clamp 到 getMaxAllowedRate（默认上限 2），
+  // 且 movi 自带中间 OSD 显示倍速（updatePlaybackRate → showOSD），无需再弹提示。
   // 播放器已无条件设置 nohotkeys（movi 内置快捷键关闭），本页快捷键独占；
   // 用捕获阶段监听，任何页面级 stopPropagation 都无法拦截。焦点在输入框时上面已拦截。
   if (e.key === 'z' || e.key === 'Z') {
@@ -151,20 +159,24 @@ function onKeydown(e: KeyboardEvent) {
       // movi 内部会存这个值并原样显示；(tenths±1)/10 得到精确的 1.2
       const tenths = Math.round(roundRate(moviEl.playbackRate) * 10)
       moviEl.playbackRate = Math.max(0.25, (tenths - 1) / 10)
-      showSpeedTip(moviEl.playbackRate)
     }
   } else if (e.key === 'x' || e.key === 'X') {
     e.preventDefault()
     if (moviEl && typeof moviEl.playbackRate === 'number') {
       moviEl.playbackRate = 1
-      showSpeedTip(1)
     }
   } else if (e.key === 'c' || e.key === 'C') {
     e.preventDefault()
     if (moviEl && typeof moviEl.playbackRate === 'number') {
       const tenths = Math.round(roundRate(moviEl.playbackRate) * 10)
       moviEl.playbackRate = Math.min(2, (tenths + 1) / 10)
-      showSpeedTip(moviEl.playbackRate)
+    }
+  } else if (e.key === ' ') {
+    // 空格：播放/暂停
+    e.preventDefault()
+    if (moviEl && typeof moviEl.paused === 'boolean') {
+      if (moviEl.paused) void moviEl.play?.()
+      else moviEl.pause?.()
     }
   } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
     // 左右方向键：快退/快进（Ctrl+左右 = 30 秒，默认 5 秒）
@@ -172,6 +184,7 @@ function onKeydown(e: KeyboardEvent) {
     if (moviEl && typeof moviEl.currentTime === 'number') {
       const delta = e.ctrlKey ? 30 : 5
       moviEl.currentTime += e.key === 'ArrowRight' ? delta : -delta
+      showSeekTip(e.key === 'ArrowRight' ? delta : -delta)
     }
   } else if (e.key === 'Escape') {
     e.preventDefault()
@@ -204,13 +217,12 @@ function roundRate(r: number) {
   return Math.round(r * 10) / 10
 }
 
-// 倍速提示：左下角 statusText 显示 1.5 秒后消失（tenths/10 保证显示精确的一位小数）
-function showSpeedTip(rate: number) {
-  const tenths = Math.round(rate * 10)
-  player.statusText = `速度 ${tenths / 10}x`
+// 快进/快退提示：左下角 statusText 显示 1.2 秒后消失（倍速提示由 movi 自带 OSD 负责）
+function showSeekTip(delta: number) {
+  player.statusText = `${delta > 0 ? '快进' : '快退'} ${Math.abs(delta)} 秒`
   setTimeout(() => {
-    if (player.statusText.startsWith('速度 ')) player.statusText = ''
-  }, 1500)
+    if (player.statusText.includes('快进') || player.statusText.includes('快退')) player.statusText = ''
+  }, 1200)
 }
 
 // 画面区滚轮：下滚快进、上滚回退（幅度见设置 html5_wheel_seek_sec）
