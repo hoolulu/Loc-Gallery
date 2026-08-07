@@ -42,8 +42,6 @@ let pendingStart: ReturnType<typeof setTimeout> | null = null
 let pendingStop: ReturnType<typeof setTimeout> | null = null
 let seekTimer: ReturnType<typeof setTimeout> | null = null
 let segTimer: ReturnType<typeof setTimeout> | null = null
-// 首帧渲染回调：video 的 playing 事件（真正有帧）触发时显示画面，避免 play() resolve 即显示导致黑屏
-let onFirstFrame: (() => void) | null = null
 
 /** 每次预览新建独立 <video>：复用元素切换 src 会残留缓冲/事件状态，
  *  导致"先预览别的视频再悬停此视频"时偶发黑屏。新建成本极低。
@@ -64,14 +62,23 @@ function createVideo(): HTMLVideoElement {
       stopNow()
     }
   })
-  // 真正有帧渲染（playing）才显示视频；play() resolve 不代表首帧就绪
+  // 真正有帧渲染才显示视频：playing 只代表"开始播放"，首帧可能尚未渲染，
+  // 此时显示会黑屏。用 requestVideoFrameCallback 等到浏览器实际画出首帧。
+  let firstFrameShown = false
   v.addEventListener('playing', () => {
-    // 必须校验 v === video：快速切换时旧元素的 playing 可能延迟到达，
-    // 若误触发 onFirstFrame 会提前显示新视频 → 黑屏
-    if (running && v === video && onFirstFrame) {
-      const fn = onFirstFrame
-      onFirstFrame = null
-      fn()
+    if (!(running && v === video) || firstFrameShown) return
+    const show = () => {
+      firstFrameShown = true
+      if (!(running && v === video)) return
+      setPreviewRatioFromVideo(v)
+      v.style.opacity = '1'
+      setPlaceholderLoading(false) // 视频就绪，隐藏「加载中」占位
+    }
+    if (typeof v.requestVideoFrameCallback === 'function') {
+      v.requestVideoFrameCallback(show)
+    } else {
+      // 不支持 rVFC（老浏览器）：playing 后延后一帧再显示
+      requestAnimationFrame(show)
     }
   })
   // 视频尺寸就绪（videoWidth/videoHeight 可用）时刷新宽高比：
@@ -105,7 +112,6 @@ function stopNow() {
   running = false
   setPlaceholderLoading(true)
   previewRatio.value = null // 重置为默认 16:9，供下一轮预览重新计算
-  onFirstFrame = null // 清残留回调，避免复用元素时旧回调被新 playing 误触发
   if (pendingStart) {
     clearTimeout(pendingStart)
     pendingStart = null
@@ -163,17 +169,8 @@ function runMontage(v: HTMLVideoElement, duration: number, positions: number[], 
         seekTimer = null
       }
       if (!running) return
-      // 显示时机完全交给 playing 事件（真正有帧渲染才触发）：
-      // play() resolve 不代表首帧就绪，提前显示会黑屏；不做时间兜底，
-      // 因为 seek 后流加载慢时强制显示同样是黑屏——由 SEEK_TIMEOUT 负责失败兜底。
-      const showVideo = () => {
-        if (!running) return
-        // 播放时 videoWidth/videoHeight 一定可用：补最后一次比例刷新
-        setPreviewRatioFromVideo(v)
-        v.style.opacity = '1'
-        setPlaceholderLoading(false) // 视频就绪，隐藏「加载中」占位
-      }
-      onFirstFrame = showVideo
+      // 显示由 createVideo 的 playing + requestVideoFrameCallback 驱动
+      // （首帧真正渲染才显示）；这里只负责播放，失败由 SEEK_TIMEOUT 兜底。
       void v.play().catch(() => {})
       if (segTimer) clearTimeout(segTimer)
       segTimer = setTimeout(() => playAt(i + 1), segSec * 1000)
