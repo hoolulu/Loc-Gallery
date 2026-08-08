@@ -287,7 +287,7 @@ async function onPlaylistSortChange(e: Event) {
 
           <p
             v-if="player.statusText"
-            class="absolute bottom-4 left-4 z-10 rounded bg-[var(--lg-bg-overlay)] px-2 py-1 text-xs"
+            class="absolute bottom-4 left-4 z-10 rounded bg-black/60 px-2 py-1 text-xs text-white"
           >
             {{ player.statusText }}
           </p>
